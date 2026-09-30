@@ -219,6 +219,20 @@ describe("OAuth + MCP end to end", () => {
     expect(r.isError).toBe(true);
   });
 
+  it("surfaces Google's refusal instead of reporting no accounts", async () => {
+    const realSearch = ads.search.bind(ads);
+    ads.search = async (cid: string, q: string) => {
+      if (q.includes("FROM customer_client")) throw new Error("Google Ads API 403: ACTION_NOT_PERMITTED The Google Cloud project is only approved for use with test accounts.");
+      return realSearch(cid, q);
+    };
+    // A fresh token means a fresh session, so the accounts cache from earlier tests doesn't apply.
+    const fresh = await connect();
+    const r = await call(fresh, "list_accounts");
+    ads.search = realSearch;
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("ACTION_NOT_PERMITTED");
+  });
+
   it("refuses write GAQL", async () => {
     const r = await call(token, "run_gaql", { customer_id: "1112223333", query: "UPDATE campaign SET x" });
     expect(r.isError).toBe(true);

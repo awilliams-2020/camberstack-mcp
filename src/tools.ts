@@ -32,7 +32,11 @@ export function buildServer(session: () => UserSession): McpServer {
     title: "List Google Ads accounts",
     description: "Lists every Google Ads account this login can reach, including client accounts under a manager (MCC). Start here.",
     annotations: read,
-  }, wrap(async () => ({ accounts: await session().accounts() })));
+  }, wrap(async () => {
+    const s = session();
+    const accounts = await s.accounts();
+    return s.lastUnreadable.length ? { accounts, unreadable: s.lastUnreadable } : { accounts };
+  }));
 
   server.registerTool("account_overview", {
     title: "Account overview",

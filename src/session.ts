@@ -39,6 +39,8 @@ export class NotConnectedError extends Error {}
 export class UserSession {
   readonly ads: AdsClient;
   private accountsCache?: { at: number; list: Account[] };
+  /** Accounts the login can see but Google refused to read, from the last accounts() call. */
+  lastUnreadable: { customerId: string; error: string }[] = [];
 
   constructor(private deps: SessionDeps, readonly user: UserRow) {
     this.ads = deps.adsFactory?.(user) ?? new AdsClient(() => this.googleAccessToken(), deps.google.developerToken);
@@ -78,14 +80,18 @@ export class UserSession {
     if (this.accountsCache && Date.now() - this.accountsCache.at < 10 * 60_000) return this.accountsCache.list;
     const roots = await this.ads.listAccessibleCustomers();
     const out = new Map<string, Account>();
+    const unreadable: { customerId: string; error: string }[] = [];
     for (const root of roots) {
       let rows: any[] = [];
       try {
         rows = await this.ads.search(root, `SELECT customer_client.id, customer_client.descriptive_name,
             customer_client.currency_code, customer_client.manager, customer_client.level, customer_client.status
           FROM customer_client WHERE customer_client.level <= 1 AND customer_client.status = 'ENABLED'`, root);
-      } catch {
-        continue; // e.g. a cancelled or unreadable root; skip rather than fail the whole list
+      } catch (e) {
+        // One cancelled account shouldn't hide the rest, but the reason must never be swallowed:
+        // an empty list that is really an API refusal reads as "you have no accounts".
+        unreadable.push({ customerId: root, error: (e as Error).message });
+        continue;
       }
       for (const r of rows) {
         const c = r.customerClient;
@@ -102,6 +108,10 @@ export class UserSession {
       }
     }
     const list = [...out.values()].sort((a, b) => Number(a.manager) - Number(b.manager) || a.name.localeCompare(b.name));
+    if (!list.length && unreadable.length) {
+      throw new Error(`This login can see ${unreadable.length} Google Ads account(s) but none could be read. ${unreadable[0]!.error}`);
+    }
+    this.lastUnreadable = unreadable;
     this.accountsCache = { at: Date.now(), list };
     return list;
   }

@@ -66,6 +66,14 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     const server = buildServer(() => (session ??= UserSession.load(deps, userId)));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => { void transport.close(); void server.close(); });
+    res.on("finish", () => {
+      // Diagnostics for rejected requests only: method + protocol header, never arguments or data.
+      if (res.statusCode >= 400) {
+        const body = req.body as { method?: string } | { method?: string }[] | undefined;
+        const method = Array.isArray(body) ? `batch[${body.map((b) => b?.method).join(",")}]` : body?.method;
+        console.warn(`mcp ${res.statusCode} method=${method ?? "?"} protocol=${req.get("mcp-protocol-version") ?? "-"} accept=${req.get("accept") ?? "-"} ua=${req.get("user-agent") ?? "-"}`);
+      }
+    });
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
