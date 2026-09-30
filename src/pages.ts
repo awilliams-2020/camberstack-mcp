@@ -42,10 +42,13 @@ function layout(o: { title: string; description: string; path: string; body: str
 <link rel="canonical" href="${o.baseUrl}${o.path}">
 <meta property="og:title" content="${o.title}"><meta property="og:description" content="${o.description}">
 <meta property="og:url" content="${o.baseUrl}${o.path}"><meta property="og:type" content="website">
+<meta property="og:image" content="${o.baseUrl}/logo.png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/logo.png">
 <style>${CSS}</style>
 ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</script>` : ""}
 </head><body>
-<header><div class="wrap"><a class="brand" href="/">Camberstack</a>
+<header><div class="wrap"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="24" height="24" style="vertical-align:-5px;margin-right:8px">Camberstack</a>
 <nav><a href="/#setup">Connect</a><a href="/#pricing">Pricing</a><a href="/privacy">Privacy</a></nav></div></header>
 <main class="wrap">${o.body}</main>
 <footer><div class="wrap">

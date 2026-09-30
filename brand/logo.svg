@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <!-- Camberstack: three cambered (gently arched) bars, stacked. -->
+  <rect width="120" height="120" rx="26" fill="#1f5f4a"/>
+  <g fill="none" stroke="#fbfaf7" stroke-width="10" stroke-linecap="round">
+    <path d="M28 84 Q60 70 92 84"/>
+    <path d="M35 63 Q60 50 85 63"/>
+    <path d="M42 42 Q60 30 78 42"/>
+  </g>
+</svg>

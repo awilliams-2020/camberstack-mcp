@@ -2,7 +2,11 @@ import express, { type Express } from "express";
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+
+/** brand/ sits beside src/ and dist/ at the package root. */
+const BRAND_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "..", "brand");
 import { loadConfig, type Config } from "./config.js";
 import { openDb, sweep, type DB } from "./db.js";
 import { CamberstackProvider, MCP_SCOPE } from "./provider.js";
@@ -97,6 +101,15 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/robots.txt", (_q, r) => { r.type("text/plain").send(robotsTxt(cfg.baseUrl)); });
   app.get("/llms.txt", (_q, r) => { r.type("text/plain").send(llmsTxt(cfg.baseUrl)); });
   app.get("/sitemap.xml", (_q, r) => { r.type("application/xml").send(sitemapXml(cfg.baseUrl, cfg.gitCommitDate)); });
+  // Brand assets: the SVG is the source; the PNGs are rendered from it (brand/).
+  const brand = (file: string, type: string) => (_q: express.Request, r: express.Response) => {
+    r.setHeader("Cache-Control", "public, max-age=86400");
+    r.type(type).sendFile(file, { root: BRAND_DIR });
+  };
+  app.get("/favicon.svg", brand("logo.svg", "image/svg+xml"));
+  app.get("/favicon.png", brand("favicon-32.png", "image/png"));
+  app.get("/favicon.ico", brand("favicon-32.png", "image/png"));
+  app.get("/logo.png", brand("logo-512.png", "image/png"));
   app.get("/healthz", (_q, r) => { r.json({ ok: true, version: SERVER_VERSION, sha: cfg.gitSha }); });
 
   app.use((_req, res) => { res.status(404).type("html").send(errorPage(cfg.baseUrl, "Page not found.")); });

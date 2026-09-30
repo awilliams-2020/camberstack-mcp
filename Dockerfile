@@ -15,6 +15,7 @@ ARG GIT_COMMIT_DATE=""
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000 GIT_SHA=$GIT_SHA GIT_COMMIT_DATE=$GIT_COMMIT_DATE
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY brand ./brand
 COPY package.json ./
 RUN mkdir -p /data && chown -R node:node /data
 USER node

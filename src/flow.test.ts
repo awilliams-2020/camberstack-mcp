@@ -244,6 +244,9 @@ describe("OAuth + MCP end to end", () => {
     const privacy = await (await fetch(`${base}/privacy`)).text();
     expect(privacy).toContain("Limited Use");
     expect(privacy).toContain("auth/adwords");
+    const logo = await fetch(`${base}/logo.png`);
+    expect(logo.status).toBe(200);
+    expect(logo.headers.get("content-type")).toContain("image/png");
   });
 });
 
