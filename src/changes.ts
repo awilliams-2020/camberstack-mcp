@@ -131,13 +131,16 @@ export async function resolveChange(
         inverse: { type: "set_daily_budget", campaign_id: change.campaign_id, amount: before },
       };
     }
-    case "remove_negative_keywords":
+    case "remove_negative_keywords": {
+      const [c] = await q(`SELECT campaign.name FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      const name = c ? `"${c.campaign.name}"` : change.campaign_id;
       return {
         change,
         service: "campaignCriteria",
         operations: change.resource_names.map((r) => ({ remove: r })),
-        describe: `Remove ${change.resource_names.length} negative keyword(s) previously added to campaign ${change.campaign_id}`,
+        describe: `Remove ${change.resource_names.length} negative keyword(s) previously added to campaign ${name}`,
       };
+    }
   }
 }
 

@@ -205,7 +205,7 @@ describe("OAuth + MCP end to end", () => {
 
     const u = await call(token, "undo_changes", { proposal_id: p.json.proposal_id });
     expect(u.json.summary).toContain("Enable keyword");
-    expect(u.json.summary).toContain("Remove 1 negative");
+    expect(u.json.summary).toContain('Remove 1 negative keyword(s) previously added to campaign "Search"');
     await call(token, "apply_changes", { proposal_id: u.json.proposal_id });
     expect(ads.negatives).toHaveLength(0);
     expect(ads.kwStatus).toBe("ENABLED");
