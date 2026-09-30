@@ -109,7 +109,7 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/favicon.svg", brand("logo.svg", "image/svg+xml"));
   app.get("/favicon.png", brand("favicon-32.png", "image/png"));
   app.get("/favicon.ico", brand("favicon-32.png", "image/png"));
-  app.get("/logo.png", brand("logo-512.png", "image/png"));
+  app.get("/logo.png", brand("logo-wordmark-480.png", "image/png"));
   app.get("/healthz", (_q, r) => { r.json({ ok: true, version: SERVER_VERSION, sha: cfg.gitSha }); });
 
   app.use((_req, res) => { res.status(404).type("html").send(errorPage(cfg.baseUrl, "Page not found.")); });

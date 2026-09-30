@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <!-- Consent-screen logo: the cambered-stack mark over the name, so it identifies the app on its own. -->
+  <rect width="120" height="120" rx="24" fill="#1f5f4a"/>
+  <g fill="none" stroke="#fbfaf7" stroke-width="7" stroke-linecap="round">
+    <path d="M38 62 Q60 52 82 62"/>
+    <path d="M44 47 Q60 38 76 47"/>
+    <path d="M50 32 Q60 25 70 32"/>
+  </g>
+  <text x="60" y="91" text-anchor="middle" fill="#fbfaf7"
+        font-family="Inter, 'DejaVu Sans', sans-serif" font-weight="700" font-size="15.5" letter-spacing="-0.3">Camberstack</text>
+</svg>
