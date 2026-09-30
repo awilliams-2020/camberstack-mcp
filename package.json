@@ -40,5 +40,12 @@
     "chatgpt",
     "negative-keywords",
     "wasted-spend"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/awilliams-2020/camberstack-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/awilliams-2020/camberstack-mcp/issues"
+  }
 }
