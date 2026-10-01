@@ -16,22 +16,43 @@ export const MAX_CHANGES = 50;
 export const PROPOSAL_TTL = 24 * 3600;
 
 const id = z.string().regex(/^\d+$/, "numeric id");
+const campaignId = id.describe("Campaign id, digits only (campaign_id from account_overview or find_wasted_spend)");
+const adGroupId = id.describe("Ad group id, digits only (ad_group.id from run_gaql)");
+const criterionId = id.describe("Keyword criterion id, digits only (ad_group_criterion.criterion_id from run_gaql)");
 
-export const ChangeSchema = z.discriminatedUnion("type", [
+/**
+ * What the AI may propose. Every field is described so a model can fill it without guessing where an
+ * id comes from or what unit an amount is in (ChatGPT took ~2 minutes to work out a budget change
+ * before these existed).
+ */
+const PUBLIC_CHANGES = [
   z.object({
     type: z.literal("add_negative_keywords"),
-    campaign_id: id,
+    campaign_id: campaignId,
     keywords: z.array(z.object({
-      text: z.string().min(1).max(80),
-      match_type: z.enum(["EXACT", "PHRASE", "BROAD"]),
+      text: z.string().min(1).max(80).describe('The search words to block, e.g. "free"'),
+      match_type: z.enum(["EXACT", "PHRASE", "BROAD"]).describe("PHRASE blocks any search containing the words in order; the usual choice"),
     })).min(1).max(MAX_CHANGES),
-  }),
-  z.object({ type: z.literal("pause_keyword"), ad_group_id: id, criterion_id: id }),
-  z.object({ type: z.literal("enable_keyword"), ad_group_id: id, criterion_id: id }),
-  z.object({ type: z.literal("pause_ad_group"), ad_group_id: id }),
-  z.object({ type: z.literal("enable_ad_group"), ad_group_id: id }),
-  z.object({ type: z.literal("set_daily_budget"), campaign_id: id, amount: z.number().positive().max(1_000_000) }),
-  // Used only by undo: remove negatives this service created.
+  }).describe("Block searches containing these words in one campaign"),
+  z.object({ type: z.literal("pause_keyword"), ad_group_id: adGroupId, criterion_id: criterionId }).describe("Pause one keyword"),
+  z.object({ type: z.literal("enable_keyword"), ad_group_id: adGroupId, criterion_id: criterionId }).describe("Re-enable one paused keyword"),
+  z.object({ type: z.literal("pause_ad_group"), ad_group_id: adGroupId }).describe("Pause one ad group"),
+  z.object({ type: z.literal("enable_ad_group"), ad_group_id: adGroupId }).describe("Re-enable one paused ad group"),
+  z.object({
+    type: z.literal("set_daily_budget"),
+    campaign_id: campaignId,
+    amount: z.number().positive().max(1_000_000)
+      .describe("New average daily budget in the account's currency, e.g. 10 for $10.00/day (not micros)"),
+  }).describe("Change a campaign's daily budget (not shared budgets)"),
+] as const;
+
+/** For propose_changes' input: what the AI sees. */
+export const PublicChangeSchema = z.discriminatedUnion("type", [...PUBLIC_CHANGES]);
+
+/** Everything the server accepts, including the change only undo creates. */
+export const ChangeSchema = z.discriminatedUnion("type", [
+  ...PUBLIC_CHANGES,
+  // Used only by undo: remove negatives this service created. Not offered to the AI.
   z.object({ type: z.literal("remove_negative_keywords"), campaign_id: id, resource_names: z.array(z.string()).min(1) }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;

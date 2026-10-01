@@ -210,6 +210,11 @@ describe("OAuth + MCP end to end", () => {
     });
     const tools = (await res.json()).result.tools;
     expect(tools.map((t: any) => t.name)).toEqual(expect.arrayContaining(["list_accounts", "find_wasted_spend", "propose_changes", "apply_changes", "undo_changes"]));
+    // The AI sees what each change field means, and never the undo-only change type.
+    const propose = JSON.stringify(tools.find((t: any) => t.name === "propose_changes").inputSchema);
+    expect(propose).toContain("not micros");
+    expect(propose).toContain("campaign_id from account_overview");
+    expect(propose).not.toContain("remove_negative_keywords");
     // Directory listings read the human-readable name from annotations.title, and need the safety hints.
     for (const t of tools) {
       expect(t.annotations?.title, t.name).toBe(t.title);
