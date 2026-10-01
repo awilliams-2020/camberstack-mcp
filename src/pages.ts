@@ -40,7 +40,7 @@ footer a{color:var(--muted);margin-right:16px}
 .label{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0}
 .big{font-size:26px;font-weight:700;letter-spacing:-.01em;margin:0}
 .meter{display:flex;gap:6px}.meter i{flex:1;height:8px;border-radius:4px;background:var(--line)}.meter i.on{background:var(--accent)}
-.card p{margin:0}.card .btn{align-self:flex-start;margin-top:auto}
+.acct .card p{margin:0}.acct .card .btn{align-self:flex-start;margin-top:auto}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:var(--muted)}.dot.ok{background:#2f9e6e}
 .chips{display:flex;flex-wrap:wrap;gap:6px}.chip{font-size:13px;border:1px solid var(--line);border-radius:99px;padding:2px 10px;color:var(--muted)}
 .change{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px}
@@ -57,7 +57,13 @@ footer a{color:var(--muted);margin-right:16px}
 .danger{border:1px solid color-mix(in srgb,#c2412d 40%,var(--line));border-radius:10px;padding:16px}
 .danger p{margin:0 0 12px}.danger label{display:block;margin-bottom:12px}
 .btn-danger{font:inherit;font-weight:600;background:#c2412d;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
-.signin{max-width:440px;margin:48px auto 0;text-align:center}.signin .card{gap:18px;align-items:center;padding:36px 32px}.signin .btn{align-self:center}
+.signin{max-width:440px;margin:72px auto 96px;text-align:center}.signin .card{display:flex;flex-direction:column;gap:16px;align-items:center;padding:36px 32px}.signin .btn{align-self:center}
+@media (max-width:600px){
+.btn{padding:9px 14px;font-size:15px;border-radius:7px}
+.btn-danger{padding:9px 14px;font-size:15px}
+.signin{margin:40px auto 56px}.signin .card{padding:28px 20px}
+.big{font-size:22px}
+}
 `;
 
 function layout(o: { title: string; description: string; path: string; body: string; baseUrl: string; jsonLd?: object }): string {
