@@ -143,7 +143,8 @@ export class Billing {
         if (!ok) return send(res, 400, "Payment not complete", `<p>We could not confirm this payment. If you were charged, email us and we will sort it out.</p>`);
         send(res, 200, "You're on Pro", `<p><strong>Thanks, you're on Camberstack Pro.</strong></p>
 <p>Go back to your AI assistant and ask it to apply the proposal again. Applying changes is now unlimited.</p>
-<p class="muted">To change your card or cancel, ask your assistant to run Camberstack's <code>billing</code> tool.</p>`);
+<p><a class="btn" href="/account">Go to your account</a></p>
+<p class="muted">Change your card or cancel any time from your account page.</p>`);
       } catch (e) {
         send(res, 502, "Could not confirm", `<p>Stripe did not answer (${esc((e as Error).message)}). Your payment is safe; your plan updates within the hour.</p>`);
       }
@@ -156,7 +157,7 @@ export class Billing {
       if (!u.stripe_customer) return send(res, 200, "No subscription", `<p>${esc(u.email)} has no Camberstack subscription.</p>`);
       try {
         const s = await this.stripe("billing_portal/sessions", {
-          customer: u.stripe_customer, return_url: this.d.baseUrl, ...(await this.portalConfig()),
+          customer: u.stripe_customer, return_url: `${this.d.baseUrl}/account`, ...(await this.portalConfig()),
         });
         res.redirect(303, s.url);
       } catch (e) {

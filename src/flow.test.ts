@@ -82,7 +82,7 @@ class FakeAds {
 }
 
 /** Stripe, just enough of it: Checkout, session lookup, the sweep's list, subscriptions, the portal. */
-const stripe = { subStatus: "active", checkouts: [] as URLSearchParams[] };
+const stripe = { subStatus: "active", checkouts: [] as URLSearchParams[], portalReturn: "" };
 const stripeFetch: typeof fetch = async (url, init) => {
   const u = String(url).replace("https://api.stripe.com/v1/", "");
   const j = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -100,6 +100,7 @@ const stripeFetch: typeof fetch = async (url, init) => {
   if (u.startsWith("billing_portal/configurations")) return j({ data: [{ id: "bpc_1", is_default: false, active: true }] });
   if (u === "billing_portal/sessions") {
     expect((init?.body as URLSearchParams).get("configuration")).toBe("bpc_1");
+    stripe.portalReturn = (init?.body as URLSearchParams).get("return_url") ?? "";
     return j({ url: "https://billing.stripe.com/p/session_1" });
   }
   throw new Error(`unexpected stripe ${u}`);
@@ -301,7 +302,9 @@ describe("OAuth + MCP end to end", () => {
 
     const done = await fetch(`${base}/upgraded?session_id=cs_test_1`);
     expect(done.status).toBe(200);
-    expect(await done.text()).toContain("on Camberstack Pro");
+    const doneHtml = await done.text();
+    expect(doneHtml).toContain("on Camberstack Pro");
+    expect(doneHtml).toContain('href="/account"');
     const now4 = await call(token, "apply_changes", { proposal_id: fourth });
     expect(now4.json.status).toBe("applied");
     expect(now4.json.free_applies_left).toBeUndefined();
@@ -310,6 +313,7 @@ describe("OAuth + MCP end to end", () => {
     expect(pro.json.plan).toBe("pro");
     const portal = await fetch(pro.json.manage_billing, { redirect: "manual" });
     expect(portal.headers.get("location")).toContain("billing.stripe.com");
+    expect(stripe.portalReturn).toBe(`${base}/account`);
 
     // Cancelled at period end: the hourly sweep drops the plan back to free.
     stripe.subStatus = "canceled";
