@@ -102,6 +102,12 @@ export class Lifecycle {
     if (!res.ok) throw new Error(`Resend ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
 
+  /** Operator check: send one sample of each email to `to`, with placeholder links. */
+  async preview(to: string): Promise<void> {
+    await this.send(to, firstSteps(this.d.baseUrl, 3), "preview");
+    await this.send(to, limitReached(this.d.baseUrl, this.d.freeApplies, `${this.d.baseUrl}/account?upgrade=1`), "preview");
+  }
+
   mount(app: Express, page: (title: string, body: string) => string): void {
     const optOut = (u: string) => this.d.db.prepare("UPDATE users SET email_opt_out = 1 WHERE id = ?").run(u);
     app.get("/unsubscribe", (req, res) => {
