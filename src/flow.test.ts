@@ -405,6 +405,16 @@ describe("OAuth + MCP end to end", () => {
     expect((await fetch(`${base}/.well-known/glama.json`)).status).toBe(404);
   });
 
+  it("serves the Claude guide and lists it in the sitemap", async () => {
+    const g = await fetch(`${base}/google-ads-claude`);
+    expect(g.status).toBe(200);
+    const html = await g.text();
+    expect(html).toContain("<h1>Connect Google Ads to Claude</h1>");
+    expect(html).toContain(`${base}/mcp`);
+    expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-claude`);
+    expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-claude"');
+  });
+
   it("serves the pages Google's brand verification reads", async () => {
     const home = await (await fetch(`${base}/`)).text();
     expect(home).toContain('href="/privacy"');

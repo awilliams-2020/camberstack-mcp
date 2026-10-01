@@ -123,7 +123,7 @@ Any question beyond these tools is answered with read-only queries.</p>
 <h2 id="setup">Connect</h2>
 <p>Server URL:</p>
 <pre>${mcpUrl}</pre>
-<h3>Claude (claude.ai or desktop)</h3>
+<h3>Claude (claude.ai or desktop) · <a href="/google-ads-claude">step-by-step guide</a></h3>
 <p>Settings → Connectors → <em>Add custom connector</em> → paste the URL above → Connect, then sign in with Google.</p>
 <h3>Claude Code</h3>
 <pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
@@ -154,6 +154,94 @@ Reports and query results are not stored. Details in the <a href="/privacy">priv
 your AI shows a personal checkout link, and once you've paid you ask it to apply again. Undo is never paywalled.</p>
 <h3>Does it work with a manager (MCC) account?</h3>
 <p>Yes. It lists the client accounts under any manager your login can reach.</p>
+`,
+  });
+}
+
+/**
+ * Use-case page for "claude google ads" / "google ads claude" / "google ads mcp server" (keyword data:
+ * project-research/keywords-ads-mcp.json). The worked example is a real find_wasted_spend run on our
+ * own account (2026-10-01, 180 days); keep its numbers true to a real run if you edit it.
+ */
+export function claudeGuidePage(baseUrl: string): string {
+  const mcpUrl = `${baseUrl}/mcp`;
+  return layout({
+    baseUrl, path: "/google-ads-claude",
+    title: "Connect Google Ads to Claude: MCP setup in 2 minutes | Camberstack",
+    description: "Connect your Google Ads account to Claude with an MCP server. No developer token or Google Cloud project: sign in with Google, then ask Claude what's wasting money.",
+    jsonLd: {
+      "@context": "https://schema.org", "@type": "TechArticle",
+      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-01",
+      author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
+      about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
+    },
+    body: `
+<h1>Connect Google Ads to Claude</h1>
+<p class="lede">Claude can read your Google Ads account, tell you where the budget is going with nothing to show for it,
+and make the fixes you approve. It takes one connector URL and a Google sign-in. No developer token, no Google Cloud project.</p>
+
+<h2>Set it up</h2>
+<p>Camberstack is a hosted Google Ads MCP server. MCP (Model Context Protocol) is how Claude connects to outside tools.</p>
+<h3>Claude on the web or desktop app</h3>
+<ol>
+<li>Open <strong>Settings → Connectors</strong> and choose <strong>Add custom connector</strong>.</li>
+<li>Paste the server URL: <code>${mcpUrl}</code></li>
+<li>Click <strong>Connect</strong> and sign in with the Google account that has access to your Google Ads.
+Google shows exactly what's being shared before you agree.</li>
+</ol>
+<h3>Claude Code</h3>
+<pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
+<p class="muted">Also works in ChatGPT, Cursor and other MCP apps: see <a href="/#setup">all setup options</a>.</p>
+
+<h2>What to ask first</h2>
+<ul>
+<li><em>"What's wasting money in my Google Ads account over the last 90 days?"</em></li>
+<li><em>"Is my conversion tracking set up right?"</em></li>
+<li><em>"Block the search terms that spent money without converting. Show me the changes first."</em></li>
+<li><em>"What did you change this week? Undo the last change."</em></li>
+</ul>
+
+<h2>A real example</h2>
+<p>We ran it on our own Google Ads account, which runs ads for three products, over 180 days. The account had spent
+<strong>$2,080 for 9 conversions</strong> ($231 each). What Claude got back:</p>
+<ol>
+<li><strong>Tracking first.</strong> Four primary conversion actions, all counting real outcomes (purchases, sign-ups, calls),
+so a search term with zero conversions really did produce nothing. If tracking had been broken, it would have said so
+before recommending a single cut.</li>
+<li><strong>One campaign stood out:</strong> it spent <strong>$1,188 with no conversions</strong>, more than five times
+the account's cost per conversion.</li>
+<li><strong>Search terms with intent to match:</strong> nine "how to…" searches ("how to create a qr code") cost $56.54
+and never converted. Claude suggested <code>"how to"</code> as a phrase negative keyword on that campaign.</li>
+<li><strong>Judgment, not a blanket rule.</strong> Searches containing "free" cost $187 across the account, and some of them
+<em>did</em> convert. So it suggested blocking "free" only in the two campaigns where it never converted ($87 and $86),
+not account-wide.</li>
+</ol>
+<p>Nothing changed until we said yes. Applying a proposal is a separate step that Claude asks you to approve, and every
+applied change can be undone with one more message.</p>
+
+<h2>What it can and can't change</h2>
+<p>It can add negative keywords, pause or re-enable a keyword or ad group, and set a campaign's daily budget. It can't create
+campaigns, change bid strategies, turn a paused campaign back on, or delete anything you built. Every change is first
+checked with Google as a dry run, shown to you in plain English, and logged.</p>
+
+<h2>How it compares with Google's own Google Ads MCP</h2>
+<p>Google publishes an open-source Google Ads MCP server. As of September 2026 it is <strong>read-only</strong>, and you run it
+yourself: you need your own Google Ads API developer token, a Google Cloud project and an OAuth client. That suits developers
+who only want reporting. Camberstack is hosted, so you only sign in with Google, and it can <strong>make</strong> the changes
+you approve, with undo.</p>
+
+<h2>Questions</h2>
+<h3>Do I need a Google Ads developer token?</h3>
+<p>No. Camberstack has its own Google Ads API access. You sign in with Google and choose what to share.</p>
+<h3>Does Claude see my whole Google account?</h3>
+<p>No. It gets Google Ads access and your email address, nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
+<h3>What does it cost?</h3>
+<p>The free plan includes unlimited diagnosis and proposals, change history, undo and 3 applied changes. Pro is $49/month for
+unlimited applied changes. See <a href="/#pricing">pricing</a>.</p>
+<h3>Does it work with manager (MCC) accounts?</h3>
+<p>Yes. It lists every client account your login can reach.</p>
+
+<p><a class="btn" href="/#setup">Connect Google Ads to Claude</a></p>
 `,
   });
 }
@@ -275,7 +363,7 @@ export function robotsTxt(baseUrl: string): string {
 }
 
 export function sitemapXml(baseUrl: string, lastmod: string): string {
-  const urls = ["/", "/privacy", "/terms"];
+  const urls = ["/", "/google-ads-claude", "/privacy", "/terms"];
   const lm = lastmod ? `<lastmod>${lastmod.slice(0, 10)}</lastmod>` : "";
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
     .map((u) => `  <url><loc>${baseUrl}${u}</loc>${lm}</url>`).join("\n")}\n</urlset>\n`;
@@ -292,6 +380,7 @@ export function llmsTxt(baseUrl: string): string {
 - Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes. Undo is always free.
 - [Setup](${baseUrl}/#setup)
 - [Pricing](${baseUrl}/#pricing)
+- [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)
 - [Source (MIT)](https://github.com/awilliams-2020/camberstack-mcp)
 - [Privacy](${baseUrl}/privacy)
 - [Terms](${baseUrl}/terms)

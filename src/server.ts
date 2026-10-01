@@ -17,7 +17,7 @@ import { mountAdmin } from "./admin.js";
 import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { createHash } from "node:crypto";
-import { errorPage, infoPage, homePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
+import { errorPage, infoPage, homePage, claudeGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
 
 export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch; stripeFetch?: typeof fetch } = {}): Express {
   const app = express();
@@ -150,6 +150,7 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     res.type("html").send(html);
   };
   app.get("/", page(homePage(cfg.baseUrl)));
+  app.get("/google-ads-claude", page(claudeGuidePage(cfg.baseUrl)));
   app.get("/privacy", page(privacyPage(cfg.baseUrl)));
   app.get("/terms", page(termsPage(cfg.baseUrl)));
   app.get("/robots.txt", (_q, r) => { r.type("text/plain").send(robotsTxt(cfg.baseUrl)); });
