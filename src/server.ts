@@ -35,7 +35,7 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   const deps: SessionDeps = {
     db, google: cfg.google, encryptionKey: cfg.encryptionKey,
     freeApplies: cfg.freeApplies, proEmails: cfg.proEmails,
-    billingLink: (kind, userId) => billing.link(kind, userId), ...overrides,
+    billingLink: (kind, userId) => billing.link(kind, userId), refreshPlan: (userId) => billing.refreshPlan(userId), ...overrides,
   };
   const mcpUrl = new URL(`${cfg.baseUrl}/mcp`);
   const logCall = db.prepare(`INSERT INTO tool_calls (at, user_id, client_id, tool, customer_id, ok, error, ms, bytes)

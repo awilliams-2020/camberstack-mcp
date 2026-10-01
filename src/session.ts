@@ -31,6 +31,8 @@ export interface SessionDeps {
   encryptionKey: Buffer;
   freeApplies: number;
   proEmails: Set<string>;
+  /** Asks Stripe whether this user just paid; true when that made them Pro (billing.ts refreshPlan). */
+  refreshPlan?: (userId: string) => Promise<boolean>;
   /** Signed per-user billing links (billing.ts); null when billing isn't configured. */
   billingLink?: (kind: "upgrade" | "billing", userId: string) => string | null;
   /** Tests inject a fake. */
@@ -294,7 +296,12 @@ export class UserSession {
   async apply(proposalId: string) {
     const p = this.proposal(proposalId);
     // Undo is always free: a paywall must never stand between a user and reversing a change.
-    const left = p.undo_of || isDemo(p.customer_id) ? null : this.freeAppliesLeft();
+    let left = p.undo_of || isDemo(p.customer_id) ? null : this.freeAppliesLeft();
+    // At the paywall, check Stripe first: someone who paid and closed the tab must not be blocked for an hour.
+    if (left === 0 && await this.deps.refreshPlan?.(this.user.id)) {
+      this.user.plan = "pro";
+      left = null;
+    }
     if (left === 0) {
       const url = this.deps.billingLink?.("upgrade", this.user.id);
       throw new Error(`This account has used its ${this.deps.freeApplies} free applied changes. Camberstack Pro ($49/month, cancel any time) applies changes without limit. `

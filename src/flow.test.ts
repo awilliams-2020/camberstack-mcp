@@ -319,14 +319,19 @@ describe("OAuth + MCP end to end", () => {
     expect(form.get("mode")).toBe("subscription");
     expect(form.get("customer_email")).toBe("owner@example.com");
 
+    // Paid, but closed the tab before /upgraded: the paywall asks Stripe first, so the very next apply works.
+    expect(db.prepare("SELECT plan FROM users WHERE email = 'owner@example.com'").get()).toEqual({ plan: "free" });
+    const paidNoTab = await call(token, "apply_changes", { proposal_id: fourth });
+    expect(paidNoTab.json.status).toBe("applied");
+    expect(db.prepare("SELECT plan FROM users WHERE email = 'owner@example.com'").get()).toEqual({ plan: "pro" });
+
+    // /upgraded is still fine afterwards (settling is idempotent).
     const done = await fetch(`${base}/upgraded?session_id=cs_test_1`);
     expect(done.status).toBe(200);
     const doneHtml = await done.text();
     expect(doneHtml).toContain("on Camberstack Pro");
     expect(doneHtml).toContain('href="/account"');
-    const now4 = await call(token, "apply_changes", { proposal_id: fourth });
-    expect(now4.json.status).toBe("applied");
-    expect(now4.json.free_applies_left).toBeUndefined();
+    expect(paidNoTab.json.free_applies_left).toBeUndefined();
 
     const pro = await call(token, "billing", {});
     expect(pro.json.plan).toBe("pro");

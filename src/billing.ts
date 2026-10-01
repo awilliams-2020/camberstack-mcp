@@ -78,17 +78,41 @@ export class Billing {
   }
 
   /** Hourly: catch payments whose tab was closed, and drop Pro when a subscription has ended. */
-  async sweep(): Promise<void> {
-    if (!this.enabled) return;
-    const recent = await this.stripe(`checkout/sessions?limit=100&status=complete&created[gte]=${now() - 3 * 86400}`);
+  /**
+   * Link completed checkouts whose subscription is still live (payers who closed the tab before /upgraded).
+   * With `onlyUser`, just that user's, over the last day: run at the moment it matters (see refreshPlan).
+   * Returns the users it upgraded.
+   */
+  private async settleCompleted(onlyUser?: string): Promise<string[]> {
+    const since = now() - (onlyUser ? 86400 : 3 * 86400);
+    const recent = await this.stripe(`checkout/sessions?limit=100&status=complete&created[gte]=${since}`);
+    const upgraded: string[] = [];
     for (const s of recent.data ?? []) {
+      if (onlyUser && s.client_reference_id !== onlyUser) continue;
       const u = s.metadata?.app === APP && s.client_reference_id ? this.user(s.client_reference_id) : undefined;
       if (!u || u.stripe_sub === s.subscription || !s.subscription) continue;
       // Only a subscription that is still live makes someone Pro. Without this, a checkout completed and then
       // cancelled within the 3-day window was re-linked (Pro) on every sweep and only undone by the next loop.
       const sub = await this.stripe(`subscriptions/${s.subscription}`);
-      if (LIVE.has(sub.status)) this.settle(s);
+      if (LIVE.has(sub.status) && this.settle(s)) upgraded.push(u.id);
     }
+    return upgraded;
+  }
+
+  /**
+   * Called when a free user hits the paywall: did they just pay (and close the tab before /upgraded)?
+   * Without this they'd stay blocked until the hourly sweep, right after paying. Never throws: if Stripe is
+   * unreachable the paywall shows as usual and the sweep catches up.
+   */
+  async refreshPlan(userId: string): Promise<boolean> {
+    if (!this.enabled) return false;
+    try { return (await this.settleCompleted(userId)).includes(userId); } catch { return false; }
+  }
+
+  /** Hourly backstop: settle missed checkouts; drop Pro whose subscription has ended. */
+  async sweep(): Promise<void> {
+    if (!this.enabled) return;
+    await this.settleCompleted();
     const pros = this.d.db.prepare("SELECT id, stripe_sub FROM users WHERE plan = 'pro' AND stripe_sub IS NOT NULL AND stripe_sub != ''").all() as
       { id: string; stripe_sub: string }[];
     for (const p of pros) {
