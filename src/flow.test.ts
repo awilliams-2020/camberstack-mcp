@@ -173,8 +173,14 @@ describe("OAuth + MCP end to end", () => {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
-    const names = (await res.json()).result.tools.map((t: any) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["list_accounts", "find_wasted_spend", "propose_changes", "apply_changes", "undo_changes"]));
+    const tools = (await res.json()).result.tools;
+    expect(tools.map((t: any) => t.name)).toEqual(expect.arrayContaining(["list_accounts", "find_wasted_spend", "propose_changes", "apply_changes", "undo_changes"]));
+    // Directory listings read the human-readable name from annotations.title, and need the safety hints.
+    for (const t of tools) {
+      expect(t.annotations?.title, t.name).toBe(t.title);
+      expect(typeof t.annotations?.readOnlyHint, t.name).toBe("boolean");
+      if (!t.annotations.readOnlyHint) expect(typeof t.annotations.destructiveHint, t.name).toBe("boolean");
+    }
   });
 
   it("finds wasted spend and suggests a phrase negative", async () => {
