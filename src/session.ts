@@ -89,7 +89,11 @@ export class UserSession {
     const upgrade = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
     const account_page = "https://camberstack.io/account";
     return this.isPro
-      ? { plan: "pro", account_page, applies: "unlimited", manage_billing: this.user.stripe_customer ? this.deps.billingLink?.("billing", this.user.id) ?? null : null }
+      ? { plan: "pro", account_page, applies: "unlimited",
+          // Pro without a Stripe customer is complimentary (PRO_EMAILS): nothing to manage or cancel.
+          ...(this.user.stripe_customer
+            ? { manage_billing: this.deps.billingLink?.("billing", this.user.id) ?? null }
+            : { complimentary: true, manage_billing: null }) }
       : { plan: "free", account_page, free_applies_left: left, free_applies_total: this.deps.freeApplies,
           always_free: "diagnosis, proposals, change history and undo",
           pro: "unlimited applied changes, $49/month, cancel any time", upgrade_url: upgrade,

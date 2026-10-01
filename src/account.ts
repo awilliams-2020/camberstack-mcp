@@ -82,7 +82,8 @@ Your AI app can no longer use Camberstack until you connect again.</p>
     const undone = new Set(history.filter((h) => h.undo_of && h.status === "applied").map((h) => h.undo_of));
 
     const planBox = plan.plan === "pro"
-      ? `<p><strong>Pro.</strong> Applying changes is unlimited.</p>${"manage_billing" in plan && plan.manage_billing
+      ? `<p><strong>Pro${"complimentary" in plan ? ", complimentary" : ""}.</strong> Applying changes is unlimited.${"complimentary" in plan
+        ? " There's no subscription on this account, so nothing to manage or cancel." : ""}</p>${"manage_billing" in plan && plan.manage_billing
         ? `<p><a class="btn" href="${esc(plan.manage_billing)}">Manage billing</a> <span class="muted">Change card, see invoices or cancel.</span></p>` : ""}`
       : `<p><strong>Free.</strong> ${"free_applies_left" in plan ? `${plan.free_applies_left} of ${plan.free_applies_total} free applied changes left.` : ""}
 Diagnosis, proposals, history and undo are always free.</p>
