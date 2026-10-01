@@ -67,6 +67,22 @@ CREATE TABLE IF NOT EXISTS proposals (
   applied_at         INTEGER
 );
 CREATE INDEX IF NOT EXISTS proposals_user ON proposals(user_id, created_at);
+
+-- One row per MCP tool call: usage + failures. Metadata only, never arguments or Ads data
+-- (the privacy page promises the Google data goes nowhere else).
+CREATE TABLE IF NOT EXISTS tool_calls (
+  id           INTEGER PRIMARY KEY,
+  at           INTEGER NOT NULL,
+  user_id      TEXT NOT NULL,
+  client_id    TEXT,            -- which registered MCP client (clients.info has its client_name)
+  tool         TEXT NOT NULL,
+  customer_id  TEXT,
+  ok           INTEGER NOT NULL,
+  error        TEXT,            -- first 300 chars of the message shown to the AI
+  ms           INTEGER NOT NULL,
+  bytes        INTEGER NOT NULL -- size of the result text
+);
+CREATE INDEX IF NOT EXISTS tool_calls_at ON tool_calls(at);
 `;
 
 export function openDb(dataDir: string): DB {

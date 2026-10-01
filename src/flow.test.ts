@@ -233,6 +233,21 @@ describe("OAuth + MCP end to end", () => {
     expect(r.text).toContain("ACTION_NOT_PERMITTED");
   });
 
+  it("logs each tool call by name, without arguments or results", async () => {
+    const rows = db.prepare("SELECT * FROM tool_calls ORDER BY id").all() as any[];
+    const tools = rows.map((r) => r.tool);
+    expect(tools).toContain("find_wasted_spend");
+    expect(tools).toContain("apply_changes");
+    const wasted = rows.find((r) => r.tool === "find_wasted_spend");
+    expect(wasted).toMatchObject({ ok: 1, error: null, customer_id: "1112223333" });
+    expect(wasted.client_id).toBeTruthy();
+    expect(wasted.bytes).toBeGreaterThan(0);
+    const failed = rows.find((r) => r.ok === 0);
+    expect(failed?.error).toBeTruthy();
+    expect(failed?.error).not.toMatch(/^Error: /);
+    expect(JSON.stringify(rows)).not.toContain("free invoice maker");
+  });
+
   it("refuses write GAQL", async () => {
     const r = await call(token, "run_gaql", { customer_id: "1112223333", query: "UPDATE campaign SET x" });
     expect(r.isError).toBe(true);

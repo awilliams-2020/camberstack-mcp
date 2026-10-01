@@ -55,6 +55,7 @@ ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</sc
 <a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
 <p>Camberstack is independent and not affiliated with or endorsed by Google. Google Ads is a trademark of Google LLC.</p>
 </div></footer>
+<script src="/e.js" defer></script>
 </body></html>`;
 }
 
@@ -185,6 +186,7 @@ Humans at Camberstack do not read your Google Ads data unless you ask us to for 
 <tr><td>Google refresh token, encrypted (AES-256-GCM)</td><td>Call the Google Ads API when you use a tool</td><td>You disconnect or revoke access</td></tr>
 <tr><td>Tokens we issue to your AI app (stored as hashes)</td><td>Authenticate your AI app</td><td>Expiry (1 hour access, 90 days refresh) or disconnect</td></tr>
 <tr><td>Proposals: the changes requested, their summary and results</td><td>Show what changed and let you undo it</td><td>You ask us to delete them</td></tr>
+<tr><td>A usage log: which tool ran, for which Google Ads account ID, when, how long it took and any error message. Never the tool's inputs or results</td><td>Find and fix failures, and see which features are used</td><td>You ask us to delete it</td></tr>
 </table>
 <p>Reports, search-term lists and query results are computed on request and returned to your AI assistant. We do not store them.
 Standard web server logs (IP address, time, path) are kept for a limited period for security and then deleted.</p>
@@ -194,6 +196,9 @@ Standard web server logs (IP address, time, path) are kept for a limited period 
 
 <h2>Where it runs</h2>
 <p>Camberstack runs on infrastructure we operate in the United States. We use no third-party analytics on your Google data.</p>
+
+<h2>Website analytics</h2>
+<p>We count visits to this website's pages with Matomo, which we host ourselves on the same infrastructure. A small script served from this site sends the page you opened and the site that linked you here; we also record that a Google Ads account was connected, with no account, email or ID attached. It sets no cookie and stores nothing in your browser. Matomo uses your IP address to estimate roughly where a visit came from and removes the last part of it before saving. Visits are grouped by a salted hash of your IP address and browser, with the salt changed daily and kept only in memory, so it cannot identify you or link visits across days. None of your Google data is sent to analytics, and we use no third-party analytics or advertising scripts.</p>
 
 <h2>Your choices</h2>
 <ul>

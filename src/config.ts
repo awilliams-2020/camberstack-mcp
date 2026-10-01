@@ -23,6 +23,8 @@ export interface Config {
   applyRequiresPro: boolean;
   /** Emails treated as Pro regardless of billing (the operator, testers). */
   proEmails: Set<string>;
+  /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
+  matomo?: { url: string; siteId: string; token: string };
   gitSha: string;
   gitCommitDate: string;
 }
@@ -50,6 +52,9 @@ export function loadConfig(): Config {
     proEmails: new Set(
       (process.env.PRO_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     ),
+    matomo: process.env.MATOMO_URL && process.env.MATOMO_SITE_ID
+      ? { url: process.env.MATOMO_URL, siteId: process.env.MATOMO_SITE_ID, token: process.env.MATOMO_AUTH_TOKEN ?? "" }
+      : undefined,
     gitSha: process.env.GIT_SHA ?? "",
     gitCommitDate: process.env.GIT_COMMIT_DATE ?? "",
   };
