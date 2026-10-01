@@ -8,7 +8,7 @@ import type { DB, UserRow } from "./db.js";
 import type { GoogleCreds } from "./google.js";
 import type { UserSession } from "./session.js";
 import { SignIn } from "./signin.js";
-import { infoPage } from "./pages.js";
+import { appPage, infoPage } from "./pages.js";
 
 export interface AccountDeps {
   db: DB;
@@ -19,6 +19,10 @@ export interface AccountDeps {
   billingLink: (kind: "upgrade" | "billing", userId: string) => string | null;
 }
 
+/** "Oct 1, 19:44 UTC" */
+const when = (ms: number) => new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "UTC" }) + " UTC";
+/** Google's dashed form: 386-283-8095 */
+const fmtCid = (c: string) => /^\d{10}$/.test(c) ? `${c.slice(0, 3)}-${c.slice(3, 6)}-${c.slice(6)}` : c;
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 export function mountAccount(app: Express, d: AccountDeps): SignIn {
@@ -28,6 +32,7 @@ export function mountAccount(app: Express, d: AccountDeps): SignIn {
     return id ? d.db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined : undefined;
   };
   const page = (title: string, body: string) => infoPage(d.baseUrl, title, body);
+  const shell = (title: string, body: string) => appPage(d.baseUrl, title, "/account", body);
 
   app.use("/account", (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
@@ -68,47 +73,80 @@ Your AI app can no longer use Camberstack until you connect again.</p>
 
   app.get("/account", (req, res) => {
     const u = user(req);
+    // "Upgrade to Pro" on the pricing section lands here. Remember the intent across the Google
+    // sign-in (15 minutes, this path only), then send a free user straight on to Stripe Checkout.
+    const wantsUpgrade = req.query.upgrade === "1" || /(?:^|;\s*)cs_upgrade=1/.test(req.headers.cookie ?? "");
+    if (u && wantsUpgrade) {
+      res.setHeader("Set-Cookie", "cs_upgrade=; Path=/account; Max-Age=0; SameSite=Lax");
+      const p = d.session(u.id).plan();
+      if ("upgrade_url" in p && p.upgrade_url) { res.redirect(303, p.upgrade_url); return; }
+    }
+    if (!u && req.query.upgrade === "1") res.setHeader("Set-Cookie", "cs_upgrade=1; Path=/account; Max-Age=900; HttpOnly; SameSite=Lax");
     if (!u) {
-      res.type("html").send(page("Your account", `<p>See your plan, every change Camberstack made to your Google Ads account, and manage billing or disconnect.</p>
-<p><a class="btn" href="/account/login">Sign in with Google</a></p>
-<p class="muted">Use the Google account you connected to your AI app. We only ask for your email address here.</p>`));
+      res.type("html").send(shell("Your account", `<div class="signin"><div class="card">
+<h1 style="font-size:26px;margin:0">Your Camberstack account</h1>
+<p class="muted">${req.query.upgrade === "1" ? "Sign in to upgrade to Pro. You'll go straight to checkout." : "See your plan, every change Camberstack made to your Google Ads, and manage billing or disconnect."}</p>
+<a class="btn" href="/account/login">Sign in with Google</a>
+<p class="muted" style="font-size:14px">Use the Google account you connected to your AI app. We only ask for your email address here.</p>
+</div></div>`));
       return;
     }
     const s = d.session(u.id);
     const plan = s.plan();
     const history = s.history(undefined, 50);
-    const apps = d.db.prepare(`SELECT DISTINCT coalesce(json_extract(cl.info, '$.client_name'), 'AI app') name FROM tool_calls c
-      LEFT JOIN clients cl ON cl.client_id = c.client_id WHERE c.user_id = ? ORDER BY c.at DESC`).all(u.id) as { name: string }[];
-    const undone = new Set(history.filter((h) => h.undo_of && h.status === "applied").map((h) => h.undo_of));
+    const apps = d.db.prepare(`SELECT coalesce(json_extract(cl.info, '$.client_name'), 'AI app') name, max(c.at) last FROM tool_calls c
+      LEFT JOIN clients cl ON cl.client_id = c.client_id WHERE c.user_id = ? GROUP BY 1 ORDER BY last DESC`).all(u.id) as { name: string }[];
+    const lastUsed = (d.db.prepare("SELECT max(at) t FROM tool_calls WHERE user_id = ?").get(u.id) as { t: number | null }).t;
 
-    const planBox = plan.plan === "pro"
-      ? `<p><strong>Pro${"complimentary" in plan ? ", complimentary" : ""}.</strong> Applying changes is unlimited.${"complimentary" in plan
-        ? " There's no subscription on this account, so nothing to manage or cancel." : ""}</p>${"manage_billing" in plan && plan.manage_billing
-        ? `<p><a class="btn" href="${esc(plan.manage_billing)}">Manage billing</a> <span class="muted">Change card, see invoices or cancel.</span></p>` : ""}`
-      : `<p><strong>Free.</strong> ${"free_applies_left" in plan ? `${plan.free_applies_left} of ${plan.free_applies_total} free applied changes left.` : ""}
-Diagnosis, proposals, history and undo are always free.</p>
-${"upgrade_url" in plan && plan.upgrade_url ? `<p><a class="btn" href="${esc(plan.upgrade_url)}">Upgrade to Pro, $49/month</a> <span class="muted">Unlimited applied changes. Cancel any time.</span></p>` : ""}`;
+    // An applied undo folds into the change it reversed; everything else is its own entry.
+    const undoneBy = new Map(history.filter((h) => h.undo_of && h.status === "applied").map((h) => [h.undo_of!, h]));
+    const entries = history.filter((h) => !(h.undo_of && h.status === "applied"));
 
-    const rows = history.map((h) => {
-      const status = h.undo_of ? `undo of ${esc(h.undo_of.slice(0, 8))}: ${esc(h.status)}` : undone.has(h.proposal_id) ? "applied, then undone" : esc(h.status);
-      return `<tr><td>${esc((h.applied_at ?? h.proposed_at).slice(0, 16).replace("T", " "))}</td><td>${esc(h.customer_id)}</td>
-<td style="white-space:pre-line">${esc(h.summary)}</td><td>${status}</td><td><code>${esc(h.proposal_id.slice(0, 8))}</code></td></tr>`;
+    const planCard = plan.plan === "pro"
+      ? `<div class="card"><p class="label">Plan</p><p class="big">Pro${"complimentary" in plan ? ` <span class="chip">complimentary</span>` : ""}</p>
+<p class="muted">Unlimited applied changes.${"complimentary" in plan ? " No subscription on this account, so nothing to manage or cancel." : ""}</p>
+${"manage_billing" in plan && plan.manage_billing ? `<a class="btn" href="${esc(plan.manage_billing)}">Manage billing</a>` : ""}</div>`
+      : (() => {
+        const left = "free_applies_left" in plan ? plan.free_applies_left ?? 0 : 0;
+        const total = ("free_applies_total" in plan ? plan.free_applies_total : undefined) ?? 3;
+        const used = Math.max(0, total - left);
+        return `<div class="card"><p class="label">Plan</p><p class="big">Free</p>
+<div class="meter" aria-label="${used} of ${total} free applied changes used">${Array.from({ length: total }, (_, i) => `<i class="${i < used ? "on" : ""}"></i>`).join("")}</div>
+<p class="muted"><strong style="color:var(--fg)">${left} of ${total}</strong> free applied changes left. Diagnosis, proposals, history and undo are always free.</p>
+${"upgrade_url" in plan && plan.upgrade_url ? `<a class="btn" href="${esc(plan.upgrade_url)}">Upgrade to Pro · $49/month</a>` : ""}</div>`;
+      })();
+
+    const connCard = `<div class="card"><p class="label">Connection</p>
+<p class="big" style="font-size:20px"><span class="dot${u.enc_refresh ? " ok" : ""}"></span>${u.enc_refresh ? "Connected to Google Ads" : "Disconnected"}</p>
+${apps.length ? `<div class="chips">${apps.map((a) => `<span class="chip">${esc(a.name)}</span>`).join("")}</div>` : ""}
+<p class="muted">${u.enc_refresh ? (lastUsed ? `Last used ${when(lastUsed * 1000)}.` : "Not used yet.") : "Connect again from your AI app to use Camberstack."}</p></div>`;
+
+    const changes = entries.map((h) => {
+      const undo = undoneBy.get(h.proposal_id);
+      const state = undo ? "undone" : h.undo_of ? "proposed" : h.status;
+      const label = undo ? `Undone ${when(Date.parse(undo.applied_at ?? undo.proposed_at))}`
+        : h.undo_of ? "Undo waiting for approval" : ({ applied: "Applied", proposed: "Waiting for approval", failed: "Failed", discarded: "Discarded" } as Record<string, string>)[h.status] ?? h.status;
+      const lines = h.summary.split("\n").map((l) => l.replace(/^\d+\.\s*/, "").trim()).filter(Boolean);
+      const canUndo = h.status === "applied" && !undo && !h.undo_of;
+      return `<div class="change"><div class="change-top"><span class="change-meta">${when(Date.parse(h.applied_at ?? h.proposed_at))} · account ${esc(fmtCid(h.customer_id))}</span>
+<span class="pill ${state}">${esc(label)}</span></div>
+<ul>${lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>
+${canUndo ? `<div class="change-foot"><span>To reverse it, paste this into your AI:</span>
+<button class="copy" type="button" data-copy="Undo Camberstack proposal ${esc(h.proposal_id)}">Copy undo request</button></div>` : ""}</div>`;
     }).join("");
 
-    res.type("html").send(page("Your account", `
-<p>${esc(u.email)} · <form method="post" action="/account/logout" style="display:inline"><button class="linkish">Sign out</button></form></p>
-<h2>Plan</h2>${planBox}
-<h2>Connection</h2>
-<p>${u.enc_refresh ? "Connected to Google Ads." : "Disconnected. Connect again from your AI app to use Camberstack."}
-${apps.length ? ` Used from: ${apps.map((a) => esc(a.name)).join(", ")}.` : ""}</p>
+    res.type("html").send(shell("Your account", `<div class="acct">
+<div class="acct-head"><h1>Your account</h1><form method="post" action="/account/logout" class="who muted">${esc(u.email)} · <button class="linkish">Sign out</button></form></div>
+<div class="grid">${planCard}${connCard}</div>
 <h2>Changes</h2>
-${history.length ? `<p class="muted">Every proposal made through Camberstack, newest first. To reverse one, ask your AI to undo it by its id.</p>
-<div style="overflow-x:auto"><table><tr><th>When (UTC)</th><th>Account</th><th>What</th><th>Status</th><th>Id</th></tr>${rows}</table></div>`
-  : `<p class="muted">No changes yet. Ask your AI "what's wasting money in my Google Ads account?" to start.</p>`}
+${entries.length ? changes : `<div class="card"><p class="muted">No changes yet. Ask your AI <em>"What's wasting money in my Google Ads account?"</em> to start.</p></div>`}
 <h2 id="disconnect">Disconnect</h2>
-${u.enc_refresh ? `<form method="post" action="/account/disconnect"><p>Revokes Camberstack's Google access and deletes the stored credentials. Your change history stays visible here.</p>
-<label><input type="checkbox" name="confirm" value="yes" required> I want to disconnect</label> <button>Disconnect</button></form>`
-  : `<p class="muted">Already disconnected.</p>`}`));
+${u.enc_refresh ? `<form method="post" action="/account/disconnect" class="danger"><p>Revokes Camberstack's Google access and deletes the stored credentials. Your AI app stops working with Camberstack until you connect again. Your change history stays here.</p>
+<label><input type="checkbox" name="confirm" value="yes" required> I want to disconnect</label><button class="btn-danger">Disconnect Google Ads</button></form>`
+  : `<p class="muted">Already disconnected.</p>`}
+</div>
+<script>document.addEventListener("click",function(e){var b=e.target.closest("[data-copy]");if(!b||!navigator.clipboard)return;
+navigator.clipboard.writeText(b.dataset.copy).then(function(){var t=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=t},1500)})});</script>`));
   });
 
   return auth;

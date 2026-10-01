@@ -32,6 +32,32 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 footer{border-top:1px solid var(--line);margin-top:72px;padding:28px 0;font-size:14px;color:var(--muted)}
 footer a{color:var(--muted);margin-right:16px}
 .legal h2{font-size:20px;margin-top:36px}
+.acct{padding:32px 0 8px}
+.acct-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between;margin-bottom:20px}
+.acct-head h1{font-size:28px;margin:0}.acct-head .who{text-transform:none;letter-spacing:0;font-weight:400;font-size:15px}
+.acct h2{font-size:19px;margin:36px 0 12px}
+.acct .grid{margin-top:0}.acct .card{display:flex;flex-direction:column;gap:10px}
+.label{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0}
+.big{font-size:26px;font-weight:700;letter-spacing:-.01em;margin:0}
+.meter{display:flex;gap:6px}.meter i{flex:1;height:8px;border-radius:4px;background:var(--line)}.meter i.on{background:var(--accent)}
+.card p{margin:0}.card .btn{align-self:flex-start;margin-top:auto}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:var(--muted)}.dot.ok{background:#2f9e6e}
+.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{font-size:13px;border:1px solid var(--line);border-radius:99px;padding:2px 10px;color:var(--muted)}
+.change{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px}
+.change-top{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between}
+.change-meta{font-size:14px;color:var(--muted)}.change ul{margin:8px 0 0;padding-left:20px}.change li{margin:2px 0}
+.pill{font-size:12px;font-weight:600;border-radius:99px;padding:2px 9px;white-space:nowrap}
+.pill.applied{background:color-mix(in srgb,#2f9e6e 16%,transparent);color:#2f9e6e}
+.pill.undone{background:var(--code);color:var(--muted)}
+.pill.proposed{background:color-mix(in srgb,#c78a12 18%,transparent);color:#b07a10}
+.pill.failed{background:color-mix(in srgb,#c2412d 16%,transparent);color:#c2412d}
+.pill.discarded{background:var(--code);color:var(--muted)}
+.change-foot{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
+.copy{font:inherit;font-size:13px;background:none;border:1px solid var(--line);border-radius:6px;padding:3px 9px;color:var(--fg);cursor:pointer}
+.danger{border:1px solid color-mix(in srgb,#c2412d 40%,var(--line));border-radius:10px;padding:16px}
+.danger p{margin:0 0 12px}.danger label{display:block;margin-bottom:12px}
+.btn-danger{font:inherit;font-weight:600;background:#c2412d;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
+.signin{max-width:440px;margin:48px auto 0;text-align:center}.signin .card{gap:18px;align-items:center;padding:36px 32px}.signin .btn{align-self:center}
 `;
 
 function layout(o: { title: string; description: string; path: string; body: string; baseUrl: string; jsonLd?: object }): string {
@@ -135,8 +161,10 @@ Any question beyond these tools is answered with read-only queries.</p>
 
 <h2 id="pricing">Pricing</h2>
 <div class="grid">
-<div class="card"><h3>Free</h3><p>Unlimited diagnosis and proposals, change history and undo, plus <strong>3 applied changes</strong>. No card. Free stays free.</p></div>
-<div class="card"><h3>Pro: $49/month</h3><p>Everything in Free, with <strong>unlimited applied changes</strong>. Cancel any time; you keep Pro until the end of the month you paid for.</p></div>
+<div class="card"><h3>Free</h3><p>Unlimited diagnosis and proposals, change history and undo, plus <strong>3 applied changes</strong>. No card. Free stays free.</p>
+<p><a class="btn" href="#setup">Connect for free</a></p></div>
+<div class="card"><h3>Pro: $49/month</h3><p>Everything in Free, with <strong>unlimited applied changes</strong>. Cancel any time; you keep Pro until the end of the month you paid for.</p>
+<p><a class="btn" href="/account?upgrade=1">Upgrade to Pro</a></p><p class="muted" style="font-size:14px">Connect Camberstack to your AI app first; you'll sign in with the same Google account.</p></div>
 </div>
 
 <h2>Questions</h2>
@@ -346,6 +374,11 @@ and our total liability is limited to the amount you paid us in the 12 months be
 <p><a href="mailto:${CONTACT}">${CONTACT}</a></p>
 </div>`,
   });
+}
+
+/** A page that brings its own heading (the account page); body is trusted HTML built by the caller. */
+export function appPage(baseUrl: string, title: string, path: string, body: string): string {
+  return layout({ baseUrl, path, title: `${escapeHtml(title)} | Camberstack`, description: title, body });
 }
 
 /** Plain page for billing outcomes; body is trusted HTML built by the caller. */

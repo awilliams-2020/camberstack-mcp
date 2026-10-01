@@ -264,7 +264,9 @@ describe("OAuth + MCP end to end", () => {
     };
     expect((await call(token, "apply_changes", { proposal_id: await negative("jobs") })).json.free_applies_left).toBe(1);
     const third = await negative("login");
-    expect((await call(token, "apply_changes", { proposal_id: third })).json.free_applies_left).toBe(0);
+    const last = (await call(token, "apply_changes", { proposal_id: third })).json;
+    expect(last.free_applies_left).toBe(0);
+    expect(last.upgrade_url).toContain("/upgrade?t=");
 
     const fourth = await negative("how to");
     const blocked = await call(token, "apply_changes", { proposal_id: fourth });
@@ -374,15 +376,25 @@ describe("OAuth + MCP end to end", () => {
 
   it("shows a connected user their plan and changes at /account, and disconnects from there", async () => {
     expect(await (await fetch(`${base}/account`)).text()).toContain("Sign in with Google");
+    // The pricing CTA remembers the upgrade intent across sign-in.
+    const intent = await fetch(`${base}/account?upgrade=1`);
+    expect(intent.headers.get("set-cookie")).toContain("cs_upgrade=1");
     const login = await fetch(`${base}/account/login`, { redirect: "manual" });
     const g = new URL(login.headers.get("location")!);
     expect(g.searchParams.get("scope")).toBe("openid email");
     const cookie = await signIn(g);
     expect(cookie).toMatch(/^cs_account=/);
+    // Signed in with the upgrade intent: a free user goes straight to checkout (/upgrade → Stripe).
+    const go = await fetch(`${base}/account`, { headers: { cookie: `${cookie}; cs_upgrade=1` }, redirect: "manual" });
+    expect([200, 303]).toContain(go.status);
+    if (go.status === 303) expect(go.headers.get("location")).toContain("/upgrade?t=");
     const html = await (await fetch(`${base}/account`, { headers: { cookie } })).text();
     expect(html).toContain("owner@example.com");
-    expect(html).toContain("applied, then undone");
-    expect(html).toContain('Remove 1 negative keyword');
+    expect(html).toContain('class="pill undone"');
+    expect(html).toContain("data-copy=\"Undo Camberstack proposal ");
+    expect(html).toContain('Add 1 negative keyword');
+    // An applied undo folds into the change it reversed instead of being its own entry.
+    expect(html).not.toContain('Remove 1 negative keyword');
     // Disconnect needs the explicit confirmation.
     const noConfirm = await fetch(`${base}/account/disconnect`, { method: "POST", headers: { cookie }, redirect: "manual" });
     expect(noConfirm.status).toBe(303);
