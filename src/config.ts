@@ -19,8 +19,10 @@ export interface Config {
     /** Sent when set. Google moved access decisions to the Cloud project on 2026-09-10. */
     developerToken?: string;
   };
-  /** When false (beta), every connected user may apply approved changes. */
-  applyRequiresPro: boolean;
+  /** Applied proposals a free user gets (undo never counts). Pro is unlimited. */
+  freeApplies: number;
+  /** Pro subscription; unset = no upgrade links (free users stop at the limit with no way to pay). */
+  stripe?: { secretKey: string; proPriceId: string };
   /** Emails treated as Pro regardless of billing (the operator, testers). */
   proEmails: Set<string>;
   /** Google accounts allowed into /admin. Empty = /admin does not exist (404). */
@@ -50,7 +52,10 @@ export function loadConfig(): Config {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
       developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || undefined,
     },
-    applyRequiresPro: process.env.APPLY_REQUIRES_PRO === "true",
+    freeApplies: Number(process.env.FREE_APPLIES ?? 3),
+    stripe: process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRO_PRICE_ID
+      ? { secretKey: process.env.STRIPE_SECRET_KEY, proPriceId: process.env.STRIPE_PRO_PRICE_ID }
+      : undefined,
     proEmails: new Set(
       (process.env.PRO_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     ),

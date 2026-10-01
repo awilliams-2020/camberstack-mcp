@@ -4,7 +4,7 @@
  */
 
 const CONTACT = "adam@camberstack.io";
-const UPDATED = "2026-09-29";
+const UPDATED = "2026-10-01";
 
 const CSS = `
 :root{--bg:#fbfaf7;--fg:#1c1b19;--muted:#5d5a53;--line:#e4e0d8;--card:#fff;--accent:#1f5f4a;--accent-fg:#fff;--code:#f1eee7}
@@ -76,7 +76,7 @@ export function homePage(baseUrl: string): string {
 <p class="lede">Camberstack is a Google Ads connector (an MCP server) for Claude, ChatGPT and other AI assistants.
 Ask where your budget is going; it reads your account, shows you the search terms and keywords that spend without converting,
 and prepares the fix. Nothing changes in your account until you say yes.</p>
-<p><a class="btn" href="#setup">Connect in 2 minutes</a> <span class="muted">&nbsp;Free during beta</span></p>
+<p><a class="btn" href="#setup">Connect in 2 minutes</a> <span class="muted">&nbsp;Free plan, no card</span></p>
 
 <div class="convo" aria-label="Example conversation">
 <p class="who">You</p><p>Where did my Google Ads budget go last month, and what should I cut?</p>
@@ -129,8 +129,8 @@ Any question beyond these tools is answered with read-only queries.</p>
 
 <h2 id="pricing">Pricing</h2>
 <div class="grid">
-<div class="card"><h3>Beta: free</h3><p>Everything, including applying approved changes, while in beta.</p></div>
-<div class="card"><h3>Pro: $49/month (after beta)</h3><p>Applying approved changes, full change history and undo, up to 3 accounts. Diagnosis and proposals stay free.</p></div>
+<div class="card"><h3>Free</h3><p>Unlimited diagnosis and proposals, change history and undo, plus <strong>3 applied changes</strong>. No card. Free stays free.</p></div>
+<div class="card"><h3>Pro: $49/month</h3><p>Everything in Free, with <strong>unlimited applied changes</strong>. Cancel any time; you keep Pro until the end of the month you paid for.</p></div>
 </div>
 
 <h2>Questions</h2>
@@ -143,6 +143,9 @@ Reports and query results are not stored. Details in the <a href="/privacy">priv
 <h3>How do I disconnect?</h3>
 <p>Ask your AI to use the <code>disconnect</code> tool, or remove Camberstack at
 <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+<h3>What happens after my 3 free changes?</h3>
+<p>Diagnosis, proposals, history and undo keep working, free, with no time limit. Applying a fourth change asks you to upgrade:
+your AI shows a personal checkout link, and once you've paid you ask it to apply again. Undo is never paywalled.</p>
 <h3>Does it work with a manager (MCC) account?</h3>
 <p>Yes. It lists the client accounts under any manager your login can reach.</p>
 `,
@@ -229,7 +232,9 @@ export function termsPage(baseUrl: string): string {
 <p class="muted">Last updated ${UPDATED}</p>
 <h2>The service</h2>
 <p>Camberstack lets an AI assistant read your Google Ads account and, when you approve a specific proposal, change it.
-It is in beta and offered free during the beta.</p>
+There is a free plan and a paid Pro plan, described at <a href="/#pricing">camberstack.io/#pricing</a>.</p>
+<h2>Pro subscription</h2>
+<p>Pro is billed monthly in advance through Stripe until you cancel. You can cancel any time from the billing link the <code>billing</code> tool gives you; Pro continues until the end of the period you paid for, and we don't refund partial months. If we change the price we will email you at least 30 days before it applies to you.</p>
 <h2>You stay in control, and responsible</h2>
 <p>Recommendations are generated from your account data and may be wrong. You decide what to approve, and you are responsible
 for changes you approve and for your Google Ads spend. Review proposals before approving them.</p>
@@ -239,13 +244,18 @@ for changes you approve and for your Google Ads spend. Review proposals before a
 <p>The service is provided "as is", without warranties of any kind, including fitness for a particular purpose or uninterrupted availability.</p>
 <h2>Limitation of liability</h2>
 <p>To the maximum extent permitted by law, Camberstack is not liable for indirect or consequential losses, including lost profits or ad spend,
-and our total liability is limited to the amount you paid us in the 12 months before the claim (zero during the free beta).</p>
+and our total liability is limited to the amount you paid us in the 12 months before the claim (zero if you have only used the free plan).</p>
 <h2>Ending</h2>
 <p>You can disconnect at any time. We may suspend access that breaks these terms or Google's policies.</p>
 <h2>Contact</h2>
 <p><a href="mailto:${CONTACT}">${CONTACT}</a></p>
 </div>`,
   });
+}
+
+/** Plain page for billing outcomes; body is trusted HTML built by the caller. */
+export function infoPage(baseUrl: string, title: string, body: string): string {
+  return layout({ baseUrl, path: "/", title: `${escapeHtml(title)} | Camberstack`, description: title, body: `<h1>${escapeHtml(title)}</h1>${body}` });
 }
 
 export function errorPage(baseUrl: string, message: string): string {

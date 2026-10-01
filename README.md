@@ -5,7 +5,7 @@ tracking, finds where the budget goes with nothing to show for it, and proposes 
 changes in the account until you approve a specific proposal, and every applied change can be
 undone.**
 
-Hosted: **https://camberstack.io/mcp** (free during beta). Setup: https://camberstack.io/#setup
+Hosted: **https://camberstack.io/mcp** (free plan: unlimited diagnosis + 3 applied changes; Pro $49/mo unlimited). Setup: https://camberstack.io/#setup
 
 ## Tools
 
@@ -18,6 +18,7 @@ Hosted: **https://camberstack.io/mcp** (free during beta). Setup: https://camber
 | `propose_changes` | no | resolves changes against the live account, dry-runs them with Google (`validateOnly`), stores a proposal with a plain-English summary |
 | `apply_changes` | **yes** | applies a stored proposal (the user's own, un-applied, under 24h old); records each change's inverse |
 | `undo_changes` | no | builds the reversing proposal for an applied one |
+| `billing` | no | plan, free applies left, and a personal upgrade or manage-billing link |
 | `discard_proposal`, `change_history`, `disconnect` | | |
 
 Writes are limited to: add negative keywords, pause/enable a keyword or ad group, set a
@@ -47,7 +48,8 @@ BASE_URL=https://your.host npm run dev
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | sent when set |
 | `BASE_URL` | public origin, the OAuth issuer (default `https://camberstack.io`) |
 | `DATA_DIR` | SQLite location (default `./data`) |
-| `APPLY_REQUIRES_PRO` / `PRO_EMAILS` | billing gate for `apply_changes` (off during beta) |
+| `FREE_APPLIES` / `PRO_EMAILS` | applied proposals on the free plan (default 3; undo never counts) / emails treated as Pro |
+| `STRIPE_SECRET_KEY` / `STRIPE_PRO_PRICE_ID` | Pro subscription via Stripe Checkout; unset = no upgrade links |
 
 `scripts/try-account.ts` runs the read tools against a real account from an existing refresh
 token, skipping OAuth. Use it for dogfooding.

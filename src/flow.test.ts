@@ -79,6 +79,27 @@ class FakeAds {
   }
 }
 
+/** Stripe, just enough of it: Checkout, session lookup, the sweep's list, subscriptions, the portal. */
+const stripe = { subStatus: "active", checkouts: [] as URLSearchParams[] };
+const stripeFetch: typeof fetch = async (url, init) => {
+  const u = String(url).replace("https://api.stripe.com/v1/", "");
+  const j = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } });
+  if (u === "checkout/sessions" && init?.method === "POST") {
+    stripe.checkouts.push(init.body as URLSearchParams);
+    return j({ id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1" });
+  }
+  if (u === "checkout/sessions/cs_test_1") {
+    const f = stripe.checkouts.at(-1)!;
+    return j({ id: "cs_test_1", status: "complete", metadata: { app: f.get("metadata[app]") },
+      client_reference_id: f.get("client_reference_id"), customer: "cus_1", subscription: "sub_1" });
+  }
+  if (u.startsWith("checkout/sessions?")) return j({ data: [] });
+  if (u === "subscriptions/sub_1") return j({ id: "sub_1", status: stripe.subStatus });
+  if (u === "billing_portal/sessions") return j({ url: "https://billing.stripe.com/p/session_1" });
+  throw new Error(`unexpected stripe ${u}`);
+};
+
+let app: ReturnType<typeof createApp>;
 let server: Server;
 let base = "";
 const ads = new FakeAds();
@@ -88,15 +109,15 @@ beforeAll(async () => {
   const cfg: Config = {
     baseUrl: "http://localhost", port: 0, dataDir: ":memory:", encryptionKey: key,
     google: { clientId: "gid", clientSecret: "gsecret" },
-    applyRequiresPro: false, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "",
+    freeApplies: 3, stripe: { secretKey: "sk_test_x", proPriceId: "price_pro" }, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "",
   };
   // Bind first so baseUrl (the OAuth issuer) is the real test origin.
   server = await new Promise<Server>((resolve) => { const s = createApp(cfg, db).listen(0, () => resolve(s)); });
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    const s = createApp({ ...cfg, baseUrl: base }, db, { fetch: googleFetch, adsFactory: () => ads as any })
-      .listen(Number(new URL(base).port), () => resolve(s));
+    app = createApp({ ...cfg, baseUrl: base }, db, { fetch: googleFetch, stripeFetch, adsFactory: () => ads as any });
+    const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
 afterAll(() => { server?.close(); });
@@ -218,6 +239,59 @@ describe("OAuth + MCP end to end", () => {
 
     const h = await call(token, "change_history", {});
     expect(h.json.map((x: any) => x.status)).toEqual(["applied", "applied"]);
+  });
+
+  it("gives 3 free applied changes, then a personal upgrade link; undo is never paywalled", async () => {
+    // The previous test used 1 apply (its undo doesn't count).
+    const negative = async (text: string) => {
+      const p = await call(token, "propose_changes", { customer_id: "1112223333",
+        changes: [{ type: "add_negative_keywords", campaign_id: "10", keywords: [{ text, match_type: "PHRASE" }] }] });
+      return p.json.proposal_id as string;
+    };
+    expect((await call(token, "apply_changes", { proposal_id: await negative("jobs") })).json.free_applies_left).toBe(1);
+    const third = await negative("login");
+    expect((await call(token, "apply_changes", { proposal_id: third })).json.free_applies_left).toBe(0);
+
+    const fourth = await negative("how to");
+    const blocked = await call(token, "apply_changes", { proposal_id: fourth });
+    expect(blocked.isError).toBe(true);
+    expect(blocked.text).toContain("3 free applied changes");
+    const link = blocked.text.match(/https?:\/\/\S+\/upgrade\?t=[\w.-]+/)![0];
+    expect(ads.negatives.map((n) => n.text)).not.toContain("how to");
+
+    // Undo still works at the limit.
+    const u = await call(token, "undo_changes", { proposal_id: third });
+    expect((await call(token, "apply_changes", { proposal_id: u.json.proposal_id })).json.status).toBe("applied");
+
+    const plan = await call(token, "billing", {});
+    expect(plan.json).toMatchObject({ plan: "free", free_applies_left: 0 });
+    expect(plan.json.upgrade_url).toContain("/upgrade?t=");
+
+    // A tampered link is refused; the real one goes to Stripe Checkout as a subscription for this user.
+    expect((await fetch(link.replace(/.$/, (c) => (c === "A" ? "B" : "A")), { redirect: "manual" })).status).toBe(400);
+    const go = await fetch(link, { redirect: "manual" });
+    expect(go.status).toBe(303);
+    expect(go.headers.get("location")).toContain("checkout.stripe.com");
+    const form = stripe.checkouts.at(-1)!;
+    expect(form.get("mode")).toBe("subscription");
+    expect(form.get("customer_email")).toBe("owner@example.com");
+
+    const done = await fetch(`${base}/upgraded?session_id=cs_test_1`);
+    expect(done.status).toBe(200);
+    expect(await done.text()).toContain("on Camberstack Pro");
+    const now4 = await call(token, "apply_changes", { proposal_id: fourth });
+    expect(now4.json.status).toBe("applied");
+    expect(now4.json.free_applies_left).toBeUndefined();
+
+    const pro = await call(token, "billing", {});
+    expect(pro.json.plan).toBe("pro");
+    const portal = await fetch(pro.json.manage_billing, { redirect: "manual" });
+    expect(portal.headers.get("location")).toContain("billing.stripe.com");
+
+    // Cancelled at period end: the hourly sweep drops the plan back to free.
+    stripe.subStatus = "canceled";
+    await (app.locals.billing as any).sweep();
+    expect((await call(token, "billing", {})).json.plan).toBe("free");
   });
 
   it("refuses to apply a proposal that doesn't exist or isn't the user's", async () => {

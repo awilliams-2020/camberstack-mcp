@@ -9,6 +9,7 @@ export const SERVER_VERSION = "0.1.0";
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Workflow: list_accounts → account_overview → find_wasted_spend → propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
+Free accounts get 3 applied changes; undo is always free. If apply_changes reports the limit, show the user the upgrade link it returns, word for word.
 Read find_wasted_spend's "tracking" section before recommending cuts: if conversion tracking is broken or warning, say so first.`;
 
 const customerId = z.string().describe("Google Ads customer ID, with or without dashes (from list_accounts)");
@@ -117,6 +118,12 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     inputSchema: { customer_id: customerId.optional(), limit: z.number().int().min(1).max(100).default(20) },
     annotations: { title: "Change history", readOnlyHint: true, openWorldHint: false },
   }, wrap("change_history", ({ customer_id, limit }: { customer_id?: string; limit: number }) => session().history(customer_id, limit)));
+
+  server.registerTool("billing", {
+    title: "Plan and billing",
+    description: "Shows the user's Camberstack plan: free applied changes left, or Pro. Returns a personal link to upgrade (free) or to change card and cancel (Pro). Diagnosis, proposals, history and undo are always free.",
+    annotations: { title: "Plan and billing", readOnlyHint: true, openWorldHint: false },
+  }, wrap("billing", () => session().plan()));
 
   server.registerTool("disconnect", {
     title: "Disconnect Google Ads",

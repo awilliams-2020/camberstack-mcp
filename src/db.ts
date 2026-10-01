@@ -102,6 +102,10 @@ export function openDb(dataDir: string): DB {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  // Columns added after launch; CREATE TABLE IF NOT EXISTS won't add them to an existing table.
+  const cols = new Set((db.prepare("PRAGMA table_info(users)").all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has("stripe_customer")) db.exec("ALTER TABLE users ADD COLUMN stripe_customer TEXT");
+  if (!cols.has("stripe_sub")) db.exec("ALTER TABLE users ADD COLUMN stripe_sub TEXT");
   return db;
 }
 
@@ -115,6 +119,8 @@ export interface UserRow {
   plan: string;
   created_at: number;
   last_seen_at: number | null;
+  stripe_customer?: string | null;
+  stripe_sub?: string | null;
 }
 
 export interface ProposalRow {

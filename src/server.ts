@@ -14,19 +14,24 @@ import { UserSession, type SessionDeps } from "./session.js";
 import { buildServer, SERVER_VERSION } from "./tools.js";
 import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
 import { ADMIN_STATE, mountAdmin } from "./admin.js";
-import { errorPage, homePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
+import { Billing } from "./billing.js";
+import { createHash } from "node:crypto";
+import { errorPage, infoPage, homePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
 
-export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch } = {}): Express {
+export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch; stripeFetch?: typeof fetch } = {}): Express {
   const app = express();
   app.set("trust proxy", 1); // behind Traefik: one hop
   app.disable("x-powered-by");
+  const billing = new Billing({ db, baseUrl: cfg.baseUrl, stripe: cfg.stripe, fetch: overrides.stripeFetch,
+    signingKey: createHash("sha256").update(cfg.encryptionKey).update("billing-links").digest() });
 
   const provider = new CamberstackProvider(db, {
     baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey, fetch: overrides.fetch,
   });
   const deps: SessionDeps = {
     db, google: cfg.google, encryptionKey: cfg.encryptionKey,
-    applyRequiresPro: cfg.applyRequiresPro, proEmails: cfg.proEmails, ...overrides,
+    freeApplies: cfg.freeApplies, proEmails: cfg.proEmails,
+    billingLink: (kind, userId) => billing.link(kind, userId), ...overrides,
   };
   const mcpUrl = new URL(`${cfg.baseUrl}/mcp`);
   const logCall = db.prepare(`INSERT INTO tool_calls (at, user_id, client_id, tool, customer_id, ok, error, ms, bytes)
@@ -132,6 +137,9 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/favicon.png", brand("favicon-32.png", "image/png"));
   app.get("/favicon.ico", brand("favicon-32.png", "image/png"));
   app.get("/logo.png", brand("logo-wordmark-480.png", "image/png"));
+  billing.mount(app, (title, body) => infoPage(cfg.baseUrl, title, body));
+  app.locals.billing = billing;
+
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
   app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(BEACON_JS); });
   app.post("/e", express.urlencoded({ extended: false, limit: "2kb" }), (req, res) => {
@@ -149,5 +157,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const cfg = loadConfig();
   const db = openDb(cfg.dataDir);
   setInterval(() => sweep(db), 10 * 60_000).unref();
-  createApp(cfg, db).listen(cfg.port, () => console.log(`camberstack-mcp ${SERVER_VERSION} on :${cfg.port} (${cfg.baseUrl})`));
+  const app = createApp(cfg, db);
+  const billing = app.locals.billing as Billing;
+  const billingSweep = () => billing.sweep().catch((e) => console.error(`billing sweep: ${(e as Error).message}`));
+  void billingSweep();
+  setInterval(billingSweep, 3600_000).unref();
+  app.listen(cfg.port, () => console.log(`camberstack-mcp ${SERVER_VERSION} on :${cfg.port} (${cfg.baseUrl})`));
 }

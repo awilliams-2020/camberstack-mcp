@@ -28,8 +28,10 @@ export interface SessionDeps {
   db: DB;
   google: GoogleCreds;
   encryptionKey: Buffer;
-  applyRequiresPro: boolean;
+  freeApplies: number;
   proEmails: Set<string>;
+  /** Signed per-user billing links (billing.ts); null when billing isn't configured. */
+  billingLink?: (kind: "upgrade" | "billing", userId: string) => string | null;
   /** Tests inject a fake. */
   adsFactory?: (user: UserRow) => AdsClient;
 }
@@ -72,6 +74,25 @@ export class UserSession {
 
   get isPro(): boolean {
     return this.user.plan === "pro" || this.deps.proEmails.has(this.user.email.toLowerCase());
+  }
+
+  /** Free applies left; null for Pro (unlimited). Undo proposals never count. */
+  freeAppliesLeft(): number | null {
+    if (this.isPro) return null;
+    const used = (this.deps.db.prepare("SELECT count(*) n FROM proposals WHERE user_id = ? AND status = 'applied' AND undo_of IS NULL")
+      .get(this.user.id) as { n: number }).n;
+    return Math.max(0, this.deps.freeApplies - used);
+  }
+
+  plan() {
+    const left = this.freeAppliesLeft();
+    const upgrade = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
+    return this.isPro
+      ? { plan: "pro", applies: "unlimited", manage_billing: this.user.stripe_customer ? this.deps.billingLink?.("billing", this.user.id) ?? null : null }
+      : { plan: "free", free_applies_left: left, free_applies_total: this.deps.freeApplies,
+          always_free: "diagnosis, proposals, change history and undo",
+          pro: "unlimited applied changes, $49/month, cancel any time", upgrade_url: upgrade,
+          note: upgrade ? "Show the user upgrade_url as a link; it is personal and expires in 7 days." : "Upgrades are not open yet." };
   }
 
   // ---------------------------------------------------------------- read
@@ -232,10 +253,15 @@ export class UserSession {
   }
 
   async apply(proposalId: string) {
-    if (this.deps.applyRequiresPro && !this.isPro) {
-      throw new Error("Applying changes is part of Camberstack Pro. Diagnosis and proposals stay free; see https://camberstack.io/#pricing");
-    }
     const p = this.proposal(proposalId);
+    // Undo is always free: a paywall must never stand between a user and reversing a change.
+    const left = p.undo_of ? null : this.freeAppliesLeft();
+    if (left === 0) {
+      const url = this.deps.billingLink?.("upgrade", this.user.id);
+      throw new Error(`This account has used its ${this.deps.freeApplies} free applied changes. Camberstack Pro ($49/month, cancel any time) applies changes without limit. `
+        + (url ? `Show the user this personal upgrade link: ${url} — then apply proposal ${p.id} again once they have paid (it stays open for 24 hours). ` : "Upgrades open soon; see https://camberstack.io/#pricing. ")
+        + "Diagnosis, proposals, change history and undo stay free.");
+    }
     if (p.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${p.status}.`);
     if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
     const changes = JSON.parse(p.changes) as Change[];
@@ -263,6 +289,7 @@ export class UserSession {
       status: allOk ? "applied" : anyOk ? "partially applied" : "failed",
       results: outcomes.map(({ describe, ok, error }) => ({ change: describe, ok, ...(error ? { error } : {}) })),
       undo: anyOk ? `To reverse this, call undo_changes with proposal_id "${p.id}".` : undefined,
+      ...(left !== null && anyOk ? { free_applies_left: left - 1 } : {}),
     };
   }
 
