@@ -33,8 +33,31 @@ if (!price) {
 } else console.log("already exists", price.id);
 console.log(`STRIPE_PRO_PRICE_ID=${price.id}`);
 
-const portals = await api("billing_portal/configurations?limit=10");
-const active = (portals.data ?? []).filter((c: any) => c.active);
-console.log(active.length
-  ? `customer portal: configured (${active.length} active); cancel ${active[0].features?.subscription_cancel?.enabled ? "enabled" : "DISABLED"}`
-  : "customer portal: NOT configured — save it once at dashboard.stripe.com/settings/billing/portal");
+// Customer portal: where Pro users change card, see invoices and cancel (at period end, matching the
+// terms). Created here if none is active; billing.ts uses the default, else the first active one.
+const portals = await api("billing_portal/configurations?limit=10&active=true");
+if (portals.data?.length) {
+  const c = portals.data[0];
+  console.log(`customer portal: already configured (${c.id}); cancel ${c.features?.subscription_cancel?.enabled ? c.features.subscription_cancel.mode : "DISABLED"}`);
+} else {
+  const c = await api("billing_portal/configurations", {
+    "business_profile[headline]": "Camberstack Pro: manage your subscription",
+    "business_profile[privacy_policy_url]": "https://camberstack.io/privacy",
+    "business_profile[terms_of_service_url]": "https://camberstack.io/terms",
+    default_return_url: "https://camberstack.io",
+    "features[payment_method_update][enabled]": "true",
+    "features[invoice_history][enabled]": "true",
+    "features[customer_update][enabled]": "true",
+    "features[customer_update][allowed_updates][0]": "email",
+    "features[customer_update][allowed_updates][1]": "address",
+    "features[subscription_cancel][enabled]": "true",
+    "features[subscription_cancel][mode]": "at_period_end",
+    "features[subscription_cancel][cancellation_reason][enabled]": "true",
+    "features[subscription_cancel][cancellation_reason][options][0]": "too_expensive",
+    "features[subscription_cancel][cancellation_reason][options][1]": "unused",
+    "features[subscription_cancel][cancellation_reason][options][2]": "missing_features",
+    "features[subscription_cancel][cancellation_reason][options][3]": "switched_service",
+    "features[subscription_cancel][cancellation_reason][options][4]": "other",
+  });
+  console.log(`customer portal: created ${c.id} (default: ${c.is_default})`);
+}

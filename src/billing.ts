@@ -93,6 +93,18 @@ export class Billing {
     }
   }
 
+  private portal?: string;
+  /** A portal configuration made through the API is not Stripe's default, so name it explicitly. */
+  private async portalConfig(): Promise<Record<string, string>> {
+    if (!this.portal) {
+      const list = await this.stripe("billing_portal/configurations?limit=10&active=true");
+      const c = (list.data ?? []).find((x: any) => x.is_default) ?? list.data?.[0];
+      if (!c) return {};
+      this.portal = c.id as string;
+    }
+    return { configuration: this.portal };
+  }
+
   mount(app: Express, page: (title: string, body: string) => string): void {
     const send = (res: Response, status: number, title: string, body: string) =>
       res.status(status).setHeader("Cache-Control", "no-store").type("html").send(page(title, body));
@@ -143,7 +155,9 @@ export class Billing {
       if (!u || !this.enabled) return expired(res);
       if (!u.stripe_customer) return send(res, 200, "No subscription", `<p>${esc(u.email)} has no Camberstack subscription.</p>`);
       try {
-        const s = await this.stripe("billing_portal/sessions", { customer: u.stripe_customer, return_url: this.d.baseUrl });
+        const s = await this.stripe("billing_portal/sessions", {
+          customer: u.stripe_customer, return_url: this.d.baseUrl, ...(await this.portalConfig()),
+        });
         res.redirect(303, s.url);
       } catch (e) {
         send(res, 502, "Billing unavailable", `<p>Stripe's billing page is not available (${esc((e as Error).message)}). Email us to change or cancel your plan.</p>`);

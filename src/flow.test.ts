@@ -95,7 +95,11 @@ const stripeFetch: typeof fetch = async (url, init) => {
   }
   if (u.startsWith("checkout/sessions?")) return j({ data: [] });
   if (u === "subscriptions/sub_1") return j({ id: "sub_1", status: stripe.subStatus });
-  if (u === "billing_portal/sessions") return j({ url: "https://billing.stripe.com/p/session_1" });
+  if (u.startsWith("billing_portal/configurations")) return j({ data: [{ id: "bpc_1", is_default: false, active: true }] });
+  if (u === "billing_portal/sessions") {
+    expect((init?.body as URLSearchParams).get("configuration")).toBe("bpc_1");
+    return j({ url: "https://billing.stripe.com/p/session_1" });
+  }
   throw new Error(`unexpected stripe ${u}`);
 };
 
