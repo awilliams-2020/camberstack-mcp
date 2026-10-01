@@ -32,6 +32,16 @@ export function googleAuthUrl(creds: GoogleCreds, redirectUri: string, state: st
   return u.toString();
 }
 
+/** Identity only (openid email), no Ads access and no refresh token: the operator's /admin sign-in. */
+export function googleSignInUrl(creds: GoogleCreds, redirectUri: string, state: string): string {
+  const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  u.search = new URLSearchParams({
+    client_id: creds.clientId, redirect_uri: redirectUri, response_type: "code",
+    scope: "openid email", prompt: "select_account", state,
+  }).toString();
+  return u.toString();
+}
+
 export interface GoogleTokenResponse {
   access_token: string;
   expires_in: number;
@@ -89,10 +99,14 @@ export async function revokeGoogleToken(token: string, f: FetchLike = fetch): Pr
  * The id_token arrives directly from Google's token endpoint over TLS, so its claims can be read
  * without verifying the signature (OpenID Connect Core §3.1.3.7, item 6).
  */
-export function idTokenClaims(idToken: string): { sub: string; email: string } {
+/**
+ * Unverified decode is safe here only because the token comes straight from Google's token endpoint
+ * over TLS, in exchange for a code plus our client secret.
+ */
+export function idTokenClaims(idToken: string): { sub: string; email: string; emailVerified: boolean } {
   const payload = JSON.parse(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8"));
   if (!payload.sub || !payload.email) throw new Error("id_token missing sub/email");
-  return { sub: String(payload.sub), email: String(payload.email).toLowerCase() };
+  return { sub: String(payload.sub), email: String(payload.email).toLowerCase(), emailVerified: payload.email_verified === true };
 }
 
 export class AdsApiError extends Error {

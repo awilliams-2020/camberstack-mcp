@@ -13,6 +13,7 @@ import { CamberstackProvider, MCP_SCOPE } from "./provider.js";
 import { UserSession, type SessionDeps } from "./session.js";
 import { buildServer, SERVER_VERSION } from "./tools.js";
 import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
+import { ADMIN_STATE, mountAdmin } from "./admin.js";
 import { errorPage, homePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
 
 export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch } = {}): Express {
@@ -51,7 +52,17 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     serviceDocumentationUrl: new URL(`${cfg.baseUrl}/#setup`),
   }));
 
+  const admin = mountAdmin(app, {
+    db, google: cfg.google, baseUrl: cfg.baseUrl, adminEmails: cfg.adminEmails,
+    internalEmails: new Set([...cfg.adminEmails, ...cfg.proEmails]), fetch: overrides.fetch,
+  });
+
   app.get("/oauth/google/callback", async (req, res) => {
+    // One registered redirect URI serves both flows; admin sign-ins are told apart by their state.
+    if (typeof req.query.state === "string" && req.query.state.startsWith(ADMIN_STATE)) {
+      try { await admin.completeCallback(req, res); } catch (e) { res.status(400).type("html").send(errorPage(cfg.baseUrl, (e as Error).message)); }
+      return;
+    }
     try {
       const to = await provider.completeGoogleCallback({
         code: typeof req.query.code === "string" ? req.query.code : undefined,

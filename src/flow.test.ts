@@ -14,7 +14,7 @@ import { decrypt, encrypt } from "./crypto.js";
 
 const key = randomBytes(32);
 const idToken = (sub: string, email: string) =>
-  `h.${Buffer.from(JSON.stringify({ sub, email })).toString("base64url")}.s`;
+  `h.${Buffer.from(JSON.stringify({ sub, email, email_verified: true })).toString("base64url")}.s`;
 
 /** Google's token endpoint. */
 const googleFetch: typeof fetch = async (url) => {
@@ -88,7 +88,7 @@ beforeAll(async () => {
   const cfg: Config = {
     baseUrl: "http://localhost", port: 0, dataDir: ":memory:", encryptionKey: key,
     google: { clientId: "gid", clientSecret: "gsecret" },
-    applyRequiresPro: false, proEmails: new Set(), gitSha: "test", gitCommitDate: "",
+    applyRequiresPro: false, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "",
   };
   // Bind first so baseUrl (the OAuth issuer) is the real test origin.
   server = await new Promise<Server>((resolve) => { const s = createApp(cfg, db).listen(0, () => resolve(s)); });
@@ -246,6 +246,31 @@ describe("OAuth + MCP end to end", () => {
     expect(failed?.error).toBeTruthy();
     expect(failed?.error).not.toMatch(/^Error: /);
     expect(JSON.stringify(rows)).not.toContain("free invoice maker");
+  });
+
+  it("keeps /admin behind a Google sign-in for ADMIN_EMAILS, asking for identity only", async () => {
+    const gate = await fetch(`${base}/admin`, { redirect: "manual" });
+    expect(gate.status).toBe(302);
+    expect(gate.headers.get("location")).toBe("/admin/login");
+    const login = await fetch(`${base}/admin/login`, { redirect: "manual" });
+    const g = new URL(login.headers.get("location")!);
+    expect(g.searchParams.get("scope")).toBe("openid email");
+    const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
+    expect(back.status).toBe(302);
+    const cookie = back.headers.get("set-cookie")!.split(";")[0]!;
+    expect(back.headers.get("set-cookie")).toContain("HttpOnly");
+    const page = await fetch(`${base}/admin?days=30&internal=1`, { headers: { cookie } });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain("find_wasted_spend");
+    expect(html).toContain("owner@example.com");
+    // The operator's own account is internal: hidden unless asked for.
+    const json = await (await fetch(`${base}/admin?format=json`, { headers: { cookie } })).json();
+    expect(json.funnel.all.connected).toBe(0);
+    // A replayed state is refused.
+    const replay = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
+    expect(replay.status).toBe(400);
+    expect((await fetch(`${base}/admin`, { headers: { cookie: "cs_admin=forged" }, redirect: "manual" })).status).toBe(302);
   });
 
   it("refuses write GAQL", async () => {
