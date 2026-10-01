@@ -181,8 +181,9 @@ and the server refuses anything that wasn't proposed first, is older than 24 hou
 <p>Your Google email, an encrypted Google refresh token, and the proposals you make (with their results, so you can undo them).
 Reports and query results are not stored. Details in the <a href="/privacy">privacy policy</a>.</p>
 <h3>How do I disconnect?</h3>
-<p>Ask your AI to use the <code>disconnect</code> tool, or remove Camberstack at
-<a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+<p>Sign in at <a href="/account">camberstack.io/account</a> and choose <strong>Disconnect Google Ads</strong>, or remove Camberstack at
+<a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>. You can also ask your AI to use the <code>disconnect</code>
+tool, though some apps (ChatGPT, for one) block disconnect requests from chat.</p>
 <h3>What happens after my 3 free changes?</h3>
 <p>Diagnosis, proposals, history and undo keep working, free, with no time limit. Applying a fourth change asks you to upgrade:
 your AI shows a personal checkout link, and once you've paid you ask it to apply again. Undo is never paywalled.</p>
