@@ -60,6 +60,12 @@ export function buildReport(db: DB, o: ReportOptions) {
     daily: q<{ day: string; calls: number; users: number; errors: number }>(
       `SELECT date(at, 'unixepoch') day, count(*) calls, count(DISTINCT c.user_id) users, sum(ok = 0) errors
        FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE at >= ? GROUP BY 1 ORDER BY 1`, since),
+    emails: q<{ kind: string; sent: number; in_window: number }>(
+      `SELECT e.kind, count(*) sent, sum(e.sent_at >= ?) in_window FROM email_log e JOIN {U} u ON u.id = e.user_id GROUP BY 1 ORDER BY 1`, since),
+    adConversions: q<{ recorded: number; uploaded: number; failing: number; last_error: string | null }>(
+      `SELECT count(*) recorded, count(a.uploaded_at) uploaded, sum(a.uploaded_at IS NULL AND a.error IS NOT NULL) failing,
+         (SELECT error FROM ad_conversions WHERE error IS NOT NULL ORDER BY at DESC LIMIT 1) last_error
+       FROM ad_conversions a JOIN {U} u ON u.id = a.user_id`)[0],
     recent: q<{ at: number; email: string; tool: string; customer_id: string | null; ok: number; error: string | null; ms: number; client: string }>(
       `SELECT c.at, u.email, c.tool, c.customer_id, c.ok, substr(c.error, 1, 160) error, c.ms, ${client} client
        FROM tool_calls c JOIN {U} u ON u.id = c.user_id LEFT JOIN clients cl ON cl.client_id = c.client_id

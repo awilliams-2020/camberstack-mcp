@@ -31,6 +31,8 @@ export interface Config {
   adminEmails: Set<string>;
   /** Upload our own campaign's conversions (adconversions.ts); unset = clicks are kept but not uploaded. */
   conversions?: import("./adconversions.js").ConversionConfig;
+  /** Lifecycle emails via Resend (lifecycle.ts); unset = none are sent. */
+  mail?: import("./lifecycle.js").MailConfig;
   /** Glama ownership token for /.well-known/glama.json (from Glama's claim panel); unset = 404. */
   glamaClaim?: string;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
@@ -70,6 +72,9 @@ export function loadConfig(): Config {
       (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     ),
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
+    mail: process.env.RESEND_API_KEY
+      ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" }
+      : undefined,
     conversions: ["CONV_ADS_CUSTOMER_ID", "CONV_ADS_ACTION_ID", "CONV_ADS_CLIENT_ID", "CONV_ADS_CLIENT_SECRET", "CONV_ADS_REFRESH_TOKEN", "CONV_ADS_DEVELOPER_TOKEN"]
       .every((k) => process.env[k])
       ? {

@@ -144,6 +144,11 @@ ${table(["app", "calls", "users"], r.clients.map((c) => [esc(c.client), c.calls,
 ${table(["tool", "error", "count", "last"], r.errors.map((e) => [esc(e.tool), `<span class="bad">${esc(e.error)}</span>`, e.n, ago(e.last)]), "No errors.")
   .replaceAll('<td><span class="bad">', '<td class="wrapok"><span class="bad">')}
 
+<h2>Ad conversions and emails</h2>
+${table(["ad connects recorded", "uploaded to Google Ads", "failing", "last error"], [[r.adConversions?.recorded ?? 0, r.adConversions?.uploaded ?? 0,
+  r.adConversions?.failing ? `<span class="bad">${r.adConversions.failing}</span>` : 0, esc(r.adConversions?.last_error ?? "—")]])}
+${table(["email", "sent (all time)", `sent in ${o.days}d`], r.emails.map((e) => [esc(e.kind), e.sent, e.in_window]), "No lifecycle emails sent yet.")}
+
 <h2>Recent calls</h2>
 ${table(["when (UTC)", "user", "tool", "account", "ms", "result", "app"], r.recent.map((c) => [date(c.at), esc(c.email), esc(c.tool),
   esc(c.customer_id ?? ""), c.ms, c.ok ? "ok" : `<span class="bad">${esc(c.error)}</span>`, esc(c.client)]))}

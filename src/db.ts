@@ -105,6 +105,14 @@ CREATE TABLE IF NOT EXISTS ad_conversions (
   attempts     INTEGER NOT NULL DEFAULT 0
 );
 
+-- Lifecycle emails (lifecycle.ts): one row per user per kind, so each is sent at most once.
+CREATE TABLE IF NOT EXISTS email_log (
+  user_id  TEXT NOT NULL,
+  kind     TEXT NOT NULL,
+  sent_at  INTEGER NOT NULL,
+  PRIMARY KEY (user_id, kind)
+);
+
 -- Each user's copy of the demo account (demo.ts): only what their changes altered, as JSON.
 CREATE TABLE IF NOT EXISTS demo_state (
   user_id     TEXT PRIMARY KEY,
@@ -127,6 +135,7 @@ export function openDb(dataDir: string): DB {
   const cols = new Set((db.prepare("PRAGMA table_info(users)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("stripe_customer")) db.exec("ALTER TABLE users ADD COLUMN stripe_customer TEXT");
   if (!cols.has("stripe_sub")) db.exec("ALTER TABLE users ADD COLUMN stripe_sub TEXT");
+  if (!cols.has("email_opt_out")) db.exec("ALTER TABLE users ADD COLUMN email_opt_out INTEGER NOT NULL DEFAULT 0");
   return db;
 }
 

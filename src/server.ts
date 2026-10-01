@@ -17,10 +17,11 @@ import { mountAdmin } from "./admin.js";
 import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
+import { Lifecycle } from "./lifecycle.js";
 import { createHash } from "node:crypto";
 import { errorPage, infoPage, homePage, claudeGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
 
-export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch; stripeFetch?: typeof fetch; adsConversionFetch?: typeof fetch } = {}): Express {
+export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch; stripeFetch?: typeof fetch; adsConversionFetch?: typeof fetch; mailFetch?: typeof fetch } = {}): Express {
   const app = express();
   app.set("trust proxy", 1); // behind Traefik: one hop
   app.disable("x-powered-by");
@@ -172,6 +173,14 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/favicon.ico", brand("favicon-32.png", "image/png"));
   app.get("/logo.png", brand("logo-wordmark-480.png", "image/png"));
   billing.mount(app, (title, body) => infoPage(cfg.baseUrl, title, body));
+  const lifecycle = new Lifecycle({
+    db, baseUrl: cfg.baseUrl, mail: cfg.mail, freeApplies: cfg.freeApplies, fetch: overrides.mailFetch,
+    internalEmails: new Set([...cfg.adminEmails, ...cfg.proEmails]),
+    signingKey: createHash("sha256").update(cfg.encryptionKey).update("email-links").digest(),
+    upgradeLink: (userId) => billing.link("upgrade", userId),
+  });
+  lifecycle.mount(app, (title, body) => infoPage(cfg.baseUrl, title, body));
+  app.locals.lifecycle = lifecycle;
   app.locals.billing = billing;
   app.locals.adConversions = adConversions;
 
@@ -197,6 +206,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const billingSweep = () => billing.sweep().catch((e) => console.error(`billing sweep: ${(e as Error).message}`));
   void billingSweep();
   setInterval(billingSweep, 3600_000).unref();
+  const lifecycle = app.locals.lifecycle as Lifecycle;
+  setInterval(() => lifecycle.run().catch((e) => console.error(`lifecycle: ${(e as Error).message}`)), 3600_000).unref();
   const conversions = app.locals.adConversions as AdConversions;
   setInterval(() => conversions.flush().catch((e) => console.error(`ad conversions: ${(e as Error).message}`)), 3600_000).unref();
   app.listen(cfg.port, () => console.log(`camberstack-mcp ${SERVER_VERSION} on :${cfg.port} (${cfg.baseUrl})`));

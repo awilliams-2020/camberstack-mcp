@@ -336,6 +336,11 @@ Standard web server logs (IP address, time, path) are kept for a limited period 
 <h2>Where it runs</h2>
 <p>Camberstack runs on infrastructure we operate in the United States. We use no third-party analytics on your Google data.</p>
 
+<h2>Emails</h2>
+<p>We may send you up to two short emails about using Camberstack: one if you connect but don't try it within a couple of days,
+and one if you use all your free changes. Each is sent once, from adam@camberstack.io, to the email address of the Google account
+you connected. They never contain your Google Ads data. Every email has an unsubscribe link, and replies reach a person.</p>
+
 <h2>Our own Google ads</h2>
 <p>If you reach this site by clicking one of our Google ads, we keep the ad click identifier Google adds to the link in a cookie on
 this site for up to 90 days. If you then connect Camberstack for the first time, we report that click to our own Google Ads account
