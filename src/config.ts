@@ -27,6 +27,8 @@ export interface Config {
   proEmails: Set<string>;
   /** Google accounts allowed into /admin. Empty = /admin does not exist (404). */
   adminEmails: Set<string>;
+  /** Glama ownership token for /.well-known/glama.json (from Glama's claim panel); unset = 404. */
+  glamaClaim?: string;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
   matomo?: { url: string; siteId: string; token: string };
   gitSha: string;
@@ -62,6 +64,7 @@ export function loadConfig(): Config {
     adminEmails: new Set(
       (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     ),
+    glamaClaim: process.env.GLAMA_CLAIM || undefined,
     matomo: process.env.MATOMO_URL && process.env.MATOMO_SITE_ID
       ? { url: process.env.MATOMO_URL, siteId: process.env.MATOMO_SITE_ID, token: process.env.MATOMO_AUTH_TOKEN ?? "" }
       : undefined,

@@ -362,6 +362,14 @@ describe("OAuth + MCP end to end", () => {
     expect(r.isError).toBe(true);
   });
 
+  it("serves protected-resource metadata at the root path too, identical to the SDK's", async () => {
+    const root = await (await fetch(`${base}/.well-known/oauth-protected-resource`)).json();
+    const sdk = await (await fetch(`${base}/.well-known/oauth-protected-resource/mcp`)).json();
+    expect(root).toEqual(sdk);
+    expect((await fetch(`${base}/geo-audit`)).status).toBe(410);
+    expect((await fetch(`${base}/.well-known/glama.json`)).status).toBe(404);
+  });
+
   it("serves the pages Google's brand verification reads", async () => {
     const home = await (await fetch(`${base}/`)).text();
     expect(home).toContain('href="/privacy"');

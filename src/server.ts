@@ -62,6 +62,21 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     internalEmails: new Set([...cfg.adminEmails, ...cfg.proEmails]), fetch: overrides.fetch,
   });
 
+  // Some MCP clients probe the root form before the path-suffixed one the SDK serves; same document.
+  app.get("/.well-known/oauth-protected-resource", (_q, r) => {
+    r.json({ resource: mcpUrl.href, authorization_servers: [new URL(cfg.baseUrl).href], scopes_supported: [MCP_SCOPE],
+      resource_name: "Camberstack Google Ads", resource_documentation: `${cfg.baseUrl}/#setup` });
+  });
+  if (cfg.glamaClaim) {
+    app.get("/.well-known/glama.json", (_q, r) => {
+      r.json({ $schema: "https://glama.ai/mcp/schemas/connector.json", claim: cfg.glamaClaim });
+    });
+  }
+  // The GEO audit that used to live on this domain. Gone for good, so say so instead of a plain 404.
+  for (const p of ["/geo-audit", "/aeo-audit", "/ai-visibility-audit", "/ai-visibility-checker", "/methodology", "/report/:id", "/fixpack/:id"]) {
+    app.get(p, (_q, r) => { r.status(410).type("html").send(errorPage(cfg.baseUrl, "That page belonged to an earlier product and has been removed.")); });
+  }
+
   app.get("/oauth/google/callback", async (req, res) => {
     // One registered redirect URI serves both flows; admin sign-ins are told apart by their state.
     if (typeof req.query.state === "string" && req.query.state.startsWith(ADMIN_STATE)) {

@@ -69,7 +69,12 @@ export function homePage(baseUrl: string): string {
       "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Camberstack",
       applicationCategory: "BusinessApplication", operatingSystem: "Web", url: baseUrl,
       description: "Google Ads MCP connector for Claude and ChatGPT: diagnose wasted spend, then apply approved changes.",
-      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      offers: [
+        { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD",
+          description: "Unlimited diagnosis and proposals, change history and undo, plus 3 applied changes." },
+        { "@type": "Offer", name: "Pro", price: "49", priceCurrency: "USD", description: "Unlimited applied changes.",
+          priceSpecification: { "@type": "UnitPriceSpecification", price: "49", priceCurrency: "USD", billingDuration: "P1M", unitCode: "MON" } },
+      ],
     },
     body: `
 <h1>Your AI, on your Google Ads account. It finds the waste. You approve every change.</h1>
@@ -280,10 +285,14 @@ export function llmsTxt(baseUrl: string): string {
 > Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or any MCP client; the AI diagnoses wasted spend and applies only changes the user approves.
 
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
-- Tools: list_accounts, account_overview, find_wasted_spend, run_gaql, propose_changes, apply_changes, undo_changes, discard_proposal, change_history, disconnect
+- Tools: list_accounts, account_overview, find_wasted_spend, run_gaql, propose_changes, apply_changes, undo_changes, discard_proposal, change_history, billing, disconnect
 - Writes are limited to: negative keywords, pause/enable keyword or ad group, daily budget. Every applied change can be undone.
+- Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes. Undo is always free.
 - [Setup](${baseUrl}/#setup)
+- [Pricing](${baseUrl}/#pricing)
+- [Source (MIT)](https://github.com/awilliams-2020/camberstack-mcp)
 - [Privacy](${baseUrl}/privacy)
+- [Terms](${baseUrl}/terms)
 `;
 }
 
