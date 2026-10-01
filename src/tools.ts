@@ -86,7 +86,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   server.registerTool("propose_changes", {
     title: "Propose changes (writes nothing)",
-    description: "Checks a set of changes against the live account and dry-runs them with Google, then stores them as a proposal and returns a plain-English summary. Nothing is changed. Show the summary to the user and apply only after they approve. Supported: add_negative_keywords, pause_keyword, enable_keyword, pause_ad_group, enable_ad_group, set_daily_budget.",
+    description: "Checks a set of changes against the live account and dry-runs them with Google, then stores them as a proposal and returns a plain-English summary. Nothing is changed. Show the summary to the user and apply only after they approve. Supported: add_negative_keywords, pause_campaign, enable_campaign, pause_keyword, enable_keyword, pause_ad_group, enable_ad_group, set_daily_budget. Point out any ⚠ line in the summary to the user before they approve.",
     inputSchema: { customer_id: customerId, changes: z.array(PublicChangeSchema).min(1).describe("Changes to propose; several can go in one proposal") },
     annotations: { title: "Propose changes (writes nothing)", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap("propose_changes", ({ customer_id, changes }: { customer_id: string; changes: unknown[] }) => session().propose(customer_id, changes)));

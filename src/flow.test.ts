@@ -33,6 +33,7 @@ class FakeAds {
   mutations: { service: string; operations: any[]; validateOnly: boolean }[] = [];
   negatives: { text: string; matchType: string; rn: string }[] = [];
   kwStatus = "ENABLED";
+  campaignStatus = "ENABLED";
   async listAccessibleCustomers() { return ["1112223333"]; }
   async search(_cid: string, q: string): Promise<any[]> {
     if (q.includes("FROM customer_client")) {
@@ -45,7 +46,7 @@ class FakeAds {
       return [{ adGroupCriterion: { status: this.kwStatus, keyword: { text: "invoice", matchType: "BROAD" } }, adGroup: { name: "AG" }, campaign: { name: "Search" } }];
     }
     if (q.includes("FROM campaign")) {
-      return [{ campaign: { id: "10", name: "Search", status: "ENABLED", advertisingChannelType: "SEARCH" },
+      return [{ campaign: { id: "10", name: "Search", status: this.campaignStatus, advertisingChannelType: "SEARCH" },
         campaignBudget: { resourceName: "customers/1112223333/campaignBudgets/99", amountMicros: "20000000", explicitlyShared: false },
         metrics: { costMicros: "200000000", clicks: "80", impressions: "900", conversions: 4, conversionsValue: 400 } }];
     }
@@ -72,6 +73,7 @@ class FakeAds {
           return { resourceName: rn };
         }
         if (op.remove) { this.negatives = this.negatives.filter((n) => n.rn !== op.remove); return { resourceName: op.remove }; }
+        if (op.update?.status && service === "campaigns") { this.campaignStatus = op.update.status; return { resourceName: op.update.resourceName }; }
         if (op.update?.status) { this.kwStatus = op.update.status; return { resourceName: op.update.resourceName }; }
         return { resourceName: op.update?.resourceName };
       }),
@@ -410,6 +412,36 @@ describe("OAuth + MCP end to end", () => {
     // (Disconnecting for real would end the shared test user's connection; covered by the tool's own path.)
     expect((await fetch(`${base}/account`, { headers: { cookie: "cs_account=forged" } })).status).toBe(200);
     expect(await (await fetch(`${base}/account`, { headers: { cookie: "cs_account=forged" } })).text()).toContain("Sign in with Google");
+  });
+
+  it("pauses and re-enables a campaign, warning before it spends again; flags big budget increases", async () => {
+    db.prepare("UPDATE users SET plan = 'pro'").run();  // the free applies were used up above
+    const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };
+
+    const pause = await propose([{ type: "pause_campaign", campaign_id: "10" }]);
+    expect(pause.summary).toContain('Pause campaign "Search" (now ENABLED)');
+    expect(pause.summary).not.toContain("⚠");
+    await call(token, "apply_changes", { proposal_id: pause.proposal_id });
+    expect(ads.campaignStatus).toBe("PAUSED");
+
+    // Pausing again is already in place: refused, nothing stored.
+    await expect(propose([{ type: "pause_campaign", campaign_id: "10" }])).rejects.toThrow("already in place");
+
+    const enable = await propose([{ type: "enable_campaign", campaign_id: "10" }]);
+    expect(enable.summary).toContain("⚠ it starts spending again, up to an average of 20.00/day");
+    await call(token, "apply_changes", { proposal_id: enable.proposal_id });
+    expect(ads.campaignStatus).toBe("ENABLED");
+
+    // Undo of the pause re-enables; undo of the enable pauses.
+    const u = await call(token, "undo_changes", { proposal_id: enable.proposal_id });
+    expect(u.json.summary).toContain('Pause campaign "Search"');
+    await call(token, "apply_changes", { proposal_id: u.json.proposal_id });
+    expect(ads.campaignStatus).toBe("PAUSED");
+
+    const big = await propose([{ type: "set_daily_budget", campaign_id: "10", amount: 100 }]);
+    expect(big.summary).toContain("from 20.00 to 100.00 ⚠ 5.0× the current budget");
+    const small = await propose([{ type: "set_daily_budget", campaign_id: "10", amount: 30 }]);
+    expect(small.summary).not.toContain("⚠");
   });
 
   it("refuses write GAQL", async () => {

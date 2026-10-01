@@ -36,6 +36,9 @@ const PUBLIC_CHANGES = [
   }).describe("Block searches containing these words in one campaign"),
   z.object({ type: z.literal("pause_keyword"), ad_group_id: adGroupId, criterion_id: criterionId }).describe("Pause one keyword"),
   z.object({ type: z.literal("enable_keyword"), ad_group_id: adGroupId, criterion_id: criterionId }).describe("Re-enable one paused keyword"),
+  z.object({ type: z.literal("pause_campaign"), campaign_id: campaignId }).describe("Pause a whole campaign (stops all its spend)"),
+  z.object({ type: z.literal("enable_campaign"), campaign_id: campaignId })
+    .describe("Turn a paused campaign back on. It starts spending again; the summary says how much"),
   z.object({ type: z.literal("pause_ad_group"), ad_group_id: adGroupId }).describe("Pause one ad group"),
   z.object({ type: z.literal("enable_ad_group"), ad_group_id: adGroupId }).describe("Re-enable one paused ad group"),
   z.object({
@@ -60,7 +63,7 @@ export type Change = z.infer<typeof ChangeSchema>;
 /** A change resolved against the account: the exact API operation plus what it looked like before. */
 export interface ResolvedChange {
   change: Change;
-  service: "campaignCriteria" | "adGroupCriteria" | "adGroups" | "campaignBudgets";
+  service: "campaignCriteria" | "adGroupCriteria" | "adGroups" | "campaignBudgets" | "campaigns";
   operations: object[];
   describe: string;
   /** Filled at resolve time when the inverse is knowable up front (pause/enable/budget). */
@@ -120,6 +123,29 @@ export async function resolveChange(
           : { type: target === "PAUSED" ? "enable_keyword" : "pause_keyword", ad_group_id: change.ad_group_id, criterion_id: change.criterion_id },
       };
     }
+    case "pause_campaign":
+    case "enable_campaign": {
+      const [c] = await q(`SELECT campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared
+        FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
+      const before = c.campaign.status as string;
+      if (before === "REMOVED") throw new Error(`Campaign "${c.campaign.name}" was removed in Google Ads and can't be changed.`);
+      const target = change.type === "pause_campaign" ? "PAUSED" : "ENABLED";
+      const budget = fromMicros(c.campaignBudget?.amountMicros);
+      // Turning a campaign on is the one change that takes spend from zero to real money: say so in the summary.
+      const warn = target === "ENABLED" && before !== "ENABLED"
+        ? ` ⚠ it starts spending again, up to an average of ${budget.toFixed(2)}/day${c.campaignBudget?.explicitlyShared ? " from a shared budget" : ""}`
+        : "";
+      return {
+        change,
+        service: "campaigns",
+        operations: before === target ? []
+          : [{ update: { resourceName: `customers/${customerId}/campaigns/${change.campaign_id}`, status: target }, updateMask: "status" }],
+        describe: `${target === "PAUSED" ? "Pause" : "Enable"} campaign "${c.campaign.name}" (now ${before})${warn}`,
+        inverse: before === target ? undefined
+          : { type: target === "PAUSED" ? "enable_campaign" : "pause_campaign", campaign_id: change.campaign_id },
+      };
+    }
     case "pause_ad_group":
     case "enable_ad_group": {
       const [g] = await q(`SELECT ad_group.name, ad_group.status, campaign.name FROM ad_group WHERE ad_group.id = ${change.ad_group_id}`);
@@ -148,7 +174,7 @@ export async function resolveChange(
         service: "campaignBudgets",
         operations: [{ update: { resourceName: c.campaignBudget.resourceName, amountMicros: toMicros(change.amount) }, updateMask: "amount_micros" }],
         describe: `Set daily budget of campaign "${c.campaign.name}" from ${before.toFixed(2)} to ${change.amount.toFixed(2)}` +
-          (change.amount > before * 2 ? " ⚠ more than doubles it" : ""),
+          (before > 0 && change.amount > before * 2 ? ` ⚠ ${(change.amount / before).toFixed(1)}× the current budget` : ""),
         inverse: { type: "set_daily_budget", campaign_id: change.campaign_id, amount: before },
       };
     }

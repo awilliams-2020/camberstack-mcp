@@ -21,9 +21,10 @@ Hosted: **https://camberstack.io/mcp** (free plan: unlimited diagnosis + 3 appli
 | `billing` | no | plan, free applies left, and a personal upgrade or manage-billing link |
 | `discard_proposal`, `change_history`, `disconnect` | | |
 
-Writes are limited to: add negative keywords, pause/enable a keyword or ad group, set a
-campaign's daily budget (never a shared budget). No campaign creation, bid strategy changes or
-deletions of anything the user built.
+Writes are limited to: add negative keywords, pause/enable a campaign, ad group or keyword, set a
+campaign's daily budget (never a shared budget). Enabling a campaign and more-than-doubling a budget
+carry a ⚠ line in the proposal summary. No campaign creation, bid strategy changes or deletions of
+anything the user built.
 
 ## How auth works
 

@@ -146,10 +146,11 @@ plus 6 exact negatives. Want me to prepare that?</p>
 <table>
 <tr><th>Change</th><th>Undo</th></tr>
 <tr><td>Add negative keywords to a campaign</td><td>Removes exactly the negatives it added</td></tr>
-<tr><td>Pause or re-enable a keyword or ad group</td><td>Restores the previous status</td></tr>
+<tr><td>Pause or re-enable a campaign, ad group or keyword</td><td>Restores the previous status</td></tr>
 <tr><td>Change a campaign's daily budget (not shared budgets)</td><td>Restores the previous amount</td></tr>
 </table>
-<p class="muted">It cannot create or delete campaigns, change bid strategies, touch billing, or edit anything outside Google Ads.
+<p class="muted">Turning a campaign back on, or more than doubling a budget, is flagged with a warning in the proposal before you approve it.
+It cannot create or delete campaigns, change bid strategies, touch billing, or edit anything outside Google Ads.
 Any question beyond these tools is answered with read-only queries.</p>
 
 <h2 id="setup">Connect</h2>
@@ -255,9 +256,10 @@ not account-wide.</li>
 applied change can be undone with one more message.</p>
 
 <h2>What it can and can't change</h2>
-<p>It can add negative keywords, pause or re-enable a keyword or ad group, and set a campaign's daily budget. It can't create
-campaigns, change bid strategies, turn a paused campaign back on, or delete anything you built. Every change is first
-checked with Google as a dry run, shown to you in plain English, and logged.</p>
+<p>It can add negative keywords, pause or re-enable a campaign, ad group or keyword, and set a campaign's daily budget.
+It can't create campaigns, change bid strategies, or delete anything you built. Turning a campaign back on, or more than
+doubling a budget, comes with a warning in the proposal. Every change is first checked with Google as a dry run, shown to
+you in plain English, and logged.</p>
 
 <h2>How it compares with Google's own Google Ads MCP</h2>
 <p>Google publishes an open-source Google Ads MCP server. As of September 2026 it is <strong>read-only</strong>, and you run it
@@ -416,7 +418,7 @@ export function llmsTxt(baseUrl: string): string {
 
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
 - Tools: list_accounts, account_overview, find_wasted_spend, run_gaql, propose_changes, apply_changes, undo_changes, discard_proposal, change_history, billing, disconnect
-- Writes are limited to: negative keywords, pause/enable keyword or ad group, daily budget. Every applied change can be undone.
+- Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget. Every applied change can be undone.
 - Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes. Undo is always free.
 - [Setup](${baseUrl}/#setup)
 - [Pricing](${baseUrl}/#pricing)
