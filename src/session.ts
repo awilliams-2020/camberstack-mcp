@@ -7,6 +7,7 @@ import type { DB, ProposalRow, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { decrypt } from "./crypto.js";
 import { AdsClient, refreshGoogleToken, revokeGoogleToken, type GoogleCreds } from "./google.js";
+import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DemoAds } from "./demo.js";
 import { analyzeWaste, round, type CampaignRow, type ConversionActionRow, type KeywordRow, type SearchTermRow } from "./analysis.js";
 import {
   ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, resolveChange, summarize,
@@ -38,14 +39,30 @@ export interface SessionDeps {
 
 export class NotConnectedError extends Error {}
 
+/** The Google Ads calls the tools make; the demo account answers the same ones. */
+type Ads = Pick<AdsClient, "listAccessibleCustomers" | "search" | "mutate">;
+
+/** Sends the demo account's calls to the demo and everything else to Google. */
+function routed(google: Ads, demo: DemoAds): Ads {
+  return {
+    listAccessibleCustomers: () => google.listAccessibleCustomers(),
+    search: (cid, query, login) => (cid === DEMO_CID ? demo.search(cid, query) : google.search(cid, query, login)),
+    mutate: (cid, service, ops, opts) => (cid === DEMO_CID ? demo.mutate(cid, service, ops, opts) : google.mutate(cid, service, ops, opts)),
+  };
+}
+
+const DEMO_ACCOUNT: Account = { customerId: DEMO_CID, name: DEMO_NAME, currency: "USD", manager: false, loginCustomerId: null };
+export const isDemo = (customerId: string | null | undefined) => (customerId ?? "").replace(/-/g, "") === DEMO_CID;
+
 export class UserSession {
-  readonly ads: AdsClient;
+  readonly ads: Ads;
   private accountsCache?: { at: number; list: Account[] };
   /** Accounts the login can see but Google refused to read, from the last accounts() call. */
   lastUnreadable: { customerId: string; error: string }[] = [];
 
   constructor(private deps: SessionDeps, readonly user: UserRow) {
-    this.ads = deps.adsFactory?.(user) ?? new AdsClient(() => this.googleAccessToken(), deps.google.developerToken);
+    const google = deps.adsFactory?.(user) ?? new AdsClient(() => this.googleAccessToken(), deps.google.developerToken);
+    this.ads = routed(google, new DemoAds(deps.db, user.id));
   }
 
   static load(deps: SessionDeps, userId: string): UserSession {
@@ -79,8 +96,9 @@ export class UserSession {
   /** Free applies left; null for Pro (unlimited). Undo proposals never count. */
   freeAppliesLeft(): number | null {
     if (this.isPro) return null;
-    const used = (this.deps.db.prepare("SELECT count(*) n FROM proposals WHERE user_id = ? AND status = 'applied' AND undo_of IS NULL")
-      .get(this.user.id) as { n: number }).n;
+    // Demo changes never count: trying the product must not spend the real allowance.
+    const used = (this.deps.db.prepare("SELECT count(*) n FROM proposals WHERE user_id = ? AND status = 'applied' AND undo_of IS NULL AND customer_id != ?")
+      .get(this.user.id, DEMO_CID) as { n: number }).n;
     return Math.max(0, this.deps.freeApplies - used);
   }
 
@@ -104,9 +122,16 @@ export class UserSession {
 
   async accounts(): Promise<Account[]> {
     if (this.accountsCache && Date.now() - this.accountsCache.at < 10 * 60_000) return this.accountsCache.list;
-    const roots = await this.ads.listAccessibleCustomers();
     const out = new Map<string, Account>();
     const unreadable: { customerId: string; error: string }[] = [];
+    let roots: string[] = [];
+    try {
+      roots = await this.ads.listAccessibleCustomers();
+    } catch (e) {
+      // A login with no Google Ads at all (NOT_ADS_USER) gets the demo account instead of a dead end.
+      if (e instanceof NotConnectedError) throw e;
+      unreadable.push({ customerId: "this Google login", error: (e as Error).message });
+    }
     for (const root of roots) {
       let rows: any[] = [];
       try {
@@ -134,9 +159,9 @@ export class UserSession {
       }
     }
     const list = [...out.values()].sort((a, b) => Number(a.manager) - Number(b.manager) || a.name.localeCompare(b.name));
-    if (!list.length && unreadable.length) {
-      throw new Error(`This login can see ${unreadable.length} Google Ads account(s) but none could be read. ${unreadable[0]!.error}`);
-    }
+    // Nothing readable (no Ads access, or blocked e.g. by 2-Step Verification): offer the demo account,
+    // and keep the reason in lastUnreadable so list_accounts still says why the real ones are missing.
+    if (!list.some((a) => !a.manager)) list.push(DEMO_ACCOUNT);
     this.lastUnreadable = unreadable;
     this.accountsCache = { at: Date.now(), list };
     return list;
@@ -144,6 +169,7 @@ export class UserSession {
 
   async account(customerId: string): Promise<Account> {
     const cid = customerId.replace(/-/g, "");
+    if (cid === DEMO_CID) return DEMO_ACCOUNT;  // anyone can try the demo by its id
     const a = (await this.accounts()).find((x) => x.customerId === cid);
     if (!a) throw new Error(`Account ${customerId} is not accessible with this Google login. Call list_accounts to see the ones that are.`);
     if (a.manager) throw new Error(`${a.name} (${cid}) is a manager account; pick one of the client accounts under it.`);
@@ -177,6 +203,7 @@ export class UserSession {
     const conv = campaigns.reduce((s, c) => s + c.conversions, 0);
     return {
       account: { customer_id: a.customerId, name: a.name, currency: a.currency },
+      ...(isDemo(a.customerId) ? { note: DEMO_NOTE } : {}),
       window: `last ${days} days`,
       totals: { cost: round(cost), conversions: round(conv), cost_per_conversion: conv > 0 ? round(cost / conv) : null },
       campaigns,
@@ -225,14 +252,14 @@ export class UserSession {
     const existingNegatives = new Set(negRows.map((r) =>
       `${r.campaign.id}|${String(r.campaignCriterion.keyword?.text ?? "").toLowerCase()}|${r.campaignCriterion.keyword?.matchType}`));
     const report = analyzeWaste({ window: `last ${days} days`, currency: a.currency, terms, keywords, campaigns, actions, existingNegatives });
-    return { account: { customer_id: a.customerId, name: a.name, currency: a.currency }, ...report };
+    return { account: { customer_id: a.customerId, name: a.name, currency: a.currency }, ...(isDemo(a.customerId) ? { note: DEMO_NOTE } : {}), ...report };
   }
 
   async runQuery(customerId: string, query: string) {
     if (!/^\s*select\b/i.test(query)) throw new Error("Only SELECT (read-only GAQL) queries are allowed. Use propose_changes to change anything.");
     const a = await this.account(customerId);
     const rows = await this.ads.search(a.customerId, query, a.loginCustomerId);
-    return { rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
+    return { ...(isDemo(a.customerId) ? { note: DEMO_NOTE } : {}), rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
   }
 
   // ---------------------------------------------------------------- write
@@ -260,7 +287,7 @@ export class UserSession {
   async apply(proposalId: string) {
     const p = this.proposal(proposalId);
     // Undo is always free: a paywall must never stand between a user and reversing a change.
-    const left = p.undo_of ? null : this.freeAppliesLeft();
+    const left = p.undo_of || isDemo(p.customer_id) ? null : this.freeAppliesLeft();
     if (left === 0) {
       const url = this.deps.billingLink?.("upgrade", this.user.id);
       throw new Error(`This account has used its ${this.deps.freeApplies} free applied changes. Camberstack Pro ($49/month, cancel any time) applies changes without limit. `

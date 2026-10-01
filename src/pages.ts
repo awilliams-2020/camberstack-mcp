@@ -165,6 +165,10 @@ Any question beyond these tools is answered with read-only queries.</p>
 <h3>Cursor, VS Code, others</h3>
 <pre>{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }</pre>
 <p class="muted">Your AI app handles sign-in. Google will show "Camberstack wants to access your Google Ads" before anything is shared.</p>
+<h3>Want to look first?</h3>
+<p>Connect, then ask <em>"Show me Camberstack's demo account"</em>. It's a sample plumbing business with six months of
+campaigns and search terms, so you can try diagnosis, proposals, applying and undo without touching a real account.
+Changes there never reach Google and don't use your free changes. A Google login with no Google Ads access gets the demo automatically.</p>
 
 <h2 id="pricing">Pricing</h2>
 <div class="grid">
@@ -419,6 +423,7 @@ export function llmsTxt(baseUrl: string): string {
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
 - Tools: list_accounts, account_overview, find_wasted_spend, run_gaql, propose_changes, apply_changes, undo_changes, discard_proposal, change_history, billing, disconnect
 - Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget. Every applied change can be undone.
+- Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
 - Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes. Undo is always free.
 - [Setup](${baseUrl}/#setup)
 - [Pricing](${baseUrl}/#pricing)

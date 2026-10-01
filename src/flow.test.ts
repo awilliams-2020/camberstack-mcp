@@ -336,8 +336,51 @@ describe("OAuth + MCP end to end", () => {
     const fresh = await connect();
     const r = await call(fresh, "list_accounts");
     ads.search = realSearch;
-    expect(r.isError).toBe(true);
-    expect(r.text).toContain("ACTION_NOT_PERMITTED");
+    // Not a dead end: the demo account is offered, and Google's reason is still reported.
+    expect(r.isError).toBe(false);
+    expect(r.json.accounts.map((x: any) => x.customerId)).toEqual(["0000000001"]);
+    expect(r.json.unreadable[0].error).toContain("ACTION_NOT_PERMITTED");
+    expect(r.json.note).toContain("demo");
+  });
+
+  it("runs the whole flow on the demo account without touching Google or the free allowance", async () => {
+    const before = ads.mutations.length;
+    const left = (await call(token, "billing", {})).json;
+    const w = (await call(token, "find_wasted_spend", { customer_id: "000-000-0001", days: 180 })).json;
+    expect(w.note).toContain("Sample data");
+    expect(w.tracking.status).toBe("ok");
+    expect(w.campaignsToReview.map((c: any) => c.name)).toContain("Drain Cleaning – Search");
+    const neg = w.suggestedNegatives.map((n: any) => `${n.campaignName}|${n.text}`);
+    expect(neg).toContain("Emergency Plumbing – Search|jobs");
+    // "free" converted in Water Heaters, so it is never suggested there.
+    expect(neg.some((n: string) => n.startsWith("Water Heaters") && n.endsWith("|free"))).toBe(false);
+
+    const q = (await call(token, "run_gaql", { customer_id: "0000000001",
+      query: "SELECT ad_group_criterion.keyword.text, metrics.cost_micros FROM keyword_view WHERE campaign.id = 2003 AND segments.date DURING LAST_30_DAYS ORDER BY metrics.cost_micros DESC LIMIT 2" })).json;
+    expect(q.rows).toHaveLength(2);
+    expect(q.rows[0].adGroupCriterion.keyword.text).toBe("drain cleaning");
+
+    const p = (await call(token, "propose_changes", { customer_id: "0000000001", changes: [
+      { type: "pause_campaign", campaign_id: "2003" },
+      { type: "add_negative_keywords", campaign_id: "2001", keywords: [{ text: "jobs", match_type: "PHRASE" }] },
+      { type: "set_daily_budget", campaign_id: "2001", amount: 50 },
+    ] })).json;
+    expect(p.summary).toContain('Pause campaign "Drain Cleaning – Search"');
+    const a = (await call(token, "apply_changes", { proposal_id: p.proposal_id })).json;
+    expect(a.status).toBe("applied");
+    expect(a.free_applies_left).toBeUndefined();
+    const after = (await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).json;
+    expect(after.campaigns.find((c: any) => c.campaign_id === "2003").status).toBe("PAUSED");
+    expect(after.campaigns.find((c: any) => c.campaign_id === "2001").daily_budget).toBe(50);
+
+    const u = (await call(token, "undo_changes", { proposal_id: p.proposal_id })).json;
+    await call(token, "apply_changes", { proposal_id: u.proposal_id });
+    const reverted = (await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).json;
+    expect(reverted.campaigns.find((c: any) => c.campaign_id === "2003").status).toBe("ENABLED");
+    expect(reverted.campaigns.find((c: any) => c.campaign_id === "2001").daily_budget).toBe(40);
+
+    expect(ads.mutations.length).toBe(before);  // Google was never called
+    expect((await call(token, "billing", {})).json).toEqual(left);  // allowance untouched
   });
 
   it("logs each tool call by name, without arguments or results", async () => {

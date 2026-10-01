@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { PublicChangeSchema } from "./changes.js";
-import type { UserSession } from "./session.js";
+import { isDemo, type UserSession } from "./session.js";
 
 export const SERVER_NAME = "camberstack";
 export const SERVER_VERSION = "0.1.0";
@@ -10,7 +10,8 @@ const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Workflow: list_accounts → account_overview → find_wasted_spend → propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
 Free accounts get 3 applied changes; undo is always free. If apply_changes reports the limit, show the user the upgrade link it returns, word for word.
-Read find_wasted_spend's "tracking" section before recommending cuts: if conversion tracking is broken or warning, say so first.`;
+Read find_wasted_spend's "tracking" section before recommending cuts: if conversion tracking is broken or warning, say so first.
+Account 000-000-0001 is a demo with sample data: anyone can try every tool on it, and changes there never touch Google. Always say when you are using it.`;
 
 const customerId = z.string().describe("Google Ads customer ID, with or without dashes (from list_accounts)");
 const days = z.number().int().min(1).max(365).default(30).describe("Look-back window in days, ending yesterday");
@@ -59,7 +60,13 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   }, wrap("list_accounts", async () => {
     const s = session();
     const accounts = await s.accounts();
-    return s.lastUnreadable.length ? { accounts, unreadable: s.lastUnreadable } : { accounts };
+    const demo = accounts.some((a) => isDemo(a.customerId));
+    return {
+      accounts,
+      ...(s.lastUnreadable.length ? { unreadable: s.lastUnreadable } : {}),
+      ...(demo ? { note: "This Google login has no readable Google Ads account, so the demo account (sample data, a fictional business) is offered. "
+        + "Tell the user plainly that it is a demo, and if `unreadable` is present, explain why their real accounts are missing." } : {}),
+    };
   }));
 
   server.registerTool("account_overview", {

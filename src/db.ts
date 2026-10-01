@@ -93,6 +93,13 @@ CREATE TABLE IF NOT EXISTS web_sessions (
   expires_at  INTEGER NOT NULL
 );
 DROP TABLE IF EXISTS admin_sessions;  -- replaced by web_sessions 2026-10-01
+
+-- Each user's copy of the demo account (demo.ts): only what their changes altered, as JSON.
+CREATE TABLE IF NOT EXISTS demo_state (
+  user_id     TEXT PRIMARY KEY,
+  state       TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
 `;
 
 export function openDb(dataDir: string): DB {

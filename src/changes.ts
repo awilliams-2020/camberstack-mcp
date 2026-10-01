@@ -74,7 +74,7 @@ const toMicros = (x: number) => String(Math.round(x * 1_000_000));
 const fromMicros = (m: unknown) => Number(m ?? 0) / 1_000_000;
 
 export async function resolveChange(
-  ads: AdsClient, customerId: string, login: string | null, change: Change,
+  ads: Pick<AdsClient, "search">, customerId: string, login: string | null, change: Change,
 ): Promise<ResolvedChange> {
   const q = (query: string) => ads.search(customerId, query, login);
   switch (change.type) {
