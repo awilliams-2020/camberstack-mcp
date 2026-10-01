@@ -13,7 +13,8 @@ import { CamberstackProvider, MCP_SCOPE } from "./provider.js";
 import { UserSession, type SessionDeps } from "./session.js";
 import { buildServer, SERVER_VERSION } from "./tools.js";
 import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
-import { ADMIN_STATE, mountAdmin } from "./admin.js";
+import { mountAdmin } from "./admin.js";
+import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { createHash } from "node:crypto";
 import { errorPage, infoPage, homePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
@@ -77,11 +78,19 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     app.get(p, (_q, r) => { r.status(410).type("html").send(errorPage(cfg.baseUrl, "That page belonged to an earlier product and has been removed.")); });
   }
 
+  const account = mountAccount(app, {
+    db, google: cfg.google, baseUrl: cfg.baseUrl, fetch: overrides.fetch,
+    session: (userId) => UserSession.load(deps, userId), billingLink: (kind, userId) => billing.link(kind, userId),
+  });
+
   app.get("/oauth/google/callback", async (req, res) => {
-    // One registered redirect URI serves both flows; admin sign-ins are told apart by their state.
-    if (typeof req.query.state === "string" && req.query.state.startsWith(ADMIN_STATE)) {
-      try { await admin.completeCallback(req, res); } catch (e) { res.status(400).type("html").send(errorPage(cfg.baseUrl, (e as Error).message)); }
-      return;
+    // One registered redirect URI serves every Google flow. Web sign-ins (/admin, /account) are told
+    // apart by their state prefix and finish on their own path, where their session cookie is scoped.
+    for (const site of [admin, account]) {
+      if (site.owns(req.query.state)) {
+        res.redirect(302, `${site.callbackPath}?${new URLSearchParams(req.query as Record<string, string>)}`);
+        return;
+      }
     }
     try {
       const to = await provider.completeGoogleCallback({

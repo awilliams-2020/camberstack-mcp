@@ -161,6 +161,16 @@ async function connect(): Promise<string> {
   return (await tok.json()).access_token;
 }
 
+/** Google → our shared callback → the page's own callback, which sets its session cookie. */
+async function signIn(google: URL): Promise<string> {
+  const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${google.searchParams.get("state")}`, { redirect: "manual" });
+  expect(back.status).toBe(302);
+  const hop = await fetch(new URL(back.headers.get("location")!, base), { redirect: "manual" });
+  expect(hop.status).toBe(302);
+  expect(hop.headers.get("set-cookie")).toContain("HttpOnly");
+  return hop.headers.get("set-cookie")!.split(";")[0]!;
+}
+
 let rpcId = 0;
 async function call(token: string, name: string, args: object = {}) {
   const res = await fetch(`${base}/mcp`, {
@@ -339,10 +349,8 @@ describe("OAuth + MCP end to end", () => {
     const login = await fetch(`${base}/admin/login`, { redirect: "manual" });
     const g = new URL(login.headers.get("location")!);
     expect(g.searchParams.get("scope")).toBe("openid email");
-    const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
-    expect(back.status).toBe(302);
-    const cookie = back.headers.get("set-cookie")!.split(";")[0]!;
-    expect(back.headers.get("set-cookie")).toContain("HttpOnly");
+    const cookie = await signIn(g);
+    expect(cookie).toMatch(/^cs_admin=/);
     const page = await fetch(`${base}/admin?days=30&internal=1`, { headers: { cookie } });
     expect(page.status).toBe(200);
     const html = await page.text();
@@ -352,9 +360,29 @@ describe("OAuth + MCP end to end", () => {
     const json = await (await fetch(`${base}/admin?format=json`, { headers: { cookie } })).json();
     expect(json.funnel.all.connected).toBe(0);
     // A replayed state is refused.
-    const replay = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
+    const replay = await fetch(`${base}/admin/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
     expect(replay.status).toBe(400);
     expect((await fetch(`${base}/admin`, { headers: { cookie: "cs_admin=forged" }, redirect: "manual" })).status).toBe(302);
+  });
+
+  it("shows a connected user their plan and changes at /account, and disconnects from there", async () => {
+    expect(await (await fetch(`${base}/account`)).text()).toContain("Sign in with Google");
+    const login = await fetch(`${base}/account/login`, { redirect: "manual" });
+    const g = new URL(login.headers.get("location")!);
+    expect(g.searchParams.get("scope")).toBe("openid email");
+    const cookie = await signIn(g);
+    expect(cookie).toMatch(/^cs_account=/);
+    const html = await (await fetch(`${base}/account`, { headers: { cookie } })).text();
+    expect(html).toContain("owner@example.com");
+    expect(html).toContain("applied, then undone");
+    expect(html).toContain('Remove 1 negative keyword');
+    // Disconnect needs the explicit confirmation.
+    const noConfirm = await fetch(`${base}/account/disconnect`, { method: "POST", headers: { cookie }, redirect: "manual" });
+    expect(noConfirm.status).toBe(303);
+    expect(db.prepare("SELECT enc_refresh FROM users").get()).not.toMatchObject({ enc_refresh: null });
+    // (Disconnecting for real would end the shared test user's connection; covered by the tool's own path.)
+    expect((await fetch(`${base}/account`, { headers: { cookie: "cs_account=forged" } })).status).toBe(200);
+    expect(await (await fetch(`${base}/account`, { headers: { cookie: "cs_account=forged" } })).text()).toContain("Sign in with Google");
   });
 
   it("refuses write GAQL", async () => {

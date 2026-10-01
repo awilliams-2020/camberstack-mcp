@@ -87,9 +87,10 @@ export class UserSession {
   plan() {
     const left = this.freeAppliesLeft();
     const upgrade = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
+    const account_page = "https://camberstack.io/account";
     return this.isPro
-      ? { plan: "pro", applies: "unlimited", manage_billing: this.user.stripe_customer ? this.deps.billingLink?.("billing", this.user.id) ?? null : null }
-      : { plan: "free", free_applies_left: left, free_applies_total: this.deps.freeApplies,
+      ? { plan: "pro", account_page, applies: "unlimited", manage_billing: this.user.stripe_customer ? this.deps.billingLink?.("billing", this.user.id) ?? null : null }
+      : { plan: "free", account_page, free_applies_left: left, free_applies_total: this.deps.freeApplies,
           always_free: "diagnosis, proposals, change history and undo",
           pro: "unlimited applied changes, $49/month, cancel any time", upgrade_url: upgrade,
           note: upgrade ? "Show the user upgrade_url as a link; it is personal and expires in 7 days." : "Upgrades are not open yet." };

@@ -1,20 +1,13 @@
 /**
- * /admin: the operator's live view of usage (report.ts). Sign-in is Google identity only (openid
- * email, no Ads scope), allowed for ADMIN_EMAILS; with that list empty the routes don't exist.
- *
- * It reuses the registered Google redirect URI (/oauth/google/callback): admin states start with
- * ADMIN_STATE, and server.ts routes those here. That keeps the verified OAuth client untouched.
+ * /admin: the operator's live view of usage (report.ts). Google sign-in (signin.ts) allowed for
+ * ADMIN_EMAILS; with that list empty the routes don't exist.
  */
-import express, { type Express, type Request, type Response } from "express";
+import type { Express } from "express";
 import type { DB } from "./db.js";
-import { now } from "./db.js";
-import { randomToken, sha256 } from "./crypto.js";
-import { exchangeGoogleCode, googleSignInUrl, idTokenClaims, type GoogleCreds } from "./google.js";
+import type { GoogleCreds } from "./google.js";
+import { SignIn } from "./signin.js";
 import { buildReport, type Report } from "./report.js";
-
-export const ADMIN_STATE = "adm_";
-const COOKIE = "cs_admin";
-const SESSION_TTL = 12 * 3600;
+import { now } from "./db.js";
 
 export interface AdminDeps {
   db: DB;
@@ -26,26 +19,11 @@ export interface AdminDeps {
   fetch?: typeof fetch;
 }
 
-function cookie(req: Request, name: string): string | undefined {
-  for (const part of (req.headers.cookie ?? "").split(";")) {
-    const [k, ...v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
-  }
-  return undefined;
-}
-
-export function mountAdmin(app: Express, d: AdminDeps): { completeCallback: (req: Request, res: Response) => Promise<void> } {
-  const redirectUri = `${d.baseUrl}/oauth/google/callback`;
-  const secure = d.baseUrl.startsWith("https://");
-  const setCookie = (res: Response, value: string, maxAge: number) =>
-    res.setHeader("Set-Cookie", `${COOKIE}=${value}; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`);
-
-  const sessionEmail = (req: Request): string | null => {
-    const t = cookie(req, COOKIE);
-    if (!t) return null;
-    const row = d.db.prepare("SELECT email, expires_at FROM admin_sessions WHERE token_hash = ?").get(sha256(t)) as
-      { email: string; expires_at: number } | undefined;
-    return row && row.expires_at > now() && d.adminEmails.has(row.email) ? row.email : null;
+export function mountAdmin(app: Express, d: AdminDeps): SignIn {
+  const auth = new SignIn(d, "adm_", "cs_admin", "/admin", 12 * 3600);
+  const email = (req: Parameters<SignIn["subject"]>[0]) => {
+    const e = auth.subject(req);
+    return e && d.adminEmails.has(e) ? e : null;
   };
 
   app.use("/admin", (_req, res, next) => {
@@ -57,45 +35,28 @@ export function mountAdmin(app: Express, d: AdminDeps): { completeCallback: (req
 
   app.get("/admin/login", (_req, res) => {
     if (!d.google.clientId) { res.status(503).send("Google sign-in is not configured."); return; }
-    const id = ADMIN_STATE + randomToken(24);
-    d.db.prepare("INSERT INTO pending_auth (id, client_id, params, created_at) VALUES (?, '__admin__', '{}', ?)").run(id, now());
-    res.redirect(302, googleSignInUrl(d.google, redirectUri, id));
+    auth.start(res);
   });
-
-  app.post("/admin/logout", (req, res) => {
-    const t = cookie(req, COOKIE);
-    if (t) d.db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?").run(sha256(t));
-    setCookie(res, "", 0);
-    res.redirect(303, "/");
+  app.get("/admin/callback", async (req, res) => {
+    const who = await auth.finish(req);
+    if (!who) { res.status(400).send('Sign-in expired or was cancelled. <a href="/admin/login">Try again</a>.'); return; }
+    if (!d.adminEmails.has(who.email)) { res.status(403).send("Not an admin account."); return; }
+    auth.open(res, who.email);
+    res.redirect(302, "/admin");
   });
+  app.post("/admin/logout", (req, res) => { auth.close(req, res); res.redirect(303, "/"); });
 
   app.get("/admin", (req, res) => {
-    const email = sessionEmail(req);
-    if (!email) { res.redirect(302, "/admin/login"); return; }
+    const who = email(req);
+    if (!who) { res.redirect(302, "/admin/login"); return; }
     const days = [1, 7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
     const all = req.query.internal === "1";
     const report = buildReport(d.db, { days, exclude: all ? [] : [...d.internalEmails] });
     if (req.query.format === "json") { res.json(report); return; }
-    res.type("html").send(adminPage(report, { email, days, all, internal: d.internalEmails.size }));
+    res.type("html").send(adminPage(report, { email: who, days, all, internal: d.internalEmails.size }));
   });
 
-  return {
-    async completeCallback(req, res) {
-      const state = typeof req.query.state === "string" ? req.query.state : "";
-      const code = typeof req.query.code === "string" ? req.query.code : "";
-      const row = d.db.prepare("SELECT created_at FROM pending_auth WHERE id = ? AND client_id = '__admin__'").get(state) as
-        { created_at: number } | undefined;
-      d.db.prepare("DELETE FROM pending_auth WHERE id = ?").run(state);
-      if (!row || row.created_at < now() - 600 || !code) { res.status(400).send("Sign-in expired or was cancelled. <a href=\"/admin/login\">Try again</a>."); return; }
-      const g = await exchangeGoogleCode(d.google, code, redirectUri, d.fetch);
-      const claims = g.id_token ? idTokenClaims(g.id_token) : null;
-      if (!claims?.emailVerified || !d.adminEmails.has(claims.email)) { res.status(403).send("Not an admin account."); return; }
-      const token = randomToken();
-      d.db.prepare("INSERT INTO admin_sessions (token_hash, email, expires_at) VALUES (?, ?, ?)").run(sha256(token), claims.email, now() + SESSION_TTL);
-      setCookie(res, token, SESSION_TTL);
-      res.redirect(302, "/admin");
-    },
-  };
+  return auth;
 }
 
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

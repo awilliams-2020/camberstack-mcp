@@ -7,6 +7,7 @@ const CONTACT = "adam@camberstack.io";
 const UPDATED = "2026-10-01";
 
 const CSS = `
+.linkish{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
 :root{--bg:#fbfaf7;--fg:#1c1b19;--muted:#5d5a53;--line:#e4e0d8;--card:#fff;--accent:#1f5f4a;--accent-fg:#fff;--code:#f1eee7}
 @media (prefers-color-scheme:dark){:root{--bg:#141413;--fg:#ecebe6;--muted:#a8a59c;--line:#2e2d2a;--card:#1b1b19;--accent:#6fc4a4;--accent-fg:#0d1f19;--code:#232320}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
@@ -49,7 +50,7 @@ function layout(o: { title: string; description: string; path: string; body: str
 ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</script>` : ""}
 </head><body>
 <header><div class="wrap"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="24" height="24" style="vertical-align:-5px;margin-right:8px">Camberstack</a>
-<nav><a href="/#setup">Connect</a><a href="/#pricing">Pricing</a><a href="/privacy">Privacy</a></nav></div></header>
+<nav><a href="/#setup">Connect</a><a href="/#pricing">Pricing</a><a href="/account">Account</a></nav></div></header>
 <main class="wrap">${o.body}</main>
 <footer><div class="wrap">
 <a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
@@ -269,7 +270,7 @@ export function errorPage(baseUrl: string, message: string): string {
 }
 
 export function robotsTxt(baseUrl: string): string {
-  return `User-agent: *\nAllow: /\nDisallow: /oauth/\nDisallow: /authorize\nDisallow: /token\nDisallow: /register\nDisallow: /admin\n\nSitemap: ${baseUrl}/sitemap.xml\n`;
+  return `User-agent: *\nAllow: /\nDisallow: /oauth/\nDisallow: /authorize\nDisallow: /token\nDisallow: /register\nDisallow: /admin\nDisallow: /account\n\nSitemap: ${baseUrl}/sitemap.xml\n`;
 }
 
 export function sitemapXml(baseUrl: string, lastmod: string): string {

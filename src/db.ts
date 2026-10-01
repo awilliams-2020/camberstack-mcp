@@ -84,12 +84,15 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 CREATE INDEX IF NOT EXISTS tool_calls_at ON tool_calls(at);
 
--- Operator sign-ins to /admin (Google identity, ADMIN_EMAILS only). Tokens stored as hashes.
-CREATE TABLE IF NOT EXISTS admin_sessions (
+-- Browser sign-ins to our own pages (signin.ts): kind = the page's state prefix, subject = an email
+-- (/admin) or a user id (/account). Tokens stored as hashes.
+CREATE TABLE IF NOT EXISTS web_sessions (
   token_hash  TEXT PRIMARY KEY,
-  email       TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  subject     TEXT NOT NULL,
   expires_at  INTEGER NOT NULL
 );
+DROP TABLE IF EXISTS admin_sessions;  -- replaced by web_sessions 2026-10-01
 `;
 
 export function openDb(dataDir: string): DB {
@@ -143,5 +146,5 @@ export function sweep(db: DB): void {
   db.prepare("DELETE FROM auth_codes WHERE expires_at < ?").run(t);
   db.prepare("DELETE FROM tokens WHERE expires_at < ?").run(t);
   db.prepare("DELETE FROM pending_auth WHERE created_at < ?").run(t - 3600);
-  db.prepare("DELETE FROM admin_sessions WHERE expires_at < ?").run(t);
+  db.prepare("DELETE FROM web_sessions WHERE expires_at < ?").run(t);
 }
