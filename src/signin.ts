@@ -37,23 +37,26 @@ export class SignIn {
   owns(state: unknown): boolean { return typeof state === "string" && state.startsWith(this.prefix); }
 
   /** Redirect the browser to Google. */
-  start(res: Response): void {
+  /** `next` (a path on this page) is where finish() says to go afterwards; it rides in the one-use state row, not a cookie. */
+  start(res: Response, next?: string): void {
     const id = this.prefix + randomToken(24);
-    this.d.db.prepare("INSERT INTO pending_auth (id, client_id, params, created_at) VALUES (?, ?, '{}', ?)").run(id, `__${this.prefix}`, now());
+    this.d.db.prepare("INSERT INTO pending_auth (id, client_id, params, created_at) VALUES (?, ?, ?, ?)")
+      .run(id, `__${this.prefix}`, JSON.stringify(next ? { next } : {}), now());
     res.redirect(302, googleSignInUrl(this.d.google, this.redirectUri, id));
   }
 
   /** Google came back: one-use state, 10 minutes. Returns the verified identity, or null. */
-  async finish(req: Request): Promise<{ sub: string; email: string } | null> {
+  async finish(req: Request): Promise<{ sub: string; email: string; next?: string } | null> {
     const state = typeof req.query.state === "string" ? req.query.state : "";
     const code = typeof req.query.code === "string" ? req.query.code : "";
-    const row = this.d.db.prepare("SELECT created_at FROM pending_auth WHERE id = ? AND client_id = ?").get(state, `__${this.prefix}`) as
-      { created_at: number } | undefined;
+    const row = this.d.db.prepare("SELECT created_at, params FROM pending_auth WHERE id = ? AND client_id = ?").get(state, `__${this.prefix}`) as
+      { created_at: number; params: string } | undefined;
     this.d.db.prepare("DELETE FROM pending_auth WHERE id = ?").run(state);
     if (!row || row.created_at < now() - 600 || !code) return null;
     const g = await exchangeGoogleCode(this.d.google, code, this.redirectUri, this.d.fetch);
     const c = g.id_token ? idTokenClaims(g.id_token) : null;
-    return c?.emailVerified ? { sub: c.sub, email: c.email } : null;
+    const next = (JSON.parse(row.params || "{}") as { next?: unknown }).next;
+    return c?.emailVerified ? { sub: c.sub, email: c.email, ...(typeof next === "string" ? { next } : {}) } : null;
   }
 
   /** Start a session for `subject` (an email for /admin, a user id for /account). */

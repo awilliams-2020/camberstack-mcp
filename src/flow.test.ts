@@ -376,18 +376,21 @@ describe("OAuth + MCP end to end", () => {
 
   it("shows a connected user their plan and changes at /account, and disconnects from there", async () => {
     expect(await (await fetch(`${base}/account`)).text()).toContain("Sign in with Google");
-    // The pricing CTA remembers the upgrade intent across sign-in.
+    // The pricing CTA's sign-in link carries the upgrade intent; a plain visit's doesn't, and no cookie lingers.
     const intent = await fetch(`${base}/account?upgrade=1`);
-    expect(intent.headers.get("set-cookie")).toContain("cs_upgrade=1");
+    expect(await intent.text()).toContain('href="/account/login?next=upgrade"');
+    expect(intent.headers.get("set-cookie")).toBeNull();
     const login = await fetch(`${base}/account/login`, { redirect: "manual" });
     const g = new URL(login.headers.get("location")!);
     expect(g.searchParams.get("scope")).toBe("openid email");
     const cookie = await signIn(g);
     expect(cookie).toMatch(/^cs_account=/);
-    // Signed in with the upgrade intent: a free user goes straight to checkout (/upgrade → Stripe).
-    const go = await fetch(`${base}/account`, { headers: { cookie: `${cookie}; cs_upgrade=1` }, redirect: "manual" });
-    expect([200, 303]).toContain(go.status);
-    if (go.status === 303) expect(go.headers.get("location")).toContain("/upgrade?t=");
+    // A sign-in started from the upgrade screen comes back to /account?upgrade=1; an ordinary one to /account.
+    const viaUpgrade = new URL((await fetch(`${base}/account/login?next=upgrade`, { redirect: "manual" })).headers.get("location")!);
+    const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${viaUpgrade.searchParams.get("state")}`, { redirect: "manual" });
+    const hop = await fetch(new URL(back.headers.get("location")!, base), { redirect: "manual" });
+    expect(hop.headers.get("location")).toBe("/account?upgrade=1");
+    expect((await fetch(`${base}/account`, { headers: { cookie }, redirect: "manual" })).status).toBe(200);
     const html = await (await fetch(`${base}/account`, { headers: { cookie } })).text();
     expect(html).toContain("owner@example.com");
     expect(html).toContain('class="pill undone"');

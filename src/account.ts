@@ -40,9 +40,10 @@ export function mountAccount(app: Express, d: AccountDeps): SignIn {
     next();
   });
 
-  app.get("/account/login", (_req, res) => {
+  app.get("/account/login", (req, res) => {
     if (!d.google.clientId) { res.status(503).type("html").send(page("Sign-in unavailable", "<p>Google sign-in is not configured.</p>")); return; }
-    auth.start(res);
+    // Only a sign-in started from the upgrade screen continues to checkout.
+    auth.start(res, req.query.next === "upgrade" ? "/account?upgrade=1" : undefined);
   });
 
   app.get("/account/callback", async (req, res) => {
@@ -55,7 +56,7 @@ Add it to your AI app first (<a href="/#setup">how to connect</a>), then come ba
       return;
     }
     auth.open(res, u.id);
-    res.redirect(302, "/account");
+    res.redirect(302, who.next === "/account?upgrade=1" ? who.next : "/account");
   });
 
   app.post("/account/logout", (req, res) => { auth.close(req, res); res.redirect(303, "/"); });
@@ -73,20 +74,19 @@ Your AI app can no longer use Camberstack until you connect again.</p>
 
   app.get("/account", (req, res) => {
     const u = user(req);
-    // "Upgrade to Pro" on the pricing section lands here. Remember the intent across the Google
-    // sign-in (15 minutes, this path only), then send a free user straight on to Stripe Checkout.
-    const wantsUpgrade = req.query.upgrade === "1" || /(?:^|;\s*)cs_upgrade=1/.test(req.headers.cookie ?? "");
+    // "Upgrade to Pro" on the pricing section lands on /account?upgrade=1. Signed in: a free user goes
+    // straight to Stripe Checkout. Signed out: the sign-in link carries the intent through Google (in
+    // the sign-in's own state, so an abandoned click can't hijack a later, ordinary sign-in).
+    const wantsUpgrade = req.query.upgrade === "1";
     if (u && wantsUpgrade) {
-      res.setHeader("Set-Cookie", "cs_upgrade=; Path=/account; Max-Age=0; SameSite=Lax");
       const p = d.session(u.id).plan();
       if ("upgrade_url" in p && p.upgrade_url) { res.redirect(303, p.upgrade_url); return; }
     }
-    if (!u && req.query.upgrade === "1") res.setHeader("Set-Cookie", "cs_upgrade=1; Path=/account; Max-Age=900; HttpOnly; SameSite=Lax");
     if (!u) {
       res.type("html").send(shell("Your account", `<div class="signin"><div class="card">
 <h1 style="font-size:26px;margin:0">Your Camberstack account</h1>
 <p class="muted">${req.query.upgrade === "1" ? "Sign in to upgrade to Pro. You'll go straight to checkout." : "See your plan, every change Camberstack made to your Google Ads, and manage billing or disconnect."}</p>
-<a class="btn" href="/account/login">Sign in with Google</a>
+<a class="btn" href="/account/login${wantsUpgrade ? "?next=upgrade" : ""}">Sign in with Google</a>
 <p class="muted" style="font-size:14px">Use the Google account you connected to your AI app. We only ask for your email address here.</p>
 </div></div>`));
       return;
