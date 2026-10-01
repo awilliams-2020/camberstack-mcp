@@ -271,7 +271,7 @@ export function errorPage(baseUrl: string, message: string): string {
 }
 
 export function robotsTxt(baseUrl: string): string {
-  return `User-agent: *\nAllow: /\nDisallow: /oauth/\nDisallow: /authorize\nDisallow: /token\nDisallow: /register\nDisallow: /admin\nDisallow: /account\n\nSitemap: ${baseUrl}/sitemap.xml\n`;
+  return `User-agent: *\nAllow: /\nDisallow: /oauth/\nDisallow: /authorize\nDisallow: /token\nDisallow: /register\nDisallow: /account\n\nSitemap: ${baseUrl}/sitemap.xml\n`;
 }
 
 export function sitemapXml(baseUrl: string, lastmod: string): string {

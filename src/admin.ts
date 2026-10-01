@@ -1,8 +1,9 @@
 /**
- * /admin: the operator's live view of usage (report.ts). Google sign-in (signin.ts) allowed for
- * ADMIN_EMAILS; with that list empty the routes don't exist.
+ * The operator's live view of usage (report.ts), served ONLY on its own host (ADMIN_URL, e.g.
+ * https://admin.camberstack.io), at its root. Google sign-in (signin.ts) allowed for ADMIN_EMAILS;
+ * with ADMIN_URL or that list unset, the admin site does not exist. The main site has no /admin.
  */
-import type { Express } from "express";
+import express, { type Express, type Request } from "express";
 import type { DB } from "./db.js";
 import type { GoogleCreds } from "./google.js";
 import { SignIn } from "./signin.js";
@@ -13,49 +14,55 @@ export interface AdminDeps {
   db: DB;
   google: GoogleCreds;
   baseUrl: string;
+  /** The admin site's origin. */
+  adminUrl?: string;
   adminEmails: Set<string>;
   /** Hidden from the numbers by default (operator + testers); the page can include them. */
   internalEmails: Set<string>;
   fetch?: typeof fetch;
 }
 
-export function mountAdmin(app: Express, d: AdminDeps): SignIn {
-  const auth = new SignIn(d, "adm_", "cs_admin", "/admin", 12 * 3600);
-  const email = (req: Parameters<SignIn["subject"]>[0]) => {
+/** Mount first: requests for the admin host never reach the public site's routes. */
+export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
+  if (!d.adminUrl || !d.adminEmails.size) return null;
+  const host = new URL(d.adminUrl).host;
+  const auth = new SignIn(d, "adm_", "cs_admin", "/", 12 * 3600, d.adminUrl);
+  const email = (req: Request) => {
     const e = auth.subject(req);
     return e && d.adminEmails.has(e) ? e : null;
   };
 
-  app.use("/admin", (_req, res, next) => {
-    if (!d.adminEmails.size) { res.status(404).end(); return; }
+  const site = express.Router();
+  site.use((_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     next();
   });
-
-  app.get("/admin/login", (_req, res) => {
+  site.get("/robots.txt", (_q, r) => { r.type("text/plain").send("User-agent: *\nDisallow: /\n"); });
+  site.get("/login", (_req, res) => {
     if (!d.google.clientId) { res.status(503).send("Google sign-in is not configured."); return; }
     auth.start(res);
   });
-  app.get("/admin/callback", async (req, res) => {
+  site.get("/callback", async (req, res) => {
     const who = await auth.finish(req);
-    if (!who) { res.status(400).send('Sign-in expired or was cancelled. <a href="/admin/login">Try again</a>.'); return; }
+    if (!who) { res.status(400).send('Sign-in expired or was cancelled. <a href="/login">Try again</a>.'); return; }
     if (!d.adminEmails.has(who.email)) { res.status(403).send("Not an admin account."); return; }
     auth.open(res, who.email);
-    res.redirect(302, "/admin");
+    res.redirect(302, "/");
   });
-  app.post("/admin/logout", (req, res) => { auth.close(req, res); res.redirect(303, "/"); });
-
-  app.get("/admin", (req, res) => {
+  site.post("/logout", (req, res) => { auth.close(req, res); res.redirect(303, d.baseUrl); });
+  site.get("/", (req, res) => {
     const who = email(req);
-    if (!who) { res.redirect(302, "/admin/login"); return; }
+    if (!who) { res.redirect(302, "/login"); return; }
     const days = [1, 7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
     const all = req.query.internal === "1";
     const report = buildReport(d.db, { days, exclude: all ? [] : [...d.internalEmails] });
     if (req.query.format === "json") { res.json(report); return; }
     res.type("html").send(adminPage(report, { email: who, days, all, internal: d.internalEmails.size }));
   });
+  site.use((_req, res) => { res.status(404).send("Not found."); });
 
+  app.use((req, res, next) => (req.get("host") === host ? site(req, res, next) : next()));
   return auth;
 }
 
@@ -79,7 +86,7 @@ function adminPage(r: Report, o: { email: string; days: number; all: boolean; in
   const maxCalls = Math.max(1, ...r.daily.map((d) => d.calls));
   const link = (p: Partial<{ days: number; all: boolean }>) => {
     const days = p.days ?? o.days, all = p.all ?? o.all;
-    return `/admin?days=${days}${all ? "&internal=1" : ""}`;
+    return `/?days=${days}${all ? "&internal=1" : ""}`;
   };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Camberstack admin</title><style>
@@ -100,7 +107,7 @@ td.wrapok{white-space:normal}.bad{color:var(--bad)}.bars{display:flex;align-item
 .fun td:nth-child(3){width:50%}.fun i{display:block;height:10px;background:var(--bar);border-radius:2px}
 button{font:inherit;background:none;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:3px 10px;cursor:pointer}
 </style></head><body><div class="wrap">
-<header><h1>Camberstack admin</h1><form method="post" action="/admin/logout" class="muted">${esc(o.email)} <button>Sign out</button></form></header>
+<header><h1>Camberstack admin</h1><form method="post" action="/logout" class="muted">${esc(o.email)} <button>Sign out</button></form></header>
 <p class="pills">${[1, 7, 30, 90].map((d) => `<a class="${d === o.days ? "on" : ""}" href="${link({ days: d })}">${d}d</a>`).join("")}
  · <a class="${o.all ? "on" : ""}" href="${link({ all: !o.all })}">${o.all ? "including" : "excluding"} ${o.internal} internal account(s)</a>
  · <a href="${link({})}&format=json">JSON</a></p>

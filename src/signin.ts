@@ -21,13 +21,18 @@ export class SignIn {
   private readonly redirectUri: string;
   private readonly secure: boolean;
 
-  constructor(private d: SignInDeps, readonly prefix: string, private cookieName: string, private path: string, private ttl: number) {
+  /**
+   * `siteUrl` is the origin the page lives on (the admin page has its own host); Google always returns
+   * to the main site's registered callback, which forwards here, so the cookie lands on the page's host.
+   */
+  constructor(private d: SignInDeps, readonly prefix: string, private cookieName: string, private path: string, private ttl: number,
+    private siteUrl = d.baseUrl) {
     this.redirectUri = `${d.baseUrl}/oauth/google/callback`;
-    this.secure = d.baseUrl.startsWith("https://");
+    this.secure = siteUrl.startsWith("https://");
   }
 
-  /** Where server.ts forwards Google's callback for this page; under the cookie's path. */
-  get callbackPath(): string { return `${this.path}/callback`; }
+  /** Absolute URL server.ts forwards Google's callback to; under the cookie's path, on the page's host. */
+  get callbackUrl(): string { return `${this.siteUrl}${this.path === "/" ? "" : this.path}/callback`; }
 
   owns(state: unknown): boolean { return typeof state === "string" && state.startsWith(this.prefix); }
 

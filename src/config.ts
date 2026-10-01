@@ -25,7 +25,9 @@ export interface Config {
   stripe?: { secretKey: string; proPriceId: string };
   /** Emails treated as Pro regardless of billing (the operator, testers). */
   proEmails: Set<string>;
-  /** Google accounts allowed into /admin. Empty = /admin does not exist (404). */
+  /** Origin of the admin site (its own host, e.g. https://admin.camberstack.io); unset = no admin site. */
+  adminUrl?: string;
+  /** Google accounts allowed into the admin site. */
   adminEmails: Set<string>;
   /** Glama ownership token for /.well-known/glama.json (from Glama's claim panel); unset = 404. */
   glamaClaim?: string;
@@ -61,6 +63,7 @@ export function loadConfig(): Config {
     proEmails: new Set(
       (process.env.PRO_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     ),
+    adminUrl: process.env.ADMIN_URL?.replace(/\/+$/, "") || undefined,
     adminEmails: new Set(
       (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     ),

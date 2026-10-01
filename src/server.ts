@@ -48,6 +48,12 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     next();
   });
 
+  // Before every public route: the admin host serves only the admin site.
+  const admin = mountAdmin(app, {
+    db, google: cfg.google, baseUrl: cfg.baseUrl, adminUrl: cfg.adminUrl, adminEmails: cfg.adminEmails,
+    internalEmails: new Set([...cfg.adminEmails, ...cfg.proEmails]), fetch: overrides.fetch,
+  });
+
   // OAuth: /.well-known/*, /authorize, /token, /register, /revoke
   app.use(mcpAuthRouter({
     provider,
@@ -58,10 +64,6 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     serviceDocumentationUrl: new URL(`${cfg.baseUrl}/#setup`),
   }));
 
-  const admin = mountAdmin(app, {
-    db, google: cfg.google, baseUrl: cfg.baseUrl, adminEmails: cfg.adminEmails,
-    internalEmails: new Set([...cfg.adminEmails, ...cfg.proEmails]), fetch: overrides.fetch,
-  });
 
   // Some MCP clients probe the root form before the path-suffixed one the SDK serves; same document.
   app.get("/.well-known/oauth-protected-resource", (_q, r) => {
@@ -87,8 +89,9 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     // One registered redirect URI serves every Google flow. Web sign-ins (/admin, /account) are told
     // apart by their state prefix and finish on their own path, where their session cookie is scoped.
     for (const site of [admin, account]) {
+      if (!site) continue;
       if (site.owns(req.query.state)) {
-        res.redirect(302, `${site.callbackPath}?${new URLSearchParams(req.query as Record<string, string>)}`);
+        res.redirect(302, `${site.callbackUrl}?${new URLSearchParams(req.query as Record<string, string>)}`);
         return;
       }
     }

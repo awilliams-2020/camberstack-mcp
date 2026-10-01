@@ -120,7 +120,7 @@ beforeAll(async () => {
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    app = createApp({ ...cfg, baseUrl: base }, db, { fetch: googleFetch, stripeFetch, adsFactory: () => ads as any });
+    app = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1") }, db, { fetch: googleFetch, stripeFetch, adsFactory: () => ads as any });
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
@@ -342,27 +342,34 @@ describe("OAuth + MCP end to end", () => {
     expect(JSON.stringify(rows)).not.toContain("free invoice maker");
   });
 
-  it("keeps /admin behind a Google sign-in for ADMIN_EMAILS, asking for identity only", async () => {
-    const gate = await fetch(`${base}/admin`, { redirect: "manual" });
+  it("serves the admin site only on its own host, behind a Google sign-in for ADMIN_EMAILS", async () => {
+    const admin = base.replace("localhost", "127.0.0.1");
+    // The main site has no /admin at all.
+    expect((await fetch(`${base}/admin`, { redirect: "manual" })).status).toBe(404);
+    const gate = await fetch(`${admin}/`, { redirect: "manual" });
     expect(gate.status).toBe(302);
-    expect(gate.headers.get("location")).toBe("/admin/login");
-    const login = await fetch(`${base}/admin/login`, { redirect: "manual" });
+    expect(gate.headers.get("location")).toBe("/login");
+    const login = await fetch(`${admin}/login`, { redirect: "manual" });
     const g = new URL(login.headers.get("location")!);
     expect(g.searchParams.get("scope")).toBe("openid email");
+    // Google returns to the main site's registered callback, which forwards to the admin host.
+    expect(g.searchParams.get("redirect_uri")).toBe(`${base}/oauth/google/callback`);
     const cookie = await signIn(g);
     expect(cookie).toMatch(/^cs_admin=/);
-    const page = await fetch(`${base}/admin?days=30&internal=1`, { headers: { cookie } });
+    const page = await fetch(`${admin}/?days=30&internal=1`, { headers: { cookie } });
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain("find_wasted_spend");
     expect(html).toContain("owner@example.com");
     // The operator's own account is internal: hidden unless asked for.
-    const json = await (await fetch(`${base}/admin?format=json`, { headers: { cookie } })).json();
+    const json = await (await fetch(`${admin}/?format=json`, { headers: { cookie } })).json();
     expect(json.funnel.all.connected).toBe(0);
-    // A replayed state is refused.
-    const replay = await fetch(`${base}/admin/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
-    expect(replay.status).toBe(400);
-    expect((await fetch(`${base}/admin`, { headers: { cookie: "cs_admin=forged" }, redirect: "manual" })).status).toBe(302);
+    // The admin host serves nothing else from the public site.
+    expect((await fetch(`${admin}/privacy`)).status).toBe(404);
+    expect((await fetch(`${admin}/.well-known/oauth-authorization-server`)).status).toBe(404);
+    // A replayed state is refused; a forged cookie gets the sign-in redirect.
+    expect((await fetch(`${admin}/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" })).status).toBe(400);
+    expect((await fetch(`${admin}/`, { headers: { cookie: "cs_admin=forged" }, redirect: "manual" })).status).toBe(302);
   });
 
   it("shows a connected user their plan and changes at /account, and disconnects from there", async () => {
