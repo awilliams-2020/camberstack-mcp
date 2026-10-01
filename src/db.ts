@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 );
 DROP TABLE IF EXISTS admin_sessions;  -- replaced by web_sessions 2026-10-01
 
+-- Our own ad campaign's conversions (adconversions.ts): one per user, on their first connection.
+CREATE TABLE IF NOT EXISTS ad_conversions (
+  user_id      TEXT PRIMARY KEY,
+  kind         TEXT NOT NULL CHECK (kind IN ('gclid','gbraid','wbraid')),
+  click_id     TEXT NOT NULL,
+  at           INTEGER NOT NULL,
+  uploaded_at  INTEGER,
+  error        TEXT,
+  attempts     INTEGER NOT NULL DEFAULT 0
+);
+
 -- Each user's copy of the demo account (demo.ts): only what their changes altered, as JSON.
 CREATE TABLE IF NOT EXISTS demo_state (
   user_id     TEXT PRIMARY KEY,

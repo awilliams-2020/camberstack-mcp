@@ -16,13 +16,15 @@ import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
 import { mountAdmin } from "./admin.js";
 import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
+import { AdConversions } from "./adconversions.js";
 import { createHash } from "node:crypto";
 import { errorPage, infoPage, homePage, claudeGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
 
-export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch; stripeFetch?: typeof fetch } = {}): Express {
+export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch; stripeFetch?: typeof fetch; adsConversionFetch?: typeof fetch } = {}): Express {
   const app = express();
   app.set("trust proxy", 1); // behind Traefik: one hop
   app.disable("x-powered-by");
+  const adConversions = new AdConversions(db, cfg.conversions, cfg.baseUrl.startsWith("https://"), overrides.adsConversionFetch);
   const billing = new Billing({ db, baseUrl: cfg.baseUrl, stripe: cfg.stripe, fetch: overrides.stripeFetch,
     signingKey: createHash("sha256").update(cfg.encryptionKey).update("billing-links").digest() });
 
@@ -96,13 +98,16 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
       }
     }
     try {
-      const to = await provider.completeGoogleCallback({
+      const done = await provider.completeGoogleCallback({
         code: typeof req.query.code === "string" ? req.query.code : undefined,
         state: typeof req.query.state === "string" ? req.query.state : undefined,
         error: typeof req.query.error === "string" ? req.query.error : undefined,
       });
-      analytics.event(req, "connect");
-      res.redirect(302, to);
+      if (done.userId) {
+        analytics.event(req, "connect");
+        adConversions.record(req, res, done.userId, !!done.created);
+      }
+      res.redirect(302, done.to);
     } catch (e) {
       res.status(400).type("html").send(errorPage(cfg.baseUrl, (e as Error).message));
     }
@@ -145,8 +150,9 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/mcp", noSessions);
   app.delete("/mcp", noSessions);
 
-  const page = (html: string) => (_req: express.Request, res: express.Response) => {
+  const page = (html: string) => (req: express.Request, res: express.Response) => {
     res.setHeader("Cache-Control", "public, max-age=300");
+    adConversions.captureClick(req, res);  // keeps an ad click id; makes the response private if it does
     res.type("html").send(html);
   };
   app.get("/", page(homePage(cfg.baseUrl)));
@@ -167,6 +173,7 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/logo.png", brand("logo-wordmark-480.png", "image/png"));
   billing.mount(app, (title, body) => infoPage(cfg.baseUrl, title, body));
   app.locals.billing = billing;
+  app.locals.adConversions = adConversions;
 
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
   app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(BEACON_JS); });
@@ -190,5 +197,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const billingSweep = () => billing.sweep().catch((e) => console.error(`billing sweep: ${(e as Error).message}`));
   void billingSweep();
   setInterval(billingSweep, 3600_000).unref();
+  const conversions = app.locals.adConversions as AdConversions;
+  setInterval(() => conversions.flush().catch((e) => console.error(`ad conversions: ${(e as Error).message}`)), 3600_000).unref();
   app.listen(cfg.port, () => console.log(`camberstack-mcp ${SERVER_VERSION} on :${cfg.port} (${cfg.baseUrl})`));
 }

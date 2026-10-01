@@ -16,13 +16,16 @@ const key = randomBytes(32);
 const idToken = (sub: string, email: string) =>
   `h.${Buffer.from(JSON.stringify({ sub, email, email_verified: true })).toString("base64url")}.s`;
 
+/** Who "Google" signs in as; a test can switch it to connect a second, brand-new user. */
+const googleUser = { sub: "google-sub-1", email: "Owner@Example.com" };
+
 /** Google's token endpoint. */
 const googleFetch: typeof fetch = async (url) => {
   if (String(url).includes("oauth2.googleapis.com/token")) {
     return new Response(JSON.stringify({
       access_token: "g-access", expires_in: 3600, refresh_token: "g-refresh",
       scope: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/adwords",
-      id_token: idToken("google-sub-1", "Owner@Example.com"),
+      id_token: idToken(googleUser.sub, googleUser.email),
     }), { status: 200, headers: { "Content-Type": "application/json" } });
   }
   throw new Error(`unexpected fetch ${url}`);
@@ -106,6 +109,14 @@ const stripeFetch: typeof fetch = async (url, init) => {
   throw new Error(`unexpected stripe ${u}`);
 };
 
+/** Our own Ads account's conversion upload endpoint, plus the operator's token refresh. */
+const conversionUploads: any[] = [];
+const adsConversionFetch: typeof fetch = async (url, init) => {
+  if (String(url).includes("oauth2.googleapis.com/token")) return new Response(JSON.stringify({ access_token: "op-token", expires_in: 3600 }), { status: 200 });
+  if (String(url).includes(":uploadClickConversions")) { conversionUploads.push(JSON.parse(String(init?.body))); return new Response("{}", { status: 200 }); }
+  throw new Error(`unexpected ${url}`);
+};
+
 let app: ReturnType<typeof createApp>;
 let server: Server;
 let base = "";
@@ -123,13 +134,14 @@ beforeAll(async () => {
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    app = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1") }, db, { fetch: googleFetch, stripeFetch, adsFactory: () => ads as any });
+    app = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"),
+      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any });
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
 afterAll(() => { server?.close(); });
 
-async function connect(): Promise<string> {
+async function connect(cookie?: string): Promise<string> {
   const redirect = "http://localhost:9999/callback";
   const reg = await fetch(`${base}/register`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -150,8 +162,10 @@ async function connect(): Promise<string> {
   expect(g.host).toBe("accounts.google.com");
   expect(g.searchParams.get("scope")).toContain("adwords");
 
-  const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
+  const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`,
+    { redirect: "manual", ...(cookie ? { headers: { cookie } } : {}) });
   expect(back.status).toBe(302);
+  lastCallbackCookies = back.headers.get("set-cookie") ?? "";
   const cb = new URL(back.headers.get("location")!);
   expect(cb.searchParams.get("state")).toBe("xyz");
 
@@ -174,6 +188,7 @@ async function signIn(google: URL): Promise<string> {
   return hop.headers.get("set-cookie")!.split(";")[0]!;
 }
 
+let lastCallbackCookies = "";
 let rpcId = 0;
 async function call(token: string, name: string, args: object = {}) {
   const res = await fetch(`${base}/mcp`, {
@@ -490,6 +505,32 @@ describe("OAuth + MCP end to end", () => {
     expect(big.summary).toContain("from 20.00 to 100.00 ⚠ 5.0× the current budget");
     const small = await propose([{ type: "set_daily_budget", campaign_id: "10", amount: 30 }]);
     expect(small.summary).not.toContain("⚠");
+  });
+
+  it("uploads one conversion for a first connection that came from our ad, and none otherwise", async () => {
+    // A visitor lands from an ad: the click id is kept in a first-party cookie and the page isn't shared-cached.
+    const land = await fetch(`${base}/google-ads-claude?gclid=Cj0KCQtest_click_1234`);
+    expect(land.headers.get("set-cookie")).toMatch(/cs_click=gclid:Cj0KCQtest_click_1234;.*HttpOnly/);
+    expect(land.headers.get("cache-control")).toContain("private");
+    const cookie = "cs_click=gclid:Cj0KCQtest_click_1234";
+
+    // An existing user reconnecting from the ad: cookie cleared, nothing uploaded.
+    await connect(cookie);
+    expect(lastCallbackCookies).toContain("cs_click=;");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(conversionUploads).toHaveLength(0);
+
+    // A brand-new user connecting from the ad: exactly one upload, to OUR account and action.
+    googleUser.sub = "google-sub-ads"; googleUser.email = "new@example.com";
+    try { await connect(cookie); } finally { googleUser.sub = "google-sub-1"; googleUser.email = "Owner@Example.com"; }
+    await new Promise((r) => setTimeout(r, 50));
+    expect(conversionUploads).toHaveLength(1);
+    const c = conversionUploads[0].conversions[0];
+    expect(c).toMatchObject({ gclid: "Cj0KCQtest_click_1234", conversionAction: "customers/9998887777/conversionActions/555" });
+    expect(c.conversionDateTime).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\+00:00$/);
+    expect(db.prepare("SELECT uploaded_at FROM ad_conversions").get()).toMatchObject({ uploaded_at: expect.any(Number) });
+    // Nothing about the user travels with it.
+    expect(JSON.stringify(conversionUploads)).not.toContain("new@example.com");
   });
 
   it("refuses write GAQL", async () => {

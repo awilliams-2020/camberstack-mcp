@@ -99,9 +99,10 @@ export class CamberstackProvider implements OAuthServerProvider {
 
   /**
    * Step 2: Google sent the user back. Returns the URL to redirect the browser to — the MCP
-   * client's redirect_uri carrying either our code or an OAuth error.
+   * client's redirect_uri carrying either our code or an OAuth error — and, when Google Ads was
+   * connected, who connected and whether it was their first time (for our own ad measurement).
    */
-  async completeGoogleCallback(q: { code?: string; state?: string; error?: string }): Promise<string> {
+  async completeGoogleCallback(q: { code?: string; state?: string; error?: string }): Promise<{ to: string; userId?: string; created?: boolean }> {
     const pending = q.state
       ? (this.db.prepare("SELECT * FROM pending_auth WHERE id = ?").get(q.state) as
           { id: string; client_id: string; params: string; created_at: number } | undefined)
@@ -117,18 +118,18 @@ export class CamberstackProvider implements OAuthServerProvider {
     if (q.error || !q.code) {
       back.searchParams.set("error", "access_denied");
       back.searchParams.set("error_description", "Google access was not granted.");
-      return back.toString();
+      return { to: back.toString() };
     }
 
     const g = await exchangeGoogleCode(this.opts.google, q.code, this.googleRedirectUri, this.opts.fetch);
     if (!g.scope.split(" ").includes(ADS_SCOPE)) {
       back.searchParams.set("error", "access_denied");
       back.searchParams.set("error_description", "Google Ads access was not granted (the Google Ads box was unticked).");
-      return back.toString();
+      return { to: back.toString() };
     }
     if (!g.id_token) throw new Error("Google did not return an id_token");
     const { sub, email } = idTokenClaims(g.id_token);
-    const user = this.upsertUser(sub, email, g.refresh_token);
+    const { user, created } = this.upsertUser(sub, email, g.refresh_token);
 
     const code = randomToken();
     this.db.prepare(`INSERT INTO auth_codes
@@ -137,22 +138,22 @@ export class CamberstackProvider implements OAuthServerProvider {
       .run(sha256(code), pending.client_id, user.id, p.codeChallenge, p.redirectUri,
         p.resource ?? null, p.scopes.join(" "), now() + CODE_TTL);
     back.searchParams.set("code", code);
-    return back.toString();
+    return { to: back.toString(), userId: user.id, created };
   }
 
-  private upsertUser(sub: string, email: string, refreshToken?: string): UserRow {
+  private upsertUser(sub: string, email: string, refreshToken?: string): { user: UserRow; created: boolean } {
     const existing = this.db.prepare("SELECT * FROM users WHERE google_sub = ?").get(sub) as UserRow | undefined;
     const enc = refreshToken ? encrypt(this.opts.encryptionKey, refreshToken) : null;
     if (existing) {
       this.db.prepare("UPDATE users SET email = ?, enc_refresh = COALESCE(?, enc_refresh), last_seen_at = ? WHERE id = ?")
         .run(email, enc, now(), existing.id);
-      return { ...existing, email, enc_refresh: enc ?? existing.enc_refresh };
+      return { user: { ...existing, email, enc_refresh: enc ?? existing.enc_refresh }, created: false };
     }
     if (!enc) throw new Error("Google did not return a refresh token; remove Camberstack at myaccount.google.com/permissions and connect again.");
     const id = randomUUID();
     this.db.prepare("INSERT INTO users (id, google_sub, email, enc_refresh, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(id, sub, email, enc, now(), now());
-    return this.db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow;
+    return { user: this.db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow, created: true };
   }
 
   async challengeForAuthorizationCode(client: OAuthClientInformationFull, code: string): Promise<string> {

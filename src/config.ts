@@ -29,6 +29,8 @@ export interface Config {
   adminUrl?: string;
   /** Google accounts allowed into the admin site. */
   adminEmails: Set<string>;
+  /** Upload our own campaign's conversions (adconversions.ts); unset = clicks are kept but not uploaded. */
+  conversions?: import("./adconversions.js").ConversionConfig;
   /** Glama ownership token for /.well-known/glama.json (from Glama's claim panel); unset = 404. */
   glamaClaim?: string;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
@@ -68,6 +70,14 @@ export function loadConfig(): Config {
       (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     ),
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
+    conversions: ["CONV_ADS_CUSTOMER_ID", "CONV_ADS_ACTION_ID", "CONV_ADS_CLIENT_ID", "CONV_ADS_CLIENT_SECRET", "CONV_ADS_REFRESH_TOKEN", "CONV_ADS_DEVELOPER_TOKEN"]
+      .every((k) => process.env[k])
+      ? {
+        customerId: process.env.CONV_ADS_CUSTOMER_ID!, loginCustomerId: process.env.CONV_ADS_LOGIN_CUSTOMER_ID || undefined,
+        actionId: process.env.CONV_ADS_ACTION_ID!, clientId: process.env.CONV_ADS_CLIENT_ID!, clientSecret: process.env.CONV_ADS_CLIENT_SECRET!,
+        refreshToken: process.env.CONV_ADS_REFRESH_TOKEN!, developerToken: process.env.CONV_ADS_DEVELOPER_TOKEN!,
+      }
+      : undefined,
     matomo: process.env.MATOMO_URL && process.env.MATOMO_SITE_ID
       ? { url: process.env.MATOMO_URL, siteId: process.env.MATOMO_SITE_ID, token: process.env.MATOMO_AUTH_TOKEN ?? "" }
       : undefined,
