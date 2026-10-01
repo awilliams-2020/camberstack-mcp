@@ -380,7 +380,8 @@ describe("OAuth + MCP end to end", () => {
     expect(reverted.campaigns.find((c: any) => c.campaign_id === "2001").daily_budget).toBe(40);
 
     expect(ads.mutations.length).toBe(before);  // Google was never called
-    expect((await call(token, "billing", {})).json).toEqual(left);  // allowance untouched
+    const now = (await call(token, "billing", {})).json;  // allowance untouched (the signed link's expiry may tick)
+    expect({ plan: now.plan, left: now.free_applies_left }).toEqual({ plan: left.plan, left: left.free_applies_left });
   });
 
   it("logs each tool call by name, without arguments or results", async () => {

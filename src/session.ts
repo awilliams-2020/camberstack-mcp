@@ -251,7 +251,13 @@ export class UserSession {
     }));
     const existingNegatives = new Set(negRows.map((r) =>
       `${r.campaign.id}|${String(r.campaignCriterion.keyword?.text ?? "").toLowerCase()}|${r.campaignCriterion.keyword?.matchType}`));
-    const report = analyzeWaste({ window: `last ${days} days`, currency: a.currency, terms, keywords, campaigns, actions, existingNegatives });
+    let accountTotals: { cost: number; conversions: number } | undefined;
+    if (campaignId) {
+      const all = await this.ads.search(a.customerId, `SELECT campaign.id, metrics.cost_micros, metrics.conversions
+        FROM campaign WHERE ${dateRange(days)} AND campaign.status != 'REMOVED'`, a.loginCustomerId);
+      accountTotals = { cost: all.reduce((s, r) => s + micros(r.metrics.costMicros), 0), conversions: all.reduce((s, r) => s + Number(r.metrics.conversions ?? 0), 0) };
+    }
+    const report = analyzeWaste({ window: `last ${days} days`, currency: a.currency, terms, keywords, campaigns, actions, existingNegatives, accountTotals });
     return { account: { customer_id: a.customerId, name: a.name, currency: a.currency }, ...(isDemo(a.customerId) ? { note: DEMO_NOTE } : {}), ...report };
   }
 

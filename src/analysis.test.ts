@@ -101,6 +101,13 @@ describe("analyzeWaste", () => {
     expect(r.campaignsToReview[0]!.reason).toContain("consider pausing it (pause_campaign)");
   });
 
+  it("judges tracking on the whole account when scoped to one campaign", () => {
+    const campaigns = [{ campaignId: "30", name: "Dud", type: "SEARCH", status: "ENABLED", cost: 400, clicks: 60, conversions: 0 }];
+    const scoped = analyzeWaste({ ...base, campaigns, terms: [t("x", 400, 60, 0, "30")], accountTotals: { cost: 3000, conversions: 38 } });
+    expect(scoped.tracking.status).toBe("ok");
+    expect(analyzeWaste({ ...base, campaigns, terms: [t("x", 400, 60, 0, "30")] }).tracking.status).toBe("warning");
+  });
+
   it("does not treat singular 'job' as a job seeker", () => {
     const r = analyzeWaste({ ...base, terms: [t("x", 100, 10, 2), t("job costing software", 30, 9, 0), t("plumber jobs near me", 12, 4, 0)] });
     expect(r.lowIntent.find((l) => l.token === "jobs")?.examples).toEqual(["plumber jobs near me"]);

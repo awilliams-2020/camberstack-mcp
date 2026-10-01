@@ -135,6 +135,8 @@ export function analyzeWaste(input: {
   campaigns: CampaignRow[];
   actions: ConversionActionRow[];
   existingNegatives: Set<string>; // `${campaignId}|${text.toLowerCase()}|${matchType}`
+  /** Whole-account totals when the report is scoped to one campaign: tracking is an account property. */
+  accountTotals?: { cost: number; conversions: number };
 }): WasteReport {
   const { terms, keywords, campaigns } = input;
   // Campaign rows are authoritative for totals: search terms miss Performance Max and hidden terms.
@@ -143,7 +145,8 @@ export function analyzeWaste(input: {
   const clicks = campaigns.length ? sum(campaigns.map((c) => c.clicks)) : sum(terms.map((t) => t.clicks));
   const cost = sum(terms.map((t) => t.cost));
   const cpa = conversions > 0 ? totalCost / conversions : null;
-  const tracking = checkTracking(input.actions, totalCost, conversions);
+  // Judge tracking on the whole account: one dead campaign says nothing about whether the tag fires.
+  const tracking = checkTracking(input.actions, input.accountTotals?.cost ?? totalCost, input.accountTotals?.conversions ?? conversions);
   const caveats: string[] = [];
 
   const campaignCpa = new Map<string, number>();
