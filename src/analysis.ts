@@ -153,9 +153,10 @@ export function analyzeWaste(input: {
   const campaignsToReview = campaigns
     .filter((c) => c.conversions === 0 && c.cost >= campaignBar)
     .sort((a, b) => b.cost - a.cost)
-    .map((c) => ({ ...c, cost: round(c.cost), reason: cpa !== null
+    .map((c) => ({ ...c, cost: round(c.cost), reason: (cpa !== null
       ? `spent ${fmt(c.cost)} (${(c.cost / cpa).toFixed(1)}× the account's cost per conversion) with 0 conversions`
-      : `spent ${fmt(c.cost)} with 0 conversions` }));
+      : `spent ${fmt(c.cost)} with 0 conversions`)
+      + (c.status === "ENABLED" ? ". The campaign itself is the problem: consider pausing it (pause_campaign) or reworking it, rather than blocking its searches one by one" : "") }));
 
   const zero = terms.filter((t) => t.conversions === 0 && t.cost > 0);
   const zeroCost = sum(zero.map((t) => t.cost));
@@ -211,8 +212,15 @@ export function analyzeWaste(input: {
         why: `${rows.length} search term(s) with "${token}" (${p.why}) cost ${fmt(c)}, none converted` });
     }
   }
-  // Exact negatives for the individually expensive terms.
+  // Exact negatives for the individually expensive terms, except where a negative is the wrong tool:
+  //  - the campaign converts nothing at all: it's in campaignsToReview, and blocking its searches one by
+  //    one only shrinks it (the demo's "drain cleaning" negative on the Drain Cleaning campaign);
+  //  - the search IS one of the campaign's own keywords: a negative would cancel that keyword, so the
+  //    honest call is to review the keyword (keywordsToReview), not to block it from underneath.
+  const reviewCampaigns = new Set(campaignsToReview.map((c) => c.campaignId));
+  const ownKeywords = new Set(input.keywords.filter((k) => k.status === "ENABLED").map((k) => `${k.campaignId}|${k.text.toLowerCase()}`));
   for (const w of wasted.slice(0, 25)) {
+    if (reviewCampaigns.has(w.campaignId) || ownKeywords.has(`${w.campaignId}|${w.term.toLowerCase()}`)) continue;
     add({ campaignId: w.campaignId, campaignName: w.campaignName, text: w.term, matchType: "EXACT", cost: w.cost, why: w.reason });
   }
   suggested.sort((a, b) => b.cost - a.cost);

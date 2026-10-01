@@ -83,6 +83,24 @@ describe("analyzeWaste", () => {
     expect(r.caveats.join(" ")).toContain("Performance Max");
   });
 
+  it("never suggests negatives that would gut a dead campaign or cancel a campaign's own keyword", () => {
+    const campaigns = [
+      { campaignId: "10", name: "Works", type: "SEARCH", status: "ENABLED", cost: 300, clicks: 100, conversions: 6 },  // CPA 50
+      { campaignId: "30", name: "Drain Cleaning", type: "SEARCH", status: "ENABLED", cost: 400, clicks: 60, conversions: 0 },
+    ];
+    const keywords = [{ campaignId: "10", campaignName: "Works", adGroupId: "1", adGroupName: "AG", criterionId: "7",
+      text: "water heater repair", matchType: "BROAD", status: "ENABLED", cost: 90, clicks: 20, conversions: 0 }];
+    const r = analyzeWaste({ ...base, campaigns, keywords, terms: [
+      t("drain cleaning", 120, 30, 0, "30"),            // dead campaign: the campaign is the problem
+      t("water heater repair", 90, 20, 0, "10"),        // the campaign's own keyword: review it instead
+      t("tankless reviews", 80, 15, 0, "10"),           // a genuinely wasted search: block it
+    ] });
+    const negs = r.suggestedNegatives.map((n) => `${n.campaignId}|${n.text}`);
+    expect(negs).toEqual(["10|tankless reviews"]);
+    expect(r.topWastedTerms.map((x) => x.term)).toContain("drain cleaning");  // still reported, just not blocked
+    expect(r.campaignsToReview[0]!.reason).toContain("consider pausing it (pause_campaign)");
+  });
+
   it("does not treat singular 'job' as a job seeker", () => {
     const r = analyzeWaste({ ...base, terms: [t("x", 100, 10, 2), t("job costing software", 30, 9, 0), t("plumber jobs near me", 12, 4, 0)] });
     expect(r.lowIntent.find((l) => l.token === "jobs")?.examples).toEqual(["plumber jobs near me"]);
