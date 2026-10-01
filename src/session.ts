@@ -108,8 +108,9 @@ export class UserSession {
     const account_page = "https://camberstack.io/account";
     return this.isPro
       ? { plan: "pro", account_page, applies: "unlimited",
-          // Pro without a Stripe customer is complimentary (PRO_EMAILS): nothing to manage or cancel.
-          ...(this.user.stripe_customer
+          // Paid Pro is plan = 'pro' (a live subscription). Pro any other way is complimentary (PRO_EMAILS):
+          // nothing to manage or cancel, even if an old Stripe customer is still on record.
+          ...(this.user.plan === "pro" && this.user.stripe_customer
             ? { manage_billing: this.deps.billingLink?.("billing", this.user.id) ?? null }
             : { complimentary: true, manage_billing: null }) }
       : { plan: "free", account_page, free_applies_left: left, free_applies_total: this.deps.freeApplies,

@@ -15,6 +15,8 @@ import { now } from "./db.js";
 
 export const PRO_PRICE_LABEL = "$49/month";
 const LINK_TTL = 7 * 86400;
+/** Subscription statuses that keep Pro (past_due: Stripe is still retrying the card). */
+const LIVE = new Set(["active", "trialing", "past_due"]);
 const APP = "camberstack-mcp";
 
 export interface BillingDeps {
@@ -81,13 +83,17 @@ export class Billing {
     const recent = await this.stripe(`checkout/sessions?limit=100&status=complete&created[gte]=${now() - 3 * 86400}`);
     for (const s of recent.data ?? []) {
       const u = s.metadata?.app === APP && s.client_reference_id ? this.user(s.client_reference_id) : undefined;
-      if (u && u.stripe_sub !== s.subscription) this.settle(s);
+      if (!u || u.stripe_sub === s.subscription || !s.subscription) continue;
+      // Only a subscription that is still live makes someone Pro. Without this, a checkout completed and then
+      // cancelled within the 3-day window was re-linked (Pro) on every sweep and only undone by the next loop.
+      const sub = await this.stripe(`subscriptions/${s.subscription}`);
+      if (LIVE.has(sub.status)) this.settle(s);
     }
     const pros = this.d.db.prepare("SELECT id, stripe_sub FROM users WHERE plan = 'pro' AND stripe_sub IS NOT NULL AND stripe_sub != ''").all() as
       { id: string; stripe_sub: string }[];
     for (const p of pros) {
       const sub = await this.stripe(`subscriptions/${p.stripe_sub}`);
-      if (["canceled", "unpaid", "incomplete_expired"].includes(sub.status)) {
+      if (!LIVE.has(sub.status)) {
         this.d.db.prepare("UPDATE users SET plan = 'free' WHERE id = ?").run(p.id);
       }
     }

@@ -98,7 +98,11 @@ const stripeFetch: typeof fetch = async (url, init) => {
     return j({ id: "cs_test_1", status: "complete", metadata: { app: f.get("metadata[app]") },
       client_reference_id: f.get("client_reference_id"), customer: "cus_1", subscription: "sub_1" });
   }
-  if (u.startsWith("checkout/sessions?")) return j({ data: [] });
+  if (u.startsWith("checkout/sessions?")) {
+    const f = stripe.checkouts.at(-1);
+    return j({ data: f ? [{ id: "cs_test_1", status: "complete", metadata: { app: f.get("metadata[app]") },
+      client_reference_id: f.get("client_reference_id"), customer: "cus_1", subscription: "sub_1" }] : [] });
+  }
   if (u === "subscriptions/sub_1") return j({ id: "sub_1", status: stripe.subStatus });
   if (u.startsWith("billing_portal/configurations")) return j({ data: [{ id: "bpc_1", is_default: false, active: true }] });
   if (u === "billing_portal/sessions") {
@@ -334,6 +338,12 @@ describe("OAuth + MCP end to end", () => {
     stripe.subStatus = "canceled";
     await (app.locals.billing as any).sweep();
     expect((await call(token, "billing", {})).json.plan).toBe("free");
+    // A completed checkout for a cancelled subscription never makes anyone Pro again, sweep after sweep.
+    db.prepare("UPDATE users SET stripe_sub = NULL").run();
+    await (app.locals.billing as any).sweep();
+    expect((await call(token, "billing", {})).json.plan).toBe("free");
+    // Not re-linked at all (the old sweep re-linked, then downgraded in the same pass: right result, wrong path).
+    expect(db.prepare("SELECT count(*) n FROM users WHERE stripe_sub IS NOT NULL").get()).toEqual({ n: 0 });
   });
 
   it("refuses to apply a proposal that doesn't exist or isn't the user's", async () => {
