@@ -3,7 +3,7 @@
   "name": "io.camberstack/google-ads",
   "title": "Camberstack: Google Ads",
   "description": "Hosted Google Ads MCP: read your account and make only the changes you approve, with undo.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "websiteUrl": "https://camberstack.io",
   "repository": {
     "url": "https://github.com/awilliams-2020/camberstack-mcp",
