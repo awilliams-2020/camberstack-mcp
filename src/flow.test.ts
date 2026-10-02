@@ -146,7 +146,7 @@ beforeAll(async () => {
 });
 afterAll(() => { server?.close(); });
 
-async function connect(cookie?: string): Promise<string> {
+async function connect(cookie?: string, state = "xyz"): Promise<string> {
   const redirect = "http://localhost:9999/callback";
   const reg = await fetch(`${base}/register`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -160,7 +160,7 @@ async function connect(cookie?: string): Promise<string> {
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   const auth = new URL(`${base}/authorize`);
   auth.search = new URLSearchParams({ client_id: client.client_id, redirect_uri: redirect, response_type: "code",
-    code_challenge: challenge, code_challenge_method: "S256", state: "xyz", scope: "ads" }).toString();
+    code_challenge: challenge, code_challenge_method: "S256", state, scope: "ads" }).toString();
   const toGoogle = await fetch(auth, { redirect: "manual" });
   expect(toGoogle.status).toBe(302);
   const g = new URL(toGoogle.headers.get("location")!);
@@ -172,7 +172,7 @@ async function connect(cookie?: string): Promise<string> {
   expect(back.status).toBe(302);
   lastCallbackCookies = back.headers.get("set-cookie") ?? "";
   const cb = new URL(back.headers.get("location")!);
-  expect(cb.searchParams.get("state")).toBe("xyz");
+  expect(cb.searchParams.get("state")).toBe(state);
 
   const tok = await fetch(`${base}/token`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -595,6 +595,11 @@ describe("OAuth + MCP end to end", () => {
     expect(claude).toContain('src="/shots/gemini-3.webp"');
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-gemini`);
     expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-gemini"');
+  });
+
+  it("hands back a Gemini-sized state (~1.4k chars, base64url) byte for byte", async () => {
+    const state = randomBytes(1050).toString("base64url");
+    expect(await connect(undefined, state)).toBeTruthy();
   });
 
   it("registers Gemini's relay as a public client, everyone else with a secret", async () => {
