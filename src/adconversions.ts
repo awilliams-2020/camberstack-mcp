@@ -16,6 +16,7 @@ import type { Request, Response } from "express";
 import type { DB } from "./db.js";
 import { now } from "./db.js";
 import { ADS_API, refreshGoogleToken } from "./google.js";
+import { readCookie } from "./http.js";
 
 export interface ConversionConfig {
   customerId: string;
@@ -52,11 +53,11 @@ export class AdConversions {
 
   /** After a successful Google Ads connection: record the conversion for a first-time user, then try to upload it. */
   record(req: Request, res: Response, userId: string, firstConnection: boolean): void {
-    const raw = /(?:^|;\s*)cs_click=([^;]+)/.exec(req.headers.cookie ?? "")?.[1];
+    const raw = readCookie(req, COOKIE);
     if (!raw) return;
     res.append("Set-Cookie", `${COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${this.secure ? "; Secure" : ""}`);
     if (!firstConnection) return;
-    const [kind, ...rest] = decodeURIComponent(raw).split(":");
+    const [kind, ...rest] = raw.split(":");
     const clickId = rest.join(":");
     if (!KINDS.includes(kind as Kind) || !clickId) return;
     this.db.prepare(`INSERT OR IGNORE INTO ad_conversions (user_id, kind, click_id, at) VALUES (?, ?, ?, ?)`)
@@ -72,7 +73,7 @@ export class AdConversions {
     if (!pending.length) return;
     let token: string;
     try {
-      token = (await refreshGoogleToken({ clientId: this.cfg.clientId, clientSecret: this.cfg.clientSecret }, this.cfg.refreshToken, this.f)).access_token;
+      token = (await refreshGoogleToken(this.cfg, this.cfg.refreshToken, this.f)).access_token;
     } catch (e) {
       for (const p of pending) this.fail(p.user_id, `token: ${(e as Error).message}`);
       return;

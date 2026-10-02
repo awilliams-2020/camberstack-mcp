@@ -401,17 +401,17 @@ and our total liability is limited to the amount you paid us in the 12 months be
 
 /** A page that brings its own heading (the account page); body is trusted HTML built by the caller. */
 export function appPage(baseUrl: string, title: string, path: string, body: string): string {
-  return layout({ baseUrl, path, title: `${escapeHtml(title)} | Camberstack`, description: title, body });
+  return layout({ baseUrl, path, title: `${esc(title)} | Camberstack`, description: title, body });
 }
 
 /** Plain page for billing outcomes; body is trusted HTML built by the caller. */
 export function infoPage(baseUrl: string, title: string, body: string): string {
-  return layout({ baseUrl, path: "/", title: `${escapeHtml(title)} | Camberstack`, description: title, body: `<h1>${escapeHtml(title)}</h1>${body}` });
+  return layout({ baseUrl, path: "/", title: `${esc(title)} | Camberstack`, description: title, body: `<h1>${esc(title)}</h1>${body}` });
 }
 
 export function errorPage(baseUrl: string, message: string): string {
   return layout({ baseUrl, path: "/", title: "Connection problem | Camberstack", description: message,
-    body: `<h1>That didn't work</h1><p class="lede">${escapeHtml(message)}</p><p><a href="/#setup">Connection instructions</a></p>` });
+    body: `<h1>That didn't work</h1><p class="lede">${esc(message)}</p><p><a href="/#setup">Connection instructions</a></p>` });
 }
 
 export function robotsTxt(baseUrl: string): string {
@@ -444,6 +444,6 @@ export function llmsTxt(baseUrl: string): string {
 `;
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+export function esc(v: unknown): string {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

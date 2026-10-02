@@ -10,15 +10,21 @@ export const ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
 export const GOOGLE_SCOPES = ["openid", "email", ADS_SCOPE];
 export const ADS_API = "https://googleads.googleapis.com/v23";
 
+/** The Ads API counts money in millionths of the account currency. */
+export const micros = (m: unknown) => Number(m ?? 0) / 1_000_000;
+export const toMicros = (x: number) => String(Math.round(x * 1_000_000));
+
 export interface GoogleCreds {
   clientId: string;
   clientSecret: string;
   developerToken?: string;
 }
 
+const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
+
 export function googleAuthUrl(creds: GoogleCreds, redirectUri: string, state: string): string {
-  const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  u.search = new URLSearchParams({
+  return `${GOOGLE_AUTH}?${new URLSearchParams({
     client_id: creds.clientId,
     redirect_uri: redirectUri,
     response_type: "code",
@@ -28,18 +34,15 @@ export function googleAuthUrl(creds: GoogleCreds, redirectUri: string, state: st
     prompt: "consent",
     include_granted_scopes: "false",
     state,
-  }).toString();
-  return u.toString();
+  })}`;
 }
 
 /** Identity only (openid email), no Ads access and no refresh token: the operator's /admin sign-in. */
 export function googleSignInUrl(creds: GoogleCreds, redirectUri: string, state: string): string {
-  const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  u.search = new URLSearchParams({
+  return `${GOOGLE_AUTH}?${new URLSearchParams({
     client_id: creds.clientId, redirect_uri: redirectUri, response_type: "code",
     scope: "openid email", prompt: "select_account", state,
-  }).toString();
-  return u.toString();
+  })}`;
 }
 
 export interface GoogleTokenResponse {
@@ -52,31 +55,26 @@ export interface GoogleTokenResponse {
 
 type FetchLike = typeof fetch;
 
+const postForm = (f: FetchLike, url: string, form: Record<string, string>) =>
+  f(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(form) });
+
 export async function exchangeGoogleCode(
   creds: GoogleCreds, code: string, redirectUri: string, f: FetchLike = fetch,
 ): Promise<GoogleTokenResponse> {
-  const res = await f("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code, client_id: creds.clientId, client_secret: creds.clientSecret,
-      redirect_uri: redirectUri, grant_type: "authorization_code",
-    }),
+  const res = await postForm(f, GOOGLE_TOKEN, {
+    code, client_id: creds.clientId, client_secret: creds.clientSecret,
+    redirect_uri: redirectUri, grant_type: "authorization_code",
   });
   if (!res.ok) throw new Error(`Google token exchange failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as GoogleTokenResponse;
 }
 
 export async function refreshGoogleToken(
-  creds: GoogleCreds, refreshToken: string, f: FetchLike = fetch,
+  creds: Pick<GoogleCreds, "clientId" | "clientSecret">, refreshToken: string, f: FetchLike = fetch,
 ): Promise<{ access_token: string; expires_in: number }> {
-  const res = await f("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refresh_token: refreshToken, client_id: creds.clientId, client_secret: creds.clientSecret,
-      grant_type: "refresh_token",
-    }),
+  const res = await postForm(f, GOOGLE_TOKEN, {
+    refresh_token: refreshToken, client_id: creds.clientId, client_secret: creds.clientSecret,
+    grant_type: "refresh_token",
   });
   if (!res.ok) {
     const body = await res.text();
@@ -88,20 +86,13 @@ export async function refreshGoogleToken(
 }
 
 export async function revokeGoogleToken(token: string, f: FetchLike = fetch): Promise<void> {
-  await f("https://oauth2.googleapis.com/revoke", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ token }),
-  }).catch(() => undefined);
+  await postForm(f, "https://oauth2.googleapis.com/revoke", { token }).catch(() => undefined);
 }
 
 /**
- * The id_token arrives directly from Google's token endpoint over TLS, so its claims can be read
- * without verifying the signature (OpenID Connect Core §3.1.3.7, item 6).
- */
-/**
- * Unverified decode is safe here only because the token comes straight from Google's token endpoint
- * over TLS, in exchange for a code plus our client secret.
+ * The id_token arrives directly from Google's token endpoint over TLS, in exchange for a code plus our
+ * client secret, so its claims can be read without verifying the signature (OpenID Connect Core
+ * §3.1.3.7, item 6).
  */
 export function idTokenClaims(idToken: string): { sub: string; email: string; emailVerified: boolean } {
   const payload = JSON.parse(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8"));
@@ -148,11 +139,16 @@ export class AdsClient {
     };
   }
 
-  async listAccessibleCustomers(): Promise<string[]> {
-    const res = await this.f(`${ADS_API}/customers:listAccessibleCustomers`, { headers: await this.headers() });
+  /** Response body as text; throws AdsApiError on a non-2xx. */
+  private static async body(res: Response): Promise<string> {
     const body = await res.text();
     if (!res.ok) throw new AdsApiError(res.status, body);
-    return ((JSON.parse(body).resourceNames ?? []) as string[]).map((r) => r.split("/")[1]!);
+    return body;
+  }
+
+  async listAccessibleCustomers(): Promise<string[]> {
+    const res = await this.f(`${ADS_API}/customers:listAccessibleCustomers`, { headers: await this.headers() });
+    return ((JSON.parse(await AdsClient.body(res)).resourceNames ?? []) as string[]).map((r) => r.split("/")[1]!);
   }
 
   async search(customerId: string, query: string, loginCustomerId?: string | null): Promise<any[]> {
@@ -161,9 +157,7 @@ export class AdsClient {
       headers: await this.headers(loginCustomerId),
       body: JSON.stringify({ query }),
     });
-    const body = await res.text();
-    if (!res.ok) throw new AdsApiError(res.status, body);
-    return (JSON.parse(body) as { results?: any[] }[]).flatMap((b) => b.results ?? []);
+    return (JSON.parse(await AdsClient.body(res)) as { results?: any[] }[]).flatMap((b) => b.results ?? []);
   }
 
   /** `service` is the REST collection, e.g. "campaignCriteria". Atomic unless partialFailure. */
@@ -176,8 +170,7 @@ export class AdsClient {
       headers: await this.headers(opts.loginCustomerId),
       body: JSON.stringify({ operations, validateOnly: !!opts.validateOnly, partialFailure: false }),
     });
-    const body = await res.text();
-    if (!res.ok) throw new AdsApiError(res.status, body);
+    const body = await AdsClient.body(res);
     return body ? JSON.parse(body) : { results: [] };
   }
 }

@@ -5,6 +5,7 @@
  */
 import type { DB } from "./db.js";
 import { DEMO_CID } from "./demo.js";
+import { now } from "./db.js";
 
 export interface ReportOptions {
   days: number;
@@ -13,7 +14,7 @@ export interface ReportOptions {
 }
 
 export function buildReport(db: DB, o: ReportOptions) {
-  const since = Math.floor(Date.now() / 1000) - o.days * 86400;
+  const since = now() - o.days * 86400;
   const ex = o.exclude.map((e) => e.toLowerCase());
   // Every query joins through `u`, so the exclusion applies everywhere at once.
   const U = `(SELECT * FROM users WHERE lower(email) NOT IN (${ex.map(() => "?").join(",") || "''"}))`;

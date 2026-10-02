@@ -4,11 +4,9 @@ import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middlew
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join } from "node:path";
-
-/** brand/ sits beside src/ and dist/ at the package root. */
-const BRAND_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "..", "brand");
 import { loadConfig, type Config } from "./config.js";
 import { now, openDb, sweep, type DB } from "./db.js";
+import { deriveKey } from "./crypto.js";
 import { CamberstackProvider, MCP_SCOPE } from "./provider.js";
 import { UserSession, type SessionDeps } from "./session.js";
 import { buildServer, SERVER_VERSION } from "./tools.js";
@@ -17,23 +15,49 @@ import { mountAdmin } from "./admin.js";
 import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
-import { Lifecycle } from "./lifecycle.js";
-import { createHash } from "node:crypto";
+import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
 import { errorPage, infoPage, homePage, claudeGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
 
-export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> & { fetch?: typeof fetch; analyticsFetch?: typeof fetch; stripeFetch?: typeof fetch; adsConversionFetch?: typeof fetch; mailFetch?: typeof fetch } = {}): Express {
+/** brand/ sits beside src/ and dist/ at the package root. */
+const BRAND_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "..", "brand");
+const RESOURCE_NAME = "Camberstack Google Ads";
+const HOUR = 3600_000;
+
+export interface Overrides extends Partial<SessionDeps> {
+  fetch?: typeof fetch;
+  analyticsFetch?: typeof fetch;
+  stripeFetch?: typeof fetch;
+  adsConversionFetch?: typeof fetch;
+  mailFetch?: typeof fetch;
+}
+
+export interface Service {
+  app: Express;
+  billing: Billing;
+  /** The background sweeps. Not started by createApp, so tests run without timers. */
+  startJobs(): void;
+}
+
+export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Service {
   const app = express();
   app.set("trust proxy", 1); // behind Traefik: one hop
   app.disable("x-powered-by");
   const adConversions = new AdConversions(db, cfg.conversions, cfg.baseUrl.startsWith("https://"), overrides.adsConversionFetch);
   const billing = new Billing({ db, baseUrl: cfg.baseUrl, stripe: cfg.stripe, fetch: overrides.stripeFetch,
-    signingKey: createHash("sha256").update(cfg.encryptionKey).update("billing-links").digest() });
+    signingKey: deriveKey(cfg.encryptionKey, "billing-links") });
+  const internalEmails = new Set([...cfg.adminEmails, ...cfg.proEmails]);
+  const lifecycle = new Lifecycle({
+    db, baseUrl: cfg.baseUrl, mail: cfg.mail, freeApplies: cfg.freeApplies, fetch: overrides.mailFetch, internalEmails,
+    signingKey: lifecycleSigningKey(cfg.encryptionKey),
+    upgradeLink: (userId) => billing.link("upgrade", userId),
+  });
+  const info = (title: string, body: string) => infoPage(cfg.baseUrl, title, body);
 
   const provider = new CamberstackProvider(db, {
     baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey, fetch: overrides.fetch,
   });
   const deps: SessionDeps = {
-    db, google: cfg.google, encryptionKey: cfg.encryptionKey,
+    db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
     freeApplies: cfg.freeApplies, proEmails: cfg.proEmails,
     billingLink: (kind, userId) => billing.link(kind, userId), refreshPlan: (userId) => billing.refreshPlan(userId), ...overrides,
   };
@@ -54,7 +78,7 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   // Before every public route: the admin host serves only the admin site.
   const admin = mountAdmin(app, {
     db, google: cfg.google, baseUrl: cfg.baseUrl, adminUrl: cfg.adminUrl, adminEmails: cfg.adminEmails,
-    internalEmails: new Set([...cfg.adminEmails, ...cfg.proEmails]), fetch: overrides.fetch,
+    internalEmails, fetch: overrides.fetch,
   });
 
   // OAuth: /.well-known/*, /authorize, /token, /register, /revoke
@@ -63,15 +87,14 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
     issuerUrl: new URL(cfg.baseUrl),
     resourceServerUrl: mcpUrl,
     scopesSupported: [MCP_SCOPE],
-    resourceName: "Camberstack Google Ads",
+    resourceName: RESOURCE_NAME,
     serviceDocumentationUrl: new URL(`${cfg.baseUrl}/#setup`),
   }));
-
 
   // Some MCP clients probe the root form before the path-suffixed one the SDK serves; same document.
   app.get("/.well-known/oauth-protected-resource", (_q, r) => {
     r.json({ resource: mcpUrl.href, authorization_servers: [new URL(cfg.baseUrl).href], scopes_supported: [MCP_SCOPE],
-      resource_name: "Camberstack Google Ads", resource_documentation: `${cfg.baseUrl}/#setup` });
+      resource_name: RESOURCE_NAME, resource_documentation: `${cfg.baseUrl}/#setup` });
   });
   if (cfg.glamaClaim) {
     app.get("/.well-known/glama.json", (_q, r) => {
@@ -91,12 +114,10 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/oauth/google/callback", async (req, res) => {
     // One registered redirect URI serves every Google flow. Web sign-ins (/admin, /account) are told
     // apart by their state prefix and finish on their own path, where their session cookie is scoped.
-    for (const site of [admin, account]) {
-      if (!site) continue;
-      if (site.owns(req.query.state)) {
-        res.redirect(302, `${site.callbackUrl}?${new URLSearchParams(req.query as Record<string, string>)}`);
-        return;
-      }
+    const site = [admin, account].find((s) => s?.owns(req.query.state));
+    if (site) {
+      res.redirect(302, `${site.callbackUrl}?${new URLSearchParams(req.query as Record<string, string>)}`);
+      return;
     }
     try {
       const done = await provider.completeGoogleCallback({
@@ -172,17 +193,8 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/favicon.png", brand("favicon-32.png", "image/png"));
   app.get("/favicon.ico", brand("favicon-32.png", "image/png"));
   app.get("/logo.png", brand("logo-wordmark-480.png", "image/png"));
-  billing.mount(app, (title, body) => infoPage(cfg.baseUrl, title, body));
-  const lifecycle = new Lifecycle({
-    db, baseUrl: cfg.baseUrl, mail: cfg.mail, freeApplies: cfg.freeApplies, fetch: overrides.mailFetch,
-    internalEmails: new Set([...cfg.adminEmails, ...cfg.proEmails]),
-    signingKey: createHash("sha256").update(cfg.encryptionKey).update("email-links").digest(),
-    upgradeLink: (userId) => billing.link("upgrade", userId),
-  });
-  lifecycle.mount(app, (title, body) => infoPage(cfg.baseUrl, title, body));
-  app.locals.lifecycle = lifecycle;
-  app.locals.billing = billing;
-  app.locals.adConversions = adConversions;
+  billing.mount(app, info);
+  lifecycle.mount(app, info);
 
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
   app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(BEACON_JS); });
@@ -194,21 +206,24 @@ export function createApp(cfg: Config, db: DB, overrides: Partial<SessionDeps> &
   app.get("/healthz", (_q, r) => { r.json({ ok: true, version: SERVER_VERSION, sha: cfg.gitSha }); });
 
   app.use((_req, res) => { res.status(404).type("html").send(errorPage(cfg.baseUrl, "Page not found.")); });
-  return app;
+
+  const every = (ms: number, name: string, job: () => unknown) => {
+    const run = async () => { try { await job(); } catch (e) { console.error(`${name}: ${(e as Error).message}`); } };
+    setInterval(run, ms).unref();
+    return run;
+  };
+  const startJobs = () => {
+    every(10 * 60_000, "db sweep", () => sweep(db));
+    void every(HOUR, "billing sweep", () => billing.sweep())();  // also at boot: a restart mustn't delay a downgrade an hour
+    every(HOUR, "lifecycle", () => lifecycle.run());
+    every(HOUR, "ad conversions", () => adConversions.flush());
+  };
+  return { app, billing, startJobs };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const cfg = loadConfig();
-  const db = openDb(cfg.dataDir);
-  setInterval(() => sweep(db), 10 * 60_000).unref();
-  const app = createApp(cfg, db);
-  const billing = app.locals.billing as Billing;
-  const billingSweep = () => billing.sweep().catch((e) => console.error(`billing sweep: ${(e as Error).message}`));
-  void billingSweep();
-  setInterval(billingSweep, 3600_000).unref();
-  const lifecycle = app.locals.lifecycle as Lifecycle;
-  setInterval(() => lifecycle.run().catch((e) => console.error(`lifecycle: ${(e as Error).message}`)), 3600_000).unref();
-  const conversions = app.locals.adConversions as AdConversions;
-  setInterval(() => conversions.flush().catch((e) => console.error(`ad conversions: ${(e as Error).message}`)), 3600_000).unref();
+  const { app, startJobs } = createApp(cfg, openDb(cfg.dataDir));
+  startJobs();
   app.listen(cfg.port, () => console.log(`camberstack-mcp ${SERVER_VERSION} on :${cfg.port} (${cfg.baseUrl})`));
 }

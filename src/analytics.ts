@@ -18,6 +18,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
+import { clientIp } from "./http.js";
 
 export interface AnalyticsConfig {
   matomoUrl: string;
@@ -53,7 +54,7 @@ export class Analytics {
   private who(req: Request): { ua: string; ip: string; cid: string } | null {
     const ua = String(req.headers["user-agent"] ?? "");
     if (!ua || BOT.test(ua)) return null;
-    const ip = String(req.headers["x-real-ip"] ?? req.socket.remoteAddress ?? "");
+    const ip = clientIp(req);
     const today = new Date().toISOString().slice(0, 10);
     if (today !== this.saltDay) { this.salt = randomBytes(16); this.saltDay = today; }
     const cid = createHash("sha256").update(this.salt).update(ip).update(ua).digest("hex").slice(0, 16);
@@ -87,7 +88,7 @@ export class Analytics {
   aiFetch(req: Request, res: Response): void {
     const ua = String(req.headers["user-agent"] ?? "");
     if (req.method !== "GET" || !AI_FETCHER.test(ua)) return;
-    const ip = String(req.headers["x-real-ip"] ?? req.socket.remoteAddress ?? "");
+    const ip = clientIp(req);
     res.once("finish", () => {
       const bytes = Number(res.getHeader("content-length"));
       this.send({ url: `${this.cfg.site}${req.path}`, recMode: "1", http_status: String(res.statusCode),

@@ -5,6 +5,7 @@
  * never changes. Sessions are random tokens stored as hashes, in an HttpOnly cookie scoped to the page.
  */
 import type { Request, Response } from "express";
+import { readCookie } from "./http.js";
 import type { DB } from "./db.js";
 import { now } from "./db.js";
 import { randomToken, sha256 } from "./crypto.js";
@@ -36,8 +37,7 @@ export class SignIn {
 
   owns(state: unknown): boolean { return typeof state === "string" && state.startsWith(this.prefix); }
 
-  /** Redirect the browser to Google. */
-  /** `next` (a path on this page) is where finish() says to go afterwards; it rides in the one-use state row, not a cookie. */
+  /** Redirect the browser to Google. `next` (a path on this page) is where finish() says to go afterwards; it rides in the one-use state row, not a cookie. */
   start(res: Response, next?: string): void {
     const id = this.prefix + randomToken(24);
     this.d.db.prepare("INSERT INTO pending_auth (id, client_id, params, created_at) VALUES (?, ?, ?, ?)")
@@ -69,7 +69,7 @@ export class SignIn {
 
   /** The signed-in subject, or null. */
   subject(req: Request): string | null {
-    const t = this.read(req);
+    const t = readCookie(req, this.cookieName);
     if (!t) return null;
     const row = this.d.db.prepare("SELECT subject, expires_at FROM web_sessions WHERE token_hash = ? AND kind = ?").get(sha256(t), this.prefix) as
       { subject: string; expires_at: number } | undefined;
@@ -77,20 +77,12 @@ export class SignIn {
   }
 
   close(req: Request, res: Response): void {
-    const t = this.read(req);
+    const t = readCookie(req, this.cookieName);
     if (t) this.d.db.prepare("DELETE FROM web_sessions WHERE token_hash = ?").run(sha256(t));
     this.cookie(res, "", 0);
   }
 
   private cookie(res: Response, value: string, maxAge: number): void {
-    res.setHeader("Set-Cookie", `${this.cookieName}=${value}; Path=${this.path}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${this.secure ? "; Secure" : ""}`);
-  }
-
-  private read(req: Request): string | undefined {
-    for (const part of (req.headers.cookie ?? "").split(";")) {
-      const [k, ...v] = part.trim().split("=");
-      if (k === this.cookieName) return decodeURIComponent(v.join("="));
-    }
-    return undefined;
+    res.append("Set-Cookie", `${this.cookieName}=${value}; Path=${this.path}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${this.secure ? "; Secure" : ""}`);
   }
 }

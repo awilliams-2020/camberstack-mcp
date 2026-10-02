@@ -8,8 +8,9 @@ import type { DB, UserRow } from "./db.js";
 import type { GoogleCreds } from "./google.js";
 import type { UserSession } from "./session.js";
 import { SignIn } from "./signin.js";
-import { appPage, infoPage } from "./pages.js";
+import { appPage, esc, infoPage } from "./pages.js";
 import { DEMO_CID } from "./demo.js";
+import { PRO_PRICE_LABEL } from "./billing.js";
 
 export interface AccountDeps {
   db: DB;
@@ -24,7 +25,6 @@ export interface AccountDeps {
 const when = (ms: number) => new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "UTC" }) + " UTC";
 /** Google's dashed form: 386-283-8095 */
 const fmtCid = (c: string) => c === DEMO_CID ? "000-000-0001 (demo, sample data)" : /^\d{10}$/.test(c) ? `${c.slice(0, 3)}-${c.slice(3, 6)}-${c.slice(6)}` : c;
-const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 export function mountAccount(app: Express, d: AccountDeps): SignIn {
   const auth = new SignIn(d, "acc_", "cs_account", "/account", 7 * 86400);
@@ -114,7 +114,7 @@ ${"manage_billing" in plan && plan.manage_billing ? `<a class="btn" href="${esc(
         return `<div class="card"><p class="label">Plan</p><p class="big">Free</p>
 <div class="meter" aria-label="${used} of ${total} free applied changes used">${Array.from({ length: total }, (_, i) => `<i class="${i < used ? "on" : ""}"></i>`).join("")}</div>
 <p class="muted"><strong style="color:var(--fg)">${left} of ${total}</strong> free applied changes left. Diagnosis, proposals, history and undo are always free.</p>
-${"upgrade_url" in plan && plan.upgrade_url ? `<a class="btn" href="${esc(plan.upgrade_url)}">Upgrade to Pro · $49/month</a>` : ""}</div>`;
+${"upgrade_url" in plan && plan.upgrade_url ? `<a class="btn" href="${esc(plan.upgrade_url)}">Upgrade to Pro · ${PRO_PRICE_LABEL}</a>` : ""}</div>`;
       })();
 
     const connCard = `<div class="card"><p class="label">Connection</p>

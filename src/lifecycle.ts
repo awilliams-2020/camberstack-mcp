@@ -9,11 +9,12 @@
  * Unsubscribe: a signed link per user. GET shows a confirm button (mail scanners follow links);
  * POST unsubscribes, which is also what List-Unsubscribe-Post one-click sends (RFC 8058).
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
 import express, { type Express } from "express";
 import type { DB } from "./db.js";
 import { now } from "./db.js";
 import { DEMO_CID } from "./demo.js";
+import { deriveKey, safeEqual, sign } from "./crypto.js";
+import { PRO_PRICE_LABEL } from "./billing.js";
 
 export interface MailConfig { apiKey: string; from: string; replyTo: string }
 
@@ -29,6 +30,9 @@ export interface LifecycleDeps {
   fetch?: typeof fetch;
 }
 
+/** Key for unsubscribe links; server.ts and email-preview.ts must sign alike. */
+export const lifecycleSigningKey = (encryptionKey: Buffer) => deriveKey(encryptionKey, "email-links");
+
 const DAY = 86400;
 const USED_TOOLS = "('account_overview','find_wasted_spend','run_gaql','propose_changes')";
 
@@ -36,27 +40,27 @@ export class Lifecycle {
   constructor(private d: LifecycleDeps) {}
 
   private sig(userId: string): string {
-    return createHmac("sha256", this.d.signingKey).update(`unsubscribe:${userId}`).digest("base64url").slice(0, 32);
+    return sign(this.d.signingKey, `unsubscribe:${userId}`);
   }
   unsubscribeUrl(userId: string): string { return `${this.d.baseUrl}/unsubscribe?u=${userId}&s=${this.sig(userId)}`; }
   private verify(userId: unknown, s: unknown): string | null {
-    const u = String(userId ?? ""), want = Buffer.from(this.sig(u)), got = Buffer.from(String(s ?? ""));
-    return u && want.length === got.length && timingSafeEqual(want, got) ? u : null;
+    const u = String(userId ?? "");
+    return u && safeEqual(this.sig(u), String(s ?? "")) ? u : null;
   }
 
   /** Who is due each email right now. */
   private due(): { kind: "first_steps" | "limit_reached"; id: string; email: string; days: number }[] {
     const t = now();
-    const base = `FROM users u WHERE u.enc_refresh IS NOT NULL AND u.email_opt_out = 0 AND u.plan = 'free'`;
+    const eligible = `u.enc_refresh IS NOT NULL AND u.email_opt_out = 0 AND u.plan = 'free'`;
     const notSent = (k: string) => `NOT EXISTS (SELECT 1 FROM email_log e WHERE e.user_id = u.id AND e.kind = '${k}')`;
-    const first = this.d.db.prepare(`SELECT u.id, u.email, u.created_at ${base}
+    const first = this.d.db.prepare(`SELECT u.id, u.email, u.created_at FROM users u WHERE ${eligible}
       AND u.created_at BETWEEN ? AND ? AND ${notSent("first_steps")}
       AND NOT EXISTS (SELECT 1 FROM tool_calls c WHERE c.user_id = u.id AND c.ok = 1 AND c.tool IN ${USED_TOOLS})`)
       .all(t - 14 * DAY, t - 2 * DAY) as { id: string; email: string; created_at: number }[];
     // Every free applied change used (real accounts, not undos), the last one 3–30 days ago.
     const limit = this.d.db.prepare(`SELECT u.id, u.email, max(p.applied_at) last, count(*) n
       FROM users u JOIN proposals p ON p.user_id = u.id AND p.status = 'applied' AND p.undo_of IS NULL AND p.customer_id != '${DEMO_CID}'
-      WHERE u.enc_refresh IS NOT NULL AND u.email_opt_out = 0 AND u.plan = 'free' AND ${notSent("limit_reached")}
+      WHERE ${eligible} AND ${notSent("limit_reached")}
       GROUP BY u.id HAVING n >= ? AND last BETWEEN ? AND ?`)
       .all(this.d.freeApplies, t - 30 * DAY, t - 3 * DAY) as { id: string; email: string; last: number }[];
     const ok = (e: string) => !this.d.internalEmails.has(e.toLowerCase());
@@ -74,7 +78,7 @@ export class Lifecycle {
       const claim = this.d.db.prepare("INSERT OR IGNORE INTO email_log (user_id, kind, sent_at) VALUES (?, ?, ?)").run(u.id, u.kind, now());
       if (!claim.changes) continue;
       try {
-        await this.send(u.email, u.kind === "first_steps" ? firstSteps(this.d.baseUrl, u.days) : limitReached(this.d.baseUrl, this.d.freeApplies, this.d.upgradeLink(u.id)), u.id);
+        await this.send(u.email, u.kind === "first_steps" ? firstSteps(u.days) : limitReached(this.d.baseUrl, this.d.freeApplies, this.d.upgradeLink(u.id)), u.id);
         sent++;
       } catch (e) {
         this.d.db.prepare("DELETE FROM email_log WHERE user_id = ? AND kind = ?").run(u.id, u.kind);
@@ -104,7 +108,7 @@ export class Lifecycle {
 
   /** Operator check: send one sample of each email to `to`, with placeholder links. */
   async preview(to: string): Promise<void> {
-    await this.send(to, firstSteps(this.d.baseUrl, 3), "preview");
+    await this.send(to, firstSteps(3), "preview");
     await this.send(to, limitReached(this.d.baseUrl, this.d.freeApplies, `${this.d.baseUrl}/account?upgrade=1`), "preview");
   }
 
@@ -131,7 +135,7 @@ export class Lifecycle {
 const p = (s: string) => `<p style="margin:0 0 14px">${s}</p>`;
 const wrap = (body: string) => `<div style="font:16px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;color:#1c1b19;max-width:560px">${body}</div>`;
 
-function firstSteps(base: string, days: number) {
+function firstSteps(days: number) {
   const ask = "What's wasting money in my Google Ads account over the last 90 days?";
   return {
     subject: "The first thing to ask Camberstack",
@@ -164,14 +168,14 @@ function limitReached(base: string, free: number, upgrade: string | null) {
 
 Camberstack has applied your ${free} free changes. You can see each one, and undo any of them, at ${base}/account
 
-Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is $49/month, cancel any time${upgrade ? `:\n${upgrade}\n(personal link, valid for 7 days)` : ` from ${base}/account`}.
+Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is ${PRO_PRICE_LABEL}, cancel any time${upgrade ? `:\n${upgrade}\n(personal link, valid for 7 days)` : ` from ${base}/account`}.
 
 This is the only email about it. Questions? Just reply.
 
 Adam
 Camberstack`,
     html: wrap(p("Hi,") + p(`Camberstack has applied your ${free} free changes. You can see each one, and undo any of them, on <a href="${base}/account">your account page</a>.`)
-      + p("Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is $49/month, cancel any time.")
+      + p(`Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is ${PRO_PRICE_LABEL}, cancel any time.`)
       + `<p style="margin:0 0 18px"><a href="${upgrade ?? `${base}/account?upgrade=1`}" style="display:inline-block;background:#1f5f4a;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:600">Upgrade to Pro</a></p>`
       + p("This is the only email about it. Questions? Just reply.") + p("Adam<br>Camberstack")),
   };

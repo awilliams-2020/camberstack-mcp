@@ -8,10 +8,11 @@
  * and closes the tab, and a subscription that later ends (cancelled at period end, unpaid).
  * past_due stays Pro while Stripe retries the card.
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import type { DB, UserRow } from "./db.js";
 import { now } from "./db.js";
+import { safeEqual, sign } from "./crypto.js";
+import { esc } from "./pages.js";
 
 export const PRO_PRICE_LABEL = "$49/month";
 const LINK_TTL = 7 * 86400;
@@ -34,7 +35,7 @@ export class Billing {
   get enabled(): boolean { return Boolean(this.d.stripe?.secretKey && this.d.stripe.proPriceId); }
 
   private sign(payload: string): string {
-    return createHmac("sha256", this.d.signingKey).update(`billing:${payload}`).digest("base64url").slice(0, 32);
+    return sign(this.d.signingKey, `billing:${payload}`);
   }
 
   /** A link for one user, valid for a week. Null when billing isn't configured. */
@@ -47,10 +48,7 @@ export class Billing {
   verify(kind: "upgrade" | "billing", t: unknown): string | null {
     const [userId, exp, sig] = String(t ?? "").split(".");
     if (!userId || !exp || !sig) return null;
-    const want = Buffer.from(this.sign(`${kind}:${userId}.${exp}`));
-    const got = Buffer.from(sig);
-    if (want.length !== got.length || !timingSafeEqual(want, got) || Number(exp) < now()) return null;
-    return userId;
+    return safeEqual(this.sign(`${kind}:${userId}.${exp}`), sig) && Number(exp) >= now() ? userId : null;
   }
 
   private async stripe(path: string, form?: Record<string, string>, method = form ? "POST" : "GET"): Promise<any> {
@@ -77,7 +75,6 @@ export class Billing {
     return r.changes ? session.client_reference_id : null;
   }
 
-  /** Hourly: catch payments whose tab was closed, and drop Pro when a subscription has ended. */
   /**
    * Link completed checkouts whose subscription is still live (payers who closed the tab before /upgraded).
    * With `onlyUser`, just that user's, over the last day: run at the moment it matters (see refreshPlan).
@@ -196,5 +193,3 @@ export class Billing {
     });
   }
 }
-
-const esc = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

@@ -121,7 +121,8 @@ const adsConversionFetch: typeof fetch = async (url, init) => {
   throw new Error(`unexpected ${url}`);
 };
 
-let app: ReturnType<typeof createApp>;
+let app: ReturnType<typeof createApp>["app"];
+let billing: ReturnType<typeof createApp>["billing"];
 let server: Server;
 let base = "";
 const ads = new FakeAds();
@@ -134,12 +135,12 @@ beforeAll(async () => {
     freeApplies: 3, stripe: { secretKey: "sk_test_x", proPriceId: "price_pro" }, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "",
   };
   // Bind first so baseUrl (the OAuth issuer) is the real test origin.
-  server = await new Promise<Server>((resolve) => { const s = createApp(cfg, db).listen(0, () => resolve(s)); });
+  server = await new Promise<Server>((resolve) => { const s = createApp(cfg, db).app.listen(0, () => resolve(s)); });
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    app = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"),
-      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any });
+    ({ app, billing } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"),
+      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
@@ -341,11 +342,11 @@ describe("OAuth + MCP end to end", () => {
 
     // Cancelled at period end: the hourly sweep drops the plan back to free.
     stripe.subStatus = "canceled";
-    await (app.locals.billing as any).sweep();
+    await billing.sweep();
     expect((await call(token, "billing", {})).json.plan).toBe("free");
     // A completed checkout for a cancelled subscription never makes anyone Pro again, sweep after sweep.
     db.prepare("UPDATE users SET stripe_sub = NULL").run();
-    await (app.locals.billing as any).sweep();
+    await billing.sweep();
     expect((await call(token, "billing", {})).json.plan).toBe("free");
     // Not re-linked at all (the old sweep re-linked, then downgraded in the same pass: right result, wrong path).
     expect(db.prepare("SELECT count(*) n FROM users WHERE stripe_sub IS NOT NULL").get()).toEqual({ n: 0 });

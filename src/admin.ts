@@ -9,6 +9,7 @@ import type { GoogleCreds } from "./google.js";
 import { SignIn } from "./signin.js";
 import { buildReport, type Report } from "./report.js";
 import { now } from "./db.js";
+import { esc } from "./pages.js";
 
 export interface AdminDeps {
   db: DB;
@@ -66,7 +67,6 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
   return auth;
 }
 
-const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const ago = (t: number | null) => {
   if (!t) return "—";
   const s = now() - t;

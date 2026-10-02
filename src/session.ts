@@ -6,7 +6,8 @@ import { randomUUID } from "node:crypto";
 import type { DB, ProposalRow, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { decrypt } from "./crypto.js";
-import { AdsClient, refreshGoogleToken, revokeGoogleToken, type GoogleCreds } from "./google.js";
+import { AdsClient, micros, refreshGoogleToken, revokeGoogleToken, type GoogleCreds } from "./google.js";
+import { PRO_PRICE_LABEL } from "./billing.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DemoAds } from "./demo.js";
 import { analyzeWaste, round, type CampaignRow, type ConversionActionRow, type KeywordRow, type SearchTermRow } from "./analysis.js";
 import {
@@ -27,6 +28,7 @@ const tokenCache = new Map<string, { token: string; exp: number }>();
 
 export interface SessionDeps {
   db: DB;
+  baseUrl: string;
   google: GoogleCreds;
   encryptionKey: Buffer;
   freeApplies: number;
@@ -54,7 +56,15 @@ function routed(google: Ads, demo: DemoAds): Ads {
 }
 
 const DEMO_ACCOUNT: Account = { customerId: DEMO_CID, name: DEMO_NAME, currency: "USD", manager: false, loginCustomerId: null };
-export const isDemo = (customerId: string | null | undefined) => (customerId ?? "").replace(/-/g, "") === DEMO_CID;
+/** Customer ids arrive with or without dashes; stored and compared without. */
+const bareCid = (customerId: string) => customerId.replace(/-/g, "");
+export const isDemo = (customerId: string | null | undefined) => bareCid(customerId ?? "") === DEMO_CID;
+/** Spread into any result about an account, so the AI can't mistake demo data for the user's. */
+const demoNote = (customerId: string) => (isDemo(customerId) ? { note: DEMO_NOTE } : {});
+
+type Outcome = { describe: string; ok: boolean; error?: string; inverse?: Change };
+/** What the AI (and the account page) sees of an applied proposal's outcomes. */
+const publicResults = (outcomes: Outcome[]) => outcomes.map(({ describe, ok, error }) => ({ change: describe, ok, ...(error ? { error } : {}) }));
 
 export class UserSession {
   readonly ads: Ads;
@@ -84,7 +94,7 @@ export class UserSession {
       return t.access_token;
     } catch (e) {
       if ((e as { revoked?: boolean }).revoked) {
-        this.deps.db.prepare("UPDATE users SET enc_refresh = NULL WHERE id = ?").run(this.user.id);
+        this.forgetGoogle();
         throw new NotConnectedError("Google access was revoked. Reconnect Camberstack in your AI app.");
       }
       throw e;
@@ -107,7 +117,7 @@ export class UserSession {
   plan() {
     const left = this.freeAppliesLeft();
     const upgrade = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
-    const account_page = "https://camberstack.io/account";
+    const account_page = `${this.deps.baseUrl}/account`;
     return this.isPro
       ? { plan: "pro", account_page, applies: "unlimited",
           // Paid Pro is plan = 'pro' (a live subscription). Pro any other way is complimentary (PRO_EMAILS):
@@ -117,7 +127,7 @@ export class UserSession {
             : { complimentary: true, manage_billing: null }) }
       : { plan: "free", account_page, free_applies_left: left, free_applies_total: this.deps.freeApplies,
           always_free: "diagnosis, proposals, change history and undo",
-          pro: "unlimited applied changes, $49/month, cancel any time", upgrade_url: upgrade,
+          pro: `unlimited applied changes, ${PRO_PRICE_LABEL}, cancel any time`, upgrade_url: upgrade,
           note: upgrade ? "Show the user upgrade_url as a link; it is personal and expires in 7 days." : "Upgrades are not open yet." };
   }
 
@@ -171,7 +181,7 @@ export class UserSession {
   }
 
   async account(customerId: string): Promise<Account> {
-    const cid = customerId.replace(/-/g, "");
+    const cid = bareCid(customerId);
     if (cid === DEMO_CID) return DEMO_ACCOUNT;  // anyone can try the demo by its id
     const a = (await this.accounts()).find((x) => x.customerId === cid);
     if (!a) throw new Error(`Account ${customerId} is not accessible with this Google login. Call list_accounts to see the ones that are.`);
@@ -185,20 +195,15 @@ export class UserSession {
         campaign.advertising_channel_type, campaign_budget.amount_micros, campaign.bidding_strategy_type,
         metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value
       FROM campaign WHERE ${dateRange(days)} AND campaign.status != 'REMOVED'`, a.loginCustomerId);
-    const byId = new Map<string, any>();
-    for (const r of rows) {
-      const id = String(r.campaign.id);
-      const e = byId.get(id) ?? {
-        campaign_id: id, name: r.campaign.name, status: r.campaign.status, type: r.campaign.advertisingChannelType,
-        bidding: r.campaign.biddingStrategyType, daily_budget: micros(r.campaignBudget?.amountMicros),
-        cost: 0, clicks: 0, impressions: 0, conversions: 0, conversion_value: 0,
-      };
-      e.cost += micros(r.metrics.costMicros); e.clicks += Number(r.metrics.clicks ?? 0);
-      e.impressions += Number(r.metrics.impressions ?? 0); e.conversions += Number(r.metrics.conversions ?? 0);
-      e.conversion_value += Number(r.metrics.conversionsValue ?? 0);
-      byId.set(id, e);
-    }
-    const campaigns = [...byId.values()].map((c) => ({
+    const summed = aggregate(rows, (r) => String(r.campaign.id), (r) => ({
+      campaign_id: String(r.campaign.id), name: r.campaign.name, status: r.campaign.status, type: r.campaign.advertisingChannelType,
+      bidding: r.campaign.biddingStrategyType, daily_budget: micros(r.campaignBudget?.amountMicros),
+      cost: 0, clicks: 0, impressions: 0, conversions: 0, conversion_value: 0,
+    }), (e, r) => {
+      e.impressions += Number(r.metrics?.impressions ?? 0);
+      e.conversion_value += Number(r.metrics?.conversionsValue ?? 0);
+    });
+    const campaigns = summed.map((c) => ({
       ...c, cost: round(c.cost), conversions: round(c.conversions),
       cost_per_conversion: c.conversions > 0 ? round(c.cost / c.conversions) : null,
     })).sort((x, y) => y.cost - x.cost);
@@ -206,7 +211,7 @@ export class UserSession {
     const conv = campaigns.reduce((s, c) => s + c.conversions, 0);
     return {
       account: { customer_id: a.customerId, name: a.name, currency: a.currency },
-      ...(isDemo(a.customerId) ? { note: DEMO_NOTE } : {}),
+      ...demoNote(a.customerId),
       window: `last ${days} days`,
       totals: { cost: round(cost), conversions: round(conv), cost_per_conversion: conv > 0 ? round(cost / conv) : null },
       campaigns,
@@ -261,14 +266,14 @@ export class UserSession {
       accountTotals = { cost: all.reduce((s, r) => s + micros(r.metrics.costMicros), 0), conversions: all.reduce((s, r) => s + Number(r.metrics.conversions ?? 0), 0) };
     }
     const report = analyzeWaste({ window: `last ${days} days`, currency: a.currency, terms, keywords, campaigns, actions, existingNegatives, accountTotals });
-    return { account: { customer_id: a.customerId, name: a.name, currency: a.currency }, ...(isDemo(a.customerId) ? { note: DEMO_NOTE } : {}), ...report };
+    return { account: { customer_id: a.customerId, name: a.name, currency: a.currency }, ...demoNote(a.customerId), ...report };
   }
 
   async runQuery(customerId: string, query: string) {
     if (!/^\s*select\b/i.test(query)) throw new Error("Only SELECT (read-only GAQL) queries are allowed. Use propose_changes to change anything.");
     const a = await this.account(customerId);
     const rows = await this.ads.search(a.customerId, query, a.loginCustomerId);
-    return { ...(isDemo(a.customerId) ? { note: DEMO_NOTE } : {}), rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
+    return { ...demoNote(a.customerId), rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
   }
 
   // ---------------------------------------------------------------- write
@@ -304,14 +309,14 @@ export class UserSession {
     }
     if (left === 0) {
       const url = this.deps.billingLink?.("upgrade", this.user.id);
-      throw new Error(`This account has used its ${this.deps.freeApplies} free applied changes. Camberstack Pro ($49/month, cancel any time) applies changes without limit. `
-        + (url ? `Show the user this personal upgrade link: ${url} — then apply proposal ${p.id} again once they have paid (it stays open for 24 hours). ` : "Upgrades open soon; see https://camberstack.io/#pricing. ")
+      throw new Error(`This account has used its ${this.deps.freeApplies} free applied changes. Camberstack Pro (${PRO_PRICE_LABEL}, cancel any time) applies changes without limit. `
+        + (url ? `Show the user this personal upgrade link: ${url} — then apply proposal ${p.id} again once they have paid (it stays open for 24 hours). ` : `Upgrades open soon; see ${this.deps.baseUrl}/#pricing. `)
         + "Diagnosis, proposals, change history and undo stay free.");
     }
     if (p.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${p.status}.`);
     if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
     const changes = JSON.parse(p.changes) as Change[];
-    const outcomes: { describe: string; ok: boolean; error?: string; inverse?: Change }[] = [];
+    const outcomes: Outcome[] = [];
     for (const c of changes) {
       let describe = c.type as string;
       try {
@@ -333,13 +338,13 @@ export class UserSession {
     return {
       proposal_id: p.id,
       status: allOk ? "applied" : anyOk ? "partially applied" : "failed",
-      results: outcomes.map(({ describe, ok, error }) => ({ change: describe, ok, ...(error ? { error } : {}) })),
+      results: publicResults(outcomes),
       undo: anyOk ? `To reverse this, call undo_changes with proposal_id "${p.id}".` : undefined,
       ...(left !== null && anyOk ? { free_applies_left: left - 1 } : {}),
       // The moment the last free apply is used is when Pro is easiest to explain: say it once, not as a wall.
       ...(left === 1 && anyOk ? {
         upgrade_url: this.deps.billingLink?.("upgrade", this.user.id) ?? null,
-        note: "That was the last of the 3 free applied changes. Mention once, briefly, that Camberstack Pro ($49/month, cancel any time) applies changes without limit, and show upgrade_url as a link if present. Diagnosis, proposals and undo stay free.",
+        note: `That was the last of the ${this.deps.freeApplies} free applied changes. Mention once, briefly, that Camberstack Pro (${PRO_PRICE_LABEL}, cancel any time) applies changes without limit, and show upgrade_url as a link if present. Diagnosis, proposals and undo stay free.`,
       } : {}),
     };
   }
@@ -347,7 +352,7 @@ export class UserSession {
   async undo(proposalId: string) {
     const p = this.proposal(proposalId);
     if (p.status !== "applied") throw new Error(`Only applied proposals can be undone (${proposalId} is ${p.status}).`);
-    const outcomes = JSON.parse(p.result ?? "[]") as { inverse?: Change }[];
+    const outcomes = JSON.parse(p.result ?? "[]") as Outcome[];
     const inverses = outcomes.map((o) => o.inverse).filter((x): x is Change => !!x).reverse();
     if (!inverses.length) throw new Error("Nothing to undo: none of the changes in that proposal altered the account.");
     return this.propose(p.customer_id, inverses, p.id);
@@ -363,7 +368,7 @@ export class UserSession {
   history(customerId: string | undefined, limit: number) {
     const rows = (customerId
       ? this.deps.db.prepare("SELECT * FROM proposals WHERE user_id = ? AND customer_id = ? ORDER BY created_at DESC LIMIT ?")
-        .all(this.user.id, customerId.replace(/-/g, ""), limit)
+        .all(this.user.id, bareCid(customerId), limit)
       : this.deps.db.prepare("SELECT * FROM proposals WHERE user_id = ? ORDER BY created_at DESC LIMIT ?")
         .all(this.user.id, limit)) as ProposalRow[];
     return rows.map((p) => ({
@@ -371,9 +376,13 @@ export class UserSession {
       proposed_at: new Date(p.created_at * 1000).toISOString(),
       applied_at: p.applied_at ? new Date(p.applied_at * 1000).toISOString() : null,
       undo_of: p.undo_of,
-      results: p.result ? (JSON.parse(p.result) as { describe: string; ok: boolean; error?: string }[])
-        .map(({ describe, ok, error }) => ({ change: describe, ok, ...(error ? { error } : {}) })) : undefined,
+      results: p.result ? publicResults(JSON.parse(p.result) as Outcome[]) : undefined,
     }));
+  }
+
+  private forgetGoogle(): void {
+    this.deps.db.prepare("UPDATE users SET enc_refresh = NULL WHERE id = ?").run(this.user.id);
+    tokenCache.delete(this.user.id);
   }
 
   private proposal(id: string): ProposalRow {
@@ -385,9 +394,8 @@ export class UserSession {
   /** Revoke at Google, forget the refresh token and every token we issued. Change history is kept. */
   async disconnect() {
     if (this.user.enc_refresh) await revokeGoogleToken(decrypt(this.deps.encryptionKey, this.user.enc_refresh));
-    this.deps.db.prepare("UPDATE users SET enc_refresh = NULL WHERE id = ?").run(this.user.id);
+    this.forgetGoogle();
     this.deps.db.prepare("DELETE FROM tokens WHERE user_id = ?").run(this.user.id);
-    tokenCache.delete(this.user.id);
     return { disconnected: true, note: "Google access revoked and stored credentials deleted. To delete your change history too, email adam@camberstack.io." };
   }
 }
@@ -400,10 +408,9 @@ export function dateRange(days: number): string {
   return `segments.date BETWEEN '${iso(start)}' AND '${iso(end)}'`;
 }
 
-const micros = (m: unknown) => Number(m ?? 0) / 1_000_000;
-
+/** Sum rows' cost, clicks and conversions per key (Google returns one row per segment); `add` sums any extra metrics. */
 function aggregate<T extends { cost: number; clicks: number; conversions: number }>(
-  rows: any[], key: (r: any) => string, init: (r: any) => T,
+  rows: any[], key: (r: any) => string, init: (r: any) => T, add?: (e: T, r: any) => void,
 ): T[] {
   const m = new Map<string, T>();
   for (const r of rows) {
@@ -412,6 +419,7 @@ function aggregate<T extends { cost: number; clicks: number; conversions: number
     e.cost += micros(r.metrics?.costMicros);
     e.clicks += Number(r.metrics?.clicks ?? 0);
     e.conversions += Number(r.metrics?.conversions ?? 0);
+    add?.(e, r);
     m.set(k, e);
   }
   return [...m.values()];

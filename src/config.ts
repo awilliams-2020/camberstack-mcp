@@ -1,5 +1,8 @@
 /** Every environment variable the service reads, in one place. */
 
+/** A comma-separated list of emails, lowercased. */
+const emails = (raw: string | undefined) => new Set((raw ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+
 function req(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing required env: ${name}`);
@@ -42,9 +45,9 @@ export interface Config {
 }
 
 export function parseKey(raw: string): Buffer {
-  const hex = /^[0-9a-f]{64}$/i.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
-  if (hex.length !== 32) throw new Error("ENCRYPTION_KEY must decode to 32 bytes (64 hex chars or base64)");
-  return hex;
+  const key = /^[0-9a-f]{64}$/i.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
+  if (key.length !== 32) throw new Error("ENCRYPTION_KEY must decode to 32 bytes (64 hex chars or base64)");
+  return key;
 }
 
 export function loadConfig(): Config {
@@ -64,13 +67,9 @@ export function loadConfig(): Config {
     stripe: process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRO_PRICE_ID
       ? { secretKey: process.env.STRIPE_SECRET_KEY, proPriceId: process.env.STRIPE_PRO_PRICE_ID }
       : undefined,
-    proEmails: new Set(
-      (process.env.PRO_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
-    ),
+    proEmails: emails(process.env.PRO_EMAILS),
     adminUrl: process.env.ADMIN_URL?.replace(/\/+$/, "") || undefined,
-    adminEmails: new Set(
-      (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
-    ),
+    adminEmails: emails(process.env.ADMIN_EMAILS),
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
     mail: process.env.RESEND_API_KEY
       ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" }

@@ -10,7 +10,7 @@
  * No creating campaigns, no bid strategy changes, no deleting anything a user built.
  */
 import { z } from "zod";
-import type { AdsClient } from "./google.js";
+import { micros, toMicros, type AdsClient } from "./google.js";
 
 export const MAX_CHANGES = 50;
 export const PROPOSAL_TTL = 24 * 3600;
@@ -70,8 +70,6 @@ export interface ResolvedChange {
   inverse?: Change;
 }
 
-const toMicros = (x: number) => String(Math.round(x * 1_000_000));
-const fromMicros = (m: unknown) => Number(m ?? 0) / 1_000_000;
 
 export async function resolveChange(
   ads: Pick<AdsClient, "search">, customerId: string, login: string | null, change: Change,
@@ -108,20 +106,13 @@ export async function resolveChange(
         FROM ad_group_criterion WHERE ad_group.id = ${change.ad_group_id}
         AND ad_group_criterion.criterion_id = ${change.criterion_id}`);
       if (!k) throw new Error(`Keyword ${change.criterion_id} not found in ad group ${change.ad_group_id}`);
-      const target = change.type === "pause_keyword" ? "PAUSED" : "ENABLED";
-      const before = k.adGroupCriterion.status as string;
-      return {
-        change,
-        service: "adGroupCriteria",
-        operations: [{
-          update: { resourceName: `customers/${customerId}/adGroupCriteria/${change.ad_group_id}~${change.criterion_id}`, status: target },
-          updateMask: "status",
-        }],
-        describe: `${target === "PAUSED" ? "Pause" : "Enable"} keyword ${fmtKw(k.adGroupCriterion.keyword.text, k.adGroupCriterion.keyword.matchType)} ` +
-          `in ad group "${k.adGroup.name}" (campaign "${k.campaign.name}"; now ${before})`,
-        inverse: before === target ? undefined
-          : { type: target === "PAUSED" ? "enable_keyword" : "pause_keyword", ad_group_id: change.ad_group_id, criterion_id: change.criterion_id },
-      };
+      const { ad_group_id, criterion_id } = change;
+      return toggle(change, "pause_keyword", "enable_keyword", (type) => ({ type, ad_group_id, criterion_id }), {
+        service: "adGroupCriteria", before: k.adGroupCriterion.status,
+        resourceName: `customers/${customerId}/adGroupCriteria/${ad_group_id}~${criterion_id}`,
+        what: `keyword ${fmtKw(k.adGroupCriterion.keyword.text, k.adGroupCriterion.keyword.matchType)} in ad group "${k.adGroup.name}"`,
+        context: `campaign "${k.campaign.name}"`,
+      });
     }
     case "pause_campaign":
     case "enable_campaign": {
@@ -130,36 +121,25 @@ export async function resolveChange(
       if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
       const before = c.campaign.status as string;
       if (before === "REMOVED") throw new Error(`Campaign "${c.campaign.name}" was removed in Google Ads and can't be changed.`);
-      const target = change.type === "pause_campaign" ? "PAUSED" : "ENABLED";
-      const budget = fromMicros(c.campaignBudget?.amountMicros);
       // Turning a campaign on is the one change that takes spend from zero to real money: say so in the summary.
-      const warn = target === "ENABLED" && before !== "ENABLED"
-        ? ` ⚠ it starts spending again, up to an average of ${budget.toFixed(2)}/day${c.campaignBudget?.explicitlyShared ? " from a shared budget" : ""}`
+      const warn = change.type === "enable_campaign" && before !== "ENABLED"
+        ? ` ⚠ it starts spending again, up to an average of ${micros(c.campaignBudget?.amountMicros).toFixed(2)}/day${c.campaignBudget?.explicitlyShared ? " from a shared budget" : ""}`
         : "";
-      return {
-        change,
-        service: "campaigns",
-        operations: before === target ? []
-          : [{ update: { resourceName: `customers/${customerId}/campaigns/${change.campaign_id}`, status: target }, updateMask: "status" }],
-        describe: `${target === "PAUSED" ? "Pause" : "Enable"} campaign "${c.campaign.name}" (now ${before})${warn}`,
-        inverse: before === target ? undefined
-          : { type: target === "PAUSED" ? "enable_campaign" : "pause_campaign", campaign_id: change.campaign_id },
-      };
+      const { campaign_id } = change;
+      return toggle(change, "pause_campaign", "enable_campaign", (type) => ({ type, campaign_id }), {
+        service: "campaigns", before, resourceName: `customers/${customerId}/campaigns/${campaign_id}`,
+        what: `campaign "${c.campaign.name}"`, warn,
+      });
     }
     case "pause_ad_group":
     case "enable_ad_group": {
       const [g] = await q(`SELECT ad_group.name, ad_group.status, campaign.name FROM ad_group WHERE ad_group.id = ${change.ad_group_id}`);
       if (!g) throw new Error(`Ad group ${change.ad_group_id} not found`);
-      const target = change.type === "pause_ad_group" ? "PAUSED" : "ENABLED";
-      const before = g.adGroup.status as string;
-      return {
-        change,
-        service: "adGroups",
-        operations: [{ update: { resourceName: `customers/${customerId}/adGroups/${change.ad_group_id}`, status: target }, updateMask: "status" }],
-        describe: `${target === "PAUSED" ? "Pause" : "Enable"} ad group "${g.adGroup.name}" (campaign "${g.campaign.name}"; now ${before})`,
-        inverse: before === target ? undefined
-          : { type: target === "PAUSED" ? "enable_ad_group" : "pause_ad_group", ad_group_id: change.ad_group_id },
-      };
+      const { ad_group_id } = change;
+      return toggle(change, "pause_ad_group", "enable_ad_group", (type) => ({ type, ad_group_id }), {
+        service: "adGroups", before: g.adGroup.status, resourceName: `customers/${customerId}/adGroups/${ad_group_id}`,
+        what: `ad group "${g.adGroup.name}"`, context: `campaign "${g.campaign.name}"`,
+      });
     }
     case "set_daily_budget": {
       const [c] = await q(`SELECT campaign.name, campaign_budget.resource_name, campaign_budget.amount_micros,
@@ -168,7 +148,7 @@ export async function resolveChange(
       if (c.campaignBudget.explicitlyShared) {
         throw new Error(`Campaign "${c.campaign.name}" uses a shared budget; changing it would change every campaign on it. Edit it in Google Ads instead.`);
       }
-      const before = fromMicros(c.campaignBudget.amountMicros);
+      const before = micros(c.campaignBudget.amountMicros);
       return {
         change,
         service: "campaignBudgets",
@@ -189,6 +169,26 @@ export async function resolveChange(
       };
     }
   }
+}
+
+/**
+ * A pause or enable: one status update, skipped when the target is already in place, whose inverse is
+ * the opposite change.
+ */
+function toggle<P extends Change["type"], E extends Change["type"]>(
+  change: Change, pause: P, enable: E, make: (type: P | E) => Change,
+  o: { service: ResolvedChange["service"]; before: string; resourceName: string; what: string; context?: string; warn?: string },
+): ResolvedChange {
+  const pausing = change.type === pause;
+  const target = pausing ? "PAUSED" : "ENABLED";
+  const same = o.before === target;
+  return {
+    change,
+    service: o.service,
+    operations: same ? [] : [{ update: { resourceName: o.resourceName, status: target }, updateMask: "status" }],
+    describe: `${pausing ? "Pause" : "Enable"} ${o.what} (${o.context ? `${o.context}; ` : ""}now ${o.before})${o.warn ?? ""}`,
+    inverse: same ? undefined : make(pausing ? enable : pause),
+  };
 }
 
 /** Inverse of an applied change, given the resource names the API returned. */
