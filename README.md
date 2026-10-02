@@ -1,7 +1,7 @@
-# Camberstack: a Google Ads MCP server that acts
+# Camberstack: a Google Ads MCP server
 
 Connect Google Ads to Claude, ChatGPT, Cursor or any MCP client. Your AI checks conversion
-tracking, finds where the budget goes with nothing to show for it, and proposes fixes. **Nothing
+tracking, finds the spend that never converted, and proposes fixes. **Nothing
 changes in the account until you approve a specific proposal, and every applied change can be
 undone.**
 

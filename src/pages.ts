@@ -12,15 +12,19 @@ const UPDATED = "2026-10-01";
 
 const CSS = `
 .linkish{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
-:root{--bg:#fbfaf7;--fg:#1c1b19;--muted:#5d5a53;--line:#e4e0d8;--card:#fff;--accent:#1f5f4a;--accent-fg:#fff;--code:#f1eee7}
-@media (prefers-color-scheme:dark){:root{--bg:#141413;--fg:#ecebe6;--muted:#a8a59c;--line:#2e2d2a;--card:#1b1b19;--accent:#6fc4a4;--accent-fg:#0d1f19;--code:#232320}}
+@font-face{font-family:"IBM Plex Sans";font-weight:400;font-display:swap;src:url(/fonts/ibm-plex-sans-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-weight:600;font-display:swap;src:url(/fonts/ibm-plex-sans-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-weight:400;font-display:swap;src:url(/fonts/ibm-plex-mono-latin-400-normal.woff2) format("woff2")}
+:root{--bg:#fff;--fg:#17181a;--muted:#5b5f66;--line:#e3e4e6;--card:#f8f8f9;--accent:#1f5f4a;--accent-fg:#fff;--code:#f1f2f3}
+@media (prefers-color-scheme:dark){:root{--bg:#111214;--fg:#e9eaec;--muted:#a0a4ab;--line:#2a2c30;--card:#17181b;--accent:#6fc4a4;--accent-fg:#0d1f19;--code:#1e2023}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 "IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+h1,h2,h3,strong,b,th{font-weight:600}
 .wrap{max-width:860px;margin:0 auto;padding:0 20px}
 header{border-bottom:1px solid var(--line)}header .wrap{display:flex;justify-content:space-between;align-items:center;height:60px}
-.brand{font-weight:700;letter-spacing:-.01em;color:var(--fg);text-decoration:none}
+.brand{white-space:nowrap;font-weight:600;letter-spacing:-.01em;color:var(--fg);text-decoration:none}
 nav a{color:var(--muted);text-decoration:none;margin-left:18px;font-size:15px}nav a:hover{color:var(--fg)}
-h1{font-size:clamp(30px,5vw,44px);line-height:1.15;letter-spacing:-.02em;margin:56px 0 16px}
+h1{font-size:clamp(30px,5vw,44px);line-height:1.15;text-wrap:balance;letter-spacing:-.02em;margin:56px 0 16px}
 h2{font-size:24px;letter-spacing:-.01em;margin:56px 0 12px}h3{font-size:18px;margin:24px 0 6px}
 p,li{color:var(--fg)}.lede{font-size:20px;color:var(--muted);max-width:680px}
 .muted{color:var(--muted)}a{color:var(--accent)}
@@ -28,10 +32,11 @@ p,li{color:var(--fg)}.lede{font-size:20px;color:var(--muted);max-width:680px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-top:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
 .card h3{margin-top:0}
-code,pre{font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:6px}
+code,pre{font:14px/1.5 "IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:6px}
 code{padding:2px 5px}pre{padding:14px;overflow-x:auto;white-space:pre-wrap;word-break:break-all}
 .convo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-top:24px}
-.convo p{margin:8px 0}.who{font-weight:600;color:var(--muted);font-size:14px;text-transform:uppercase;letter-spacing:.04em}
+.convo p{margin:8px 0}.who{font-weight:600;color:var(--muted);font-size:14px;margin:16px 0 4px!important}.convo .who:first-child{margin-top:0!important}
+.convo .said{display:inline-block;background:var(--code);border-radius:12px;padding:8px 14px;margin-top:0}
 table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;vertical-align:top}
 footer{border-top:1px solid var(--line);margin-top:72px;padding:28px 0;font-size:14px;color:var(--muted)}
 footer a{color:var(--muted);margin-right:16px}
@@ -48,7 +53,7 @@ ol.steps>li{margin-bottom:28px}
 .acct h2{font-size:19px;margin:36px 0 12px}
 .acct .grid{margin-top:0}.acct .card{display:flex;flex-direction:column;gap:10px}
 .label{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0}
-.big{font-size:26px;font-weight:700;letter-spacing:-.01em;margin:0}
+.big{font-size:26px;font-weight:600;letter-spacing:-.01em;margin:0}
 .meter{display:flex;gap:6px}.meter i{flex:1;height:8px;border-radius:4px;background:var(--line)}.meter i.on{background:var(--accent)}
 .acct .card p{margin:0}.acct .card .btn{align-self:flex-start;margin-top:auto}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:var(--muted)}.dot.ok{background:#2f9e6e}
@@ -74,6 +79,7 @@ ol.steps>li{margin-bottom:28px}
 .btn-danger{font:inherit;font-weight:600;background:#c2412d;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
 .signin{max-width:440px;margin:72px auto 96px;text-align:center}.signin .card{display:flex;flex-direction:column;gap:16px;align-items:center;padding:36px 32px}.signin .btn{align-self:center}
 @media (max-width:600px){
+nav a{margin-left:12px}
 .btn{padding:9px 14px;font-size:15px;border-radius:7px}
 .btn-danger{padding:9px 14px;font-size:15px}
 .signin{margin:40px auto 56px}.signin .card{padding:28px 20px}
@@ -140,39 +146,31 @@ export function homePage(baseUrl: string): string {
       ],
     },
     body: `
-<h1>Your AI, on your Google Ads account. It finds the waste. You approve every change.</h1>
-<p class="lede">Camberstack is a Google Ads connector (an MCP server) for Claude, ChatGPT and other AI assistants.
-Ask where your budget is going; it reads your account, shows you the search terms and keywords that spend without converting,
-and prepares the fix. Nothing changes in your account until you say yes.</p>
+<h1>Let Claude or ChatGPT fix your Google Ads</h1>
+<p class="lede">Nothing changes until you approve it. Camberstack connects your Google Ads account to Claude, ChatGPT and other AI assistants (it's an MCP server).
+Ask where the budget went: it finds the search terms and keywords that spend without converting, and prepares the fix.</p>
 <p><a class="btn" href="#setup">Connect in 2 minutes</a> <span class="muted">&nbsp;Free plan, no card</span></p>
 
 <div class="convo" aria-label="Example conversation">
-<p class="who">You</p><p>Where did my Google Ads budget go last month, and what should I cut?</p>
-<p class="who">Your AI, using Camberstack</p>
+<p class="who">You</p><p class="said">Where did my Google Ads budget go last month, and what should I cut?</p>
+<p class="who">Claude, with Camberstack</p>
 <p>Conversion tracking looks healthy (1 primary action: "Purchase"). You spent $2,140 at $61 per conversion.
 $486 went to search terms that never converted. The biggest: <code>free invoice template</code> ($112, 41 clicks) and
 <code>invoice clerk jobs</code> ($64). I can add "free" and "jobs" as phrase negatives to your Search campaign,
 plus 6 exact negatives. Want me to prepare that?</p>
-<p class="who">You</p><p>Yes, but keep "free trial".</p>
+<p class="who">You</p><p class="said">Yes, but keep "free trial".</p>
 <p class="muted">An illustration of the workflow, not a real account.</p>
-</div>
-
-<h2>How it works</h2>
-<div class="grid">
-<div class="card"><h3>1. Connect</h3><p>Add Camberstack to your AI app and sign in with Google. You grant Google Ads access only.</p></div>
-<div class="card"><h3>2. Ask</h3><p>"What's wasting money?" It checks your conversion tracking first, then your search terms, keywords and campaigns.</p></div>
-<div class="card"><h3>3. Approve</h3><p>Changes are proposed as a plain-English list and dry-run with Google first. They apply only when you approve, and can be undone.</p></div>
 </div>
 
 <h2>What it checks, in order</h2>
 <ol>
-<li><strong>Is conversion tracking telling the truth?</strong> No primary conversion action, or a page view counted as a conversion, makes every other number misleading. It says so before recommending any cut.</li>
-<li><strong>Search terms that spent a conversion's worth with nothing to show.</strong> Your own cost per conversion is the bar.</li>
-<li><strong>Low-intent searches</strong> such as "free", jobs, how-to and login, only when none of them ever converted for you.</li>
-<li><strong>Keywords</strong> that spent twice your cost per conversion with zero conversions.</li>
+<li>Conversion tracking. With no primary conversion action, or a page view counted as a conversion, every other number is misleading, so it tells you that first.</li>
+<li>Search terms that cost more than a conversion usually does and didn't convert. Your own cost per conversion sets the bar.</li>
+<li>Low-intent searches like "free", "jobs", "how to" and "login", but only where they've never converted for you.</li>
+<li>Keywords that spent twice your cost per conversion and never converted.</li>
 </ol>
 
-<h2>What it can change</h2>
+<h2 id="changes">What it can change</h2>
 <table>
 <tr><th>Change</th><th>Undo</th></tr>
 <tr><td>Add negative keywords to a campaign</td><td>Removes exactly the negatives it added</td></tr>
@@ -206,7 +204,7 @@ Changes there never reach Google and don't use your free changes. A Google login
 
 <h2 id="pricing">Pricing</h2>
 <div class="grid">
-<div class="card"><h3>Free</h3><p>Unlimited diagnosis and proposals, change history and undo, plus <strong>3 applied changes</strong>. No card. Free stays free.</p>
+<div class="card"><h3>Free</h3><p>Unlimited diagnosis and proposals, change history and undo, plus <strong>3 applied changes</strong>. No card.</p>
 <p><a class="btn" href="#setup">Connect for free</a></p></div>
 <div class="card"><h3>Pro: $49/month</h3><p>Everything in Free, with <strong>unlimited applied changes</strong>, plus ${PRO_SESSION}. Cancel any time; you keep Pro until the end of the month you paid for.</p>
 <p><a class="btn" href="/account?upgrade=1">Upgrade to Pro</a></p><p class="muted" style="font-size:14px">Connect Camberstack to your AI app first; you'll sign in with the same Google account.</p></div>
@@ -243,11 +241,9 @@ const ASK_FIRST = `<h2>What to ask first</h2>
 <li>Not ready to use your real account? <em>"Show me Camberstack's demo account."</em></li>
 </ul>`;
 
-const CAN_CHANGE = `<h2>What it can and can't change</h2>
-<p>It can add negative keywords, pause or re-enable a campaign, ad group or keyword, and set a campaign's daily budget.
-It can't create campaigns, change bid strategies, or delete anything you built. Turning a campaign back on, or more than
-doubling a budget, comes with a warning in the proposal. Every change is first checked with Google as a dry run, shown to
-you in plain English, and logged.</p>`;
+const CAN_CHANGE = `<h2>What it can change</h2>
+<p>Negative keywords, paused or enabled campaigns, ad groups and keywords, and daily budgets. You approve each change, and each
+one can be undone. <a href="/#changes">The full list</a>, and <a href="/tools">every tool</a>.</p>`;
 
 /** The questions every guide answers; `app` is the AI app's name. */
 const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer token?</h3>
@@ -255,10 +251,7 @@ const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer t
 <h3>Does ${app} see my whole Google account?</h3>
 <p>No. It gets Google Ads access and your email address, nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
 <h3>What does it cost?</h3>
-<p>The free plan includes unlimited diagnosis and proposals, change history, undo and 3 applied changes. Pro is $49/month for
-unlimited applied changes, plus ${PRO_SESSION}. See <a href="/#pricing">pricing</a>.</p>
-<h3>Does it work with manager (MCC) accounts?</h3>
-<p>Yes. It lists every client account your login can reach.</p>`;
+<p>Free for diagnosis, proposals and undo, with 3 applied changes. <a href="/#pricing">Pro</a> is $49/month.</p>`;
 
 /**
  * Use-case page for "claude google ads" / "google ads claude" / "google ads mcp server" (keyword data:
@@ -279,7 +272,7 @@ export function claudeGuidePage(baseUrl: string): string {
     },
     body: `
 <h1>Connect Google Ads to Claude</h1>
-<p class="lede">Claude can read your Google Ads account, tell you where the budget is going with nothing to show for it,
+<p class="lede">Claude can read your Google Ads account, find the spend that never converted,
 and make the fixes you approve. It takes one connector URL and a Google sign-in. No developer token, no Google Cloud project.</p>
 
 <h2>Set it up</h2>
@@ -309,21 +302,17 @@ ${ASK_FIRST}
 
 <h2>A real example</h2>
 <p>We ran it on our own Google Ads account, which runs ads for three products, over 180 days. The account had spent
-<strong>$2,080 for 9 conversions</strong> ($231 each). What Claude got back:</p>
+<strong>$2,080 for 9 conversions</strong> ($231 each). What Claude came back with:</p>
 <ol>
-<li><strong>Tracking first.</strong> Four primary conversion actions, all counting real outcomes (purchases, sign-ups, calls),
-so a search term with zero conversions really did produce nothing. If tracking had been broken, it would have said so
-before recommending a single cut.</li>
-<li><strong>One campaign stood out:</strong> it spent <strong>$1,188 with no conversions</strong>, more than five times
-the account's cost per conversion.</li>
-<li><strong>Search terms with intent to match:</strong> nine "how to…" searches ("how to create a qr code") cost $56.54
-and never converted. Claude suggested <code>"how to"</code> as a phrase negative keyword on that campaign.</li>
-<li><strong>Judgment, not a blanket rule.</strong> Searches containing "free" cost $187 across the account, and some of them
-<em>did</em> convert. So it suggested blocking "free" only in the two campaigns where it never converted ($87 and $86),
-not account-wide.</li>
+<li>It checked tracking before anything else. All four primary conversion actions counted real outcomes (purchases,
+sign-ups, calls), so a search term with no conversions really had produced nothing.</li>
+<li>One campaign had spent <strong>$1,188 with no conversions</strong>, more than five times the account's cost per conversion.</li>
+<li>Nine "how to…" searches, such as "how to create a qr code", had cost $56.54 without converting. Claude suggested
+<code>"how to"</code> as a phrase negative keyword on that campaign.</li>
+<li>Searches containing "free" cost $187 across the account, but some of them converted. So Claude suggested blocking
+"free" only in the two campaigns where it never had ($87 and $86).</li>
 </ol>
-<p>Nothing changed until we said yes. Applying a proposal is a separate step that Claude asks you to approve, and every
-applied change can be undone with one more message.</p>
+<p>Nothing changed until we approved it.</p>
 
 ${CAN_CHANGE}
 
@@ -362,7 +351,7 @@ export function chatgptGuidePage(baseUrl: string): string {
     },
     body: `
 <h1>Connect Google Ads to ChatGPT</h1>
-<p class="lede">ChatGPT can read your Google Ads account, show you where the budget goes with nothing to show for it,
+<p class="lede">ChatGPT can read your Google Ads account, find the spend that never converted,
 and make the fixes you approve. Setup takes a few menus in ChatGPT's settings and a Google sign-in. No developer token,
 no Google Cloud project.</p>
 
@@ -453,7 +442,7 @@ export function geminiGuidePage(baseUrl: string): string {
 <div class="card"><p><strong>Not working yet.</strong> Gemini accepts Camberstack and you can sign in, but Gemini then stops
 before finishing the connection, with "Cannot Complete Request". We've reported it to Google. Until it's fixed, use
 <a href="/google-ads-claude">Claude</a> or <a href="/google-ads-chatgpt">ChatGPT</a>. The steps below are kept for when it works.</p></div>
-<p class="lede">Gemini can read your Google Ads account, show you where the budget goes with nothing to show for it,
+<p class="lede">Gemini can read your Google Ads account, find the spend that never converted,
 and make the fixes you approve. You add Camberstack as a custom app with one URL, then sign in with Google.
 No developer token, no Google Cloud project.</p>
 

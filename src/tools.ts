@@ -93,7 +93,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   tool("find_wasted_spend", {
     title: "Find wasted spend",
-    description: "Diagnoses where money is going with nothing to show for it: checks conversion tracking first, then search terms that spent a conversion's worth with none, low-intent patterns (free, jobs, how-to, login) that never converted, and keywords to review. Returns suggested negative keywords ready to pass to propose_changes.",
+    description: "Diagnoses spend that isn't converting: checks conversion tracking first, then search terms that spent a conversion's worth with none, low-intent patterns (free, jobs, how-to, login) that never converted, and keywords to review. Returns suggested negative keywords ready to pass to propose_changes.",
     inputSchema: { customer_id: customerId, days, campaign_id: z.string().optional().describe("Limit to one campaign") },
     annotations: read,
   }, ({ customer_id, days, campaign_id }: { customer_id: string; days: number; campaign_id?: string }) =>

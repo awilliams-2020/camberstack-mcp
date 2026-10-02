@@ -230,6 +230,11 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   app.get("/favicon.png", brand("favicon-32.png", "image/png"));
   app.get("/favicon.ico", brand("favicon-32.png", "image/png"));
   app.get("/logo.png", brand("logo-wordmark-480.png", "image/png"));
+  // Self-hosted IBM Plex (OFL, brand/fonts/OFL.txt), so pages make no third-party font requests.
+  app.get("/fonts/:file", (q, r, next) => {
+    if (!/^[a-z0-9-]+\.woff2$/.test(q.params.file)) return next();
+    brand(`fonts/${q.params.file}`, "font/woff2")(q, r);
+  });
   // Setup-guide screenshots (brand/shots/): cropped, personal data painted out, WebP.
   app.get("/shots/:file", (q, r, next) => {
     if (!/^[a-z0-9-]+\.webp$/.test(q.params.file)) return next();
