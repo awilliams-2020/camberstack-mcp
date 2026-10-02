@@ -15,19 +15,33 @@ function setup() {
 
 describe("analytics", () => {
   it("accepts page views and rejects anything else", () => {
-    expect(parseBeacon({ t: "pv", p: "/privacy", x: "https://claude.ai/" })).toEqual({ page: "/privacy", ref: "https://claude.ai/" });
+    expect(parseBeacon({ t: "pv", p: "/privacy", x: "https://claude.ai/" })).toEqual({ page: "/privacy", ref: "https://claude.ai/", campaign: "", keyword: "" });
     expect(parseBeacon({ t: "pv", p: "/<script>" })).toBeNull();
     expect(parseBeacon({ t: "pv", p: "/", x: "javascript:alert(1)" })).toBeNull();
     expect(parseBeacon({ t: "submit", p: "/" })).toBeNull();
   });
 
+  it("names the campaign from the landing query, never forwarding the query itself", () => {
+    const pv = (q: string) => parseBeacon({ t: "pv", p: "/", q });
+    expect(pv("?gad_source=1&gad_campaignid=24316536904&gclid=abc")).toMatchObject({ campaign: "google-ads-24316536904", keyword: "" });
+    expect(pv("?gbraid=xyz")).toMatchObject({ campaign: "google-ads" });
+    expect(pv("?utm_campaign=launch&utm_term=mcp&gclid=abc")).toMatchObject({ campaign: "launch", keyword: "mcp" });
+    expect(pv("?utm_term=mcp&ref=x")).toMatchObject({ campaign: "", keyword: "" });
+    expect(pv("?utm_campaign=<script>")).toMatchObject({ campaign: "" });
+  });
+
   it("sends page views with the visitor's IP and referrer, and drops bots", () => {
     const { a, sent } = setup();
-    a.pageview(req(CHROME), "/", "https://chatgpt.com/");
-    a.pageview(req("Googlebot/2.1"), "/", "");
-    a.pageview(req(""), "/", "");
-    expect(sent).toHaveLength(1);
-    expect(Object.fromEntries(sent[0]!)).toMatchObject({ idsite: "7", url: "https://camberstack.io/", urlref: "https://chatgpt.com/", cip: "203.0.113.9", token_auth: "t" });
+    const pv = { page: "/", ref: "https://chatgpt.com/", campaign: "", keyword: "" };
+    a.pageview(req(CHROME), pv);
+    a.pageview(req("Googlebot/2.1"), pv);
+    a.pageview(req(""), pv);
+    a.pageview(req(CHROME), { ...pv, ref: "https://www.google.com/", campaign: "google-ads-1", keyword: "mcp" });
+    expect(sent).toHaveLength(2);
+    const [chat, ad] = sent.map((s) => Object.fromEntries(s));
+    expect(chat).toMatchObject({ idsite: "7", url: "https://camberstack.io/", urlref: "https://chatgpt.com/", cip: "203.0.113.9", token_auth: "t" });
+    expect(chat!._rcn).toBeUndefined();
+    expect(ad).toMatchObject({ _rcn: "google-ads-1", _rck: "mcp" });
   });
 
   it("records a connect with nothing that identifies the account", () => {

@@ -247,7 +247,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(BEACON_JS); });
   app.post("/e", express.urlencoded({ extended: false, limit: "2kb" }), (req, res) => {
     const b = parseBeacon(req.body ?? {});
-    if (b) analytics.pageview(req, b.page, b.ref);
+    if (b) analytics.pageview(req, b);
     res.status(204).end();
   });
   app.get("/healthz", (_q, r) => { r.json({ ok: true, version: SERVER_VERSION, sha: cfg.gitSha }); });

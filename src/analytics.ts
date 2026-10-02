@@ -33,15 +33,33 @@ const AI_FETCHER = /(ChatGPT-User|MistralAI-User|Gemini-Deep-Research|Claude-Use
 
 /** No cookie, no storage, no identifier. Skips navigator.webdriver (unstealthed headless browsers). */
 export const BEACON_JS = `(()=>{var n=navigator;if(n.webdriver||!n.sendBeacon)return;
-n.sendBeacon('/e',new URLSearchParams({t:'pv',p:location.pathname,x:document.referrer}))})();`;
+n.sendBeacon('/e',new URLSearchParams({t:'pv',p:location.pathname,q:location.search,x:document.referrer}))})();`;
+
+export interface Beacon { page: string; ref: string; campaign: string; keyword: string }
+
+const TAG = /^[\w .:-]{1,100}$/;
+const tag = (v: string | null) => (v && TAG.test(v) ? v : "");
+
+/**
+ * Campaign from the landing URL's query string. Only the name and keyword are kept; the query itself
+ * (click ids included) never reaches Matomo. Google Ads auto-tagging adds no utm tags, and this
+ * Matomo does not read gclid, so without this an ad click is filed as organic Google search.
+ */
+function campaignOf(query: string): { campaign: string; keyword: string } {
+  const q = new URLSearchParams(query.slice(0, 2000));
+  const ads = q.has("gclid") || q.has("gbraid") || q.has("wbraid");
+  const adsId = tag(q.get("gad_campaignid"));
+  const campaign = tag(q.get("utm_campaign")) || (ads ? (adsId ? `google-ads-${adsId}` : "google-ads") : "");
+  return { campaign, keyword: campaign ? tag(q.get("utm_term")) : "" };
+}
 
 /** Pure, so it is unit-testable. Returns null for anything malformed. */
-export function parseBeacon(form: Record<string, unknown>): { page: string; ref: string } | null {
+export function parseBeacon(form: Record<string, unknown>): Beacon | null {
   const page = String(form.p ?? "");
   if (form.t !== "pv" || !/^\/[A-Za-z0-9_\-/.]{0,80}$/.test(page)) return null;
   const ref = String(form.x ?? "");
   if (ref && !/^https?:\/\/\S{1,500}$/.test(ref)) return null;
-  return { page, ref };
+  return { page, ref, ...campaignOf(String(form.q ?? "")) };
 }
 
 export class Analytics {
@@ -70,11 +88,12 @@ export class Analytics {
     }).catch(() => { /* analytics must never affect a request */ });
   }
 
-  pageview(req: Request, page: string, ref: string): void {
+  pageview(req: Request, { page, ref, campaign, keyword }: Beacon): void {
     const w = this.who(req);
     if (!w) return;
     this.send({ url: `${this.cfg.site}${page}`, action_name: page, urlref: ref, ua: w.ua,
-      lang: String(req.headers["accept-language"] ?? ""), cid: w.cid }, w.ip);
+      lang: String(req.headers["accept-language"] ?? ""), cid: w.cid,
+      ...(campaign ? { _rcn: campaign } : {}), ...(keyword ? { _rck: keyword } : {}) }, w.ip);
   }
 
   /** Server-side outcome event, e.g. a Google Ads account connected. Same browser → same daily visitor. */
