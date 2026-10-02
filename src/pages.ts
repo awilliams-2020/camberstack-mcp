@@ -447,8 +447,10 @@ No developer token, no Google Cloud project.</p>
 <ol>
 <li>In Gemini, open <strong>Settings</strong> and choose <strong>Personal Intelligence</strong>.
 ${shot("gemini-menu.webp", 540, 285, "Gemini's settings menu with Personal Intelligence highlighted")}</li>
-<li>Open <strong>Connected Apps</strong>, then tap <strong>Custom apps</strong>.
-(Shortcut: <a href="https://gemini.google.com/apps">gemini.google.com/apps</a> opens Connected Apps directly.)
+<li>Tap <strong>Connected Apps</strong>.
+(Shortcut: <a href="https://gemini.google.com/apps">gemini.google.com/apps</a> opens it directly.)
+${shot("gemini-connected.webp", 540, 299, "Gemini's Personal Intelligence page with the Connected Apps card highlighted")}</li>
+<li>Tap <strong>Custom apps</strong>.
 ${shot("gemini-1.webp", 540, 334, "Gemini's Connected Apps page with the Custom apps filter highlighted")}</li>
 <li>Under <strong>Custom apps for Spark</strong>, paste the server URL <code>${mcpUrl}</code> and tap <strong>Next</strong>.
 ${shot("gemini-2.webp", 540, 218, "The Custom apps for Spark box, with the app link field and Next button highlighted")}</li>
