@@ -8,7 +8,7 @@ import type { DB, UserRow } from "./db.js";
 import type { GoogleCreds } from "./google.js";
 import type { UserSession } from "./session.js";
 import { SignIn } from "./signin.js";
-import { appPage, esc, infoPage } from "./pages.js";
+import { appPage, COPY_JS, esc, infoPage } from "./pages.js";
 import { DEMO_CID } from "./demo.js";
 import { PRO_PRICE_LABEL, proSessionHtml } from "./plans.js";
 
@@ -148,8 +148,7 @@ ${u.enc_refresh ? `<form method="post" action="/account/disconnect" class="dange
 <label><input type="checkbox" name="confirm" value="yes" required> I want to disconnect</label><button class="btn-danger">Disconnect Google Ads</button></form>`
   : `<p class="muted">Already disconnected.</p>`}
 </div>
-<script>document.addEventListener("click",function(e){var b=e.target.closest("[data-copy]");if(!b||!navigator.clipboard)return;
-navigator.clipboard.writeText(b.dataset.copy).then(function(){var t=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=t},1500)})});</script>`));
+${COPY_JS}`));
   });
 
   return auth;

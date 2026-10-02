@@ -575,7 +575,15 @@ describe("OAuth + MCP end to end", () => {
     expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-claude"');
     const c = await fetch(`${base}/google-ads-chatgpt`);
     expect(c.status).toBe(200);
-    expect(await c.text()).toContain("Create MCP app");
+    expect(await c.text()).toContain("Create MCP App");
+    const claude = await (await fetch(`${base}/google-ads-claude`)).text() + await (await fetch(`${base}/google-ads-chatgpt`)).text();
+    for (const m of claude.matchAll(/src="(\/shots\/[^"]+)"/g)) {
+      const img = await fetch(`${base}${m[1]}`);
+      expect(img.status).toBe(200);
+      expect(img.headers.get("content-type")).toContain("image/webp");
+    }
+    expect(claude).toContain('src="/shots/claude-1.webp"');
+    expect((await fetch(`${base}/shots/..%2Fserver.ts`)).status).toBe(404);
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-chatgpt`);
     expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-chatgpt"');
   });

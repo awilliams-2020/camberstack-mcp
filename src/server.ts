@@ -194,6 +194,11 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   app.get("/favicon.png", brand("favicon-32.png", "image/png"));
   app.get("/favicon.ico", brand("favicon-32.png", "image/png"));
   app.get("/logo.png", brand("logo-wordmark-480.png", "image/png"));
+  // Setup-guide screenshots (brand/shots/): cropped, personal data painted out, WebP.
+  app.get("/shots/:file", (q, r, next) => {
+    if (!/^[a-z0-9-]+\.webp$/.test(q.params.file)) return next();
+    brand(`shots/${q.params.file}`, "image/webp")(q, r);
+  });
   billing.mount(app, info);
   lifecycle.mount(app, info);
 

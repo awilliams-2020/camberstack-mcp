@@ -34,6 +34,10 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 footer{border-top:1px solid var(--line);margin-top:72px;padding:28px 0;font-size:14px;color:var(--muted)}
 footer a{color:var(--muted);margin-right:16px}
 .legal h2{font-size:20px;margin-top:36px}
+ol.steps>li{margin-bottom:28px}
+.shot{display:block;width:100%;max-width:340px;height:auto;margin-top:12px;border:1px solid var(--line);border-radius:12px}
+.url{display:flex;align-items:center;gap:10px;background:var(--code);border-radius:8px;padding:8px 8px 8px 14px;margin:8px 0 24px}
+.url code{background:none;padding:0;flex:1;font-size:15px;overflow-x:auto;white-space:nowrap}
 .acct{padding:32px 0 8px}
 .acct-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between;margin-bottom:20px}
 .acct-head h1{font-size:28px;margin:0}.acct-head .who{text-transform:none;letter-spacing:0;font-weight:400;font-size:15px}
@@ -93,6 +97,14 @@ ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</sc
 <script src="/e.js" defer></script>
 </body></html>`;
 }
+
+/** Copies a [data-copy] button's text to the clipboard. Include once per page. */
+export const COPY_JS = `<script>document.addEventListener("click",function(e){var b=e.target.closest("[data-copy]");if(!b||!navigator.clipboard)return;
+navigator.clipboard.writeText(b.dataset.copy).then(function(){var t=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=t},1500)})});</script>`;
+
+/** A guide screenshot from brand/shots/ (served at /shots/). */
+const shot = (file: string, w: number, h: number, alt: string) =>
+  `<img class="shot" src="/shots/${file}" width="${w}" height="${h}" alt="${alt}" loading="lazy">`;
 
 export function homePage(baseUrl: string): string {
   const mcpUrl = `${baseUrl}/mcp`;
@@ -156,16 +168,17 @@ It cannot create or delete campaigns, change bid strategies, touch billing, or e
 Any question beyond these tools is answered with read-only queries.</p>
 
 <h2 id="setup">Connect</h2>
-<p>Server URL:</p>
-<pre>${mcpUrl}</pre>
-<h3>Claude (claude.ai or desktop) · <a href="/google-ads-claude">step-by-step guide</a></h3>
-<p>Customize → Connectors → <em>+ Add</em> → <em>Add custom connector</em> → paste the URL above → Connect, then sign in with Google.
-In a chat, switch it on under <strong>+</strong> → Connectors.</p>
+<p>Add this server URL to your AI app, then sign in with Google.</p>
+<div class="url"><code>${mcpUrl}</code><button class="copy" type="button" data-copy="${mcpUrl}">Copy</button></div>
+${COPY_JS}
+<h3>Claude (web and desktop app)</h3>
+<p>Add it as a custom connector in <strong>Settings</strong>, under <strong>Connectors</strong>. About two minutes.
+<a href="/google-ads-claude">Setup guide with screenshots</a></p>
+<h3>ChatGPT (Plus, Pro, Business, Enterprise)</h3>
+<p>Turn on developer mode, add it as an MCP app, then type <strong>@Camberstack</strong> in a chat.
+<a href="/google-ads-chatgpt">Step-by-step setup guide</a></p>
 <h3>Claude Code</h3>
 <pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
-<h3>ChatGPT (Plus, Pro, Business, Enterprise) · <a href="/google-ads-chatgpt">step-by-step guide</a></h3>
-<p>Settings → Plugins → turn on <em>Developer mode</em>. Then Plugins → <em>+</em> → <em>Create app</em> → <em>Create MCP app</em> → paste the URL above, authentication OAuth, then sign in with Google.
-In a chat, type <strong>@Camberstack</strong> before your question.</p>
 <h3>Cursor, VS Code, others</h3>
 <pre>{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }</pre>
 <p class="muted">Your AI app handles sign-in. Google will show "Camberstack wants to access your Google Ads" before anything is shared.</p>
@@ -243,7 +256,7 @@ export function claudeGuidePage(baseUrl: string): string {
     description: "Connect your Google Ads account to Claude with an MCP server. No developer token or Google Cloud project: sign in with Google, then ask Claude what's wasting money.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
-      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-01",
+      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-02",
       author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
       about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
     },
@@ -255,15 +268,21 @@ and make the fixes you approve. It takes one connector URL and a Google sign-in.
 <h2>Set it up</h2>
 <p>Camberstack is a hosted Google Ads MCP server. MCP (Model Context Protocol) is how Claude connects to outside tools.</p>
 <h3>Claude on the web or desktop app</h3>
-<ol>
-<li>Open <strong>Customize → Connectors</strong>, click <strong>+ Add</strong> and choose <strong>Add custom connector</strong>.</li>
-<li>Name it Camberstack and paste the server URL: <code>${mcpUrl}</code></li>
-<li>Click <strong>Connect</strong> and sign in with the Google account that has access to your Google Ads.
+<ol class="steps">
+<li>Click your name at the bottom of the sidebar and choose <strong>Settings</strong>.
+${shot("claude-1.webp", 540, 546, "Claude's account menu, open over the sidebar, with Settings highlighted")}</li>
+<li>Open the <strong>Connectors</strong> tab and click <strong>Add</strong>.
+${shot("claude-2.webp", 540, 643, "Claude's Settings on the Connectors tab, with the Add button highlighted")}</li>
+<li>Choose <strong>Add custom connector</strong>.
+${shot("claude-3.webp", 540, 423, "The Add menu with Add custom connector highlighted")}</li>
+<li>Name it Camberstack, paste the server URL <code>${mcpUrl}</code> and click <strong>Continue</strong>.
+${shot("claude-4.webp", 540, 885, "The Add custom connector form, with the Name and MCP server URL fields highlighted")}</li>
+<li>Sign in with the Google account that has access to your Google Ads.
 Google shows exactly what's being shared before you agree.</li>
 <li>In a chat, click <strong>+</strong> at the bottom left, open <strong>Connectors</strong> and make sure Camberstack is switched on.</li>
 </ol>
-<p class="muted">On the Free plan you can add one custom connector. On a Team or Enterprise plan, an Owner adds it first under
-<strong>Organization settings → Connectors</strong> (Add → Custom → Web); then each member connects it under Customize → Connectors.</p>
+<p class="muted">On the Free plan you can add one custom connector. On a Team or Enterprise plan, an Owner adds it first in
+<strong>Organization settings</strong>, under <strong>Connectors</strong> (choose Add, Custom, then Web); then each member connects it from their own Settings.</p>
 <h3>Claude Code</h3>
 <pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
 <p class="muted">Also works in <a href="/google-ads-chatgpt">ChatGPT</a>, Cursor and other MCP apps: see <a href="/#setup">all setup options</a>.</p>
@@ -306,8 +325,9 @@ ${commonQuestions("Claude")}
 
 /**
  * Use-case page for "chatgpt google ads". ChatGPT only takes plugins outside its directory through developer
- * mode, which is several menus deep and warns about "elevated risk", so this page walks through both.
- * Menu labels, the OAuth option, @-mention use and mobile confirmed by the operator in a live account, 2026-10-01; they move, so re-check when editing.
+ * mode, which is several menus deep and warns that "custom MCP servers introduce risk", so this page walks through both.
+ * Menu labels, the OAuth option, @-mention use and mobile confirmed by the operator in a live account, 2026-10-01; the Plugins path
+ * (+, Create custom MCP server, Create MCP App) re-confirmed with screenshots 2026-10-02. They move, so re-check when editing.
  */
 export function chatgptGuidePage(baseUrl: string): string {
   const mcpUrl = `${baseUrl}/mcp`;
@@ -317,7 +337,7 @@ export function chatgptGuidePage(baseUrl: string): string {
     description: "Connect your Google Ads account to ChatGPT with a plugin. No developer token or Google Cloud project: turn on developer mode, add one URL, sign in with Google, then ask what's wasting money.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
-      headline: "Connect Google Ads to ChatGPT", url: `${baseUrl}/google-ads-chatgpt`, dateModified: "2026-10-01",
+      headline: "Connect Google Ads to ChatGPT", url: `${baseUrl}/google-ads-chatgpt`, dateModified: "2026-10-02",
       author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
       about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
     },
@@ -332,21 +352,28 @@ no Google Cloud project.</p>
 <li><strong>A paid ChatGPT plan:</strong> Plus, Pro, Business, Enterprise or Edu. The free plan can't add plugins like this one.</li>
 <li><strong>ChatGPT on the web</strong> (chatgpt.com) for setup. Once it's added, it works in the ChatGPT phone app too.</li>
 <li><strong>On Business or Enterprise,</strong> a workspace admin may need to allow developer mode first, under
-Workspace settings → Permissions &amp; roles.</li>
+<strong>Workspace settings</strong>, under <strong>Permissions &amp; roles</strong>.</li>
 </ul>
 
 <h2>Set it up</h2>
 <ol>
-<li>In ChatGPT, open <strong>Settings → Plugins</strong> and turn on <strong>Developer mode</strong>.</li>
-<li>Still in Plugins, click <strong>+</strong>, then <strong>Create app</strong>, then <strong>Create MCP app</strong>.</li>
-<li>Name it Camberstack, paste the server URL <code>${mcpUrl}</code>, and choose <strong>OAuth</strong> for authentication.</li>
+<li>In ChatGPT, open <strong>Settings</strong>, go to <strong>Plugins</strong> and turn on <strong>Developer mode</strong>.</li>
+<li>Open <strong>Plugins</strong> from the sidebar.
+${shot("chatgpt-1.webp", 540, 497, "ChatGPT's sidebar with Plugins highlighted")}</li>
+<li>Click <strong>+</strong> next to the search box and choose <strong>Create custom MCP server</strong>.
+${shot("chatgpt-2.webp", 540, 503, "ChatGPT's Plugins page with the + button and Create custom MCP server highlighted")}</li>
+<li>Click <strong>Create MCP App</strong>.
+${shot("chatgpt-3.webp", 540, 582, "The New Plugin dialog with Create MCP App highlighted")}</li>
+<li>Name it Camberstack, paste the server URL <code>${mcpUrl}</code> under <strong>Connection</strong>, leave
+<strong>Authentication</strong> on <strong>OAuth</strong>, and tick <strong>I understand and want to continue</strong>.
+${shot("chatgpt-4.webp", 540, 994, "ChatGPT's New Plugin form with the Name, server URL, Authentication and I understand checkbox highlighted")}</li>
 <li>Sign in with the Google account that has access to your Google Ads. Google shows exactly what's being shared before you agree.</li>
 <li>In a chat, type <strong>@</strong> and the name you gave it, then your question:
 <em>"@Camberstack what's wasting money in my Google Ads account?"</em></li>
 </ol>
 
-<h2>About the "elevated risk" warning</h2>
-<p>ChatGPT shows that warning for every plugin added through developer mode, which is the only way to add one that isn't in
+<h2>About the "Custom MCP servers introduce risk" warning</h2>
+<p>ChatGPT shows that warning for every custom MCP server, which is the only way to add one that isn't in
 ChatGPT's plugin directory yet. It isn't specific to Camberstack. What protects your account here:</p>
 <ul>
 <li>Nothing changes until you approve it. The AI can only <em>propose</em> changes; applying is a separate step, and ChatGPT
