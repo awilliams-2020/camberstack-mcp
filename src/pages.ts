@@ -357,7 +357,12 @@ no Google Cloud project.</p>
 
 <h2>Set it up</h2>
 <ol>
-<li>In ChatGPT, open <strong>Settings</strong>, go to <strong>Plugins</strong> and turn on <strong>Developer mode</strong>.</li>
+<li>In ChatGPT, click your name at the bottom of the sidebar and choose <strong>Settings</strong>.
+${shot("chatgpt-dev-1.webp", 540, 521, "ChatGPT's account menu with Settings highlighted")}</li>
+<li>Open the <strong>Plugins</strong> tab and choose <strong>Developer mode</strong>.
+${shot("chatgpt-dev-2.webp", 540, 809, "ChatGPT's Settings on the Plugins tab, with Developer mode highlighted")}</li>
+<li>Turn on the <strong>Developer mode</strong> switch.
+${shot("chatgpt-dev-3.webp", 540, 612, "The Developer mode switch, marked Elevated risk")}</li>
 <li>Open <strong>Plugins</strong> from the sidebar.
 ${shot("chatgpt-1.webp", 540, 497, "ChatGPT's sidebar with Plugins highlighted")}</li>
 <li>Click <strong>+</strong> next to the search box and choose <strong>Create custom MCP server</strong>.
