@@ -21,6 +21,8 @@ import { errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, gemin
 /** brand/ sits beside src/ and dist/ at the package root. */
 const BRAND_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "..", "brand");
 const RESOURCE_NAME = "Camberstack Google Ads";
+/** Gemini's OAuth relay; it registers its /r/ and /a/ paths on all three hosts. */
+const GEMINI_REDIRECT = /^https:\/\/oauth-redirect(-sandbox|-test)?\.googleusercontent\.com\//;
 const HOUR = 3600_000;
 
 export interface Overrides extends Partial<SessionDeps> {
@@ -79,6 +81,19 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   const admin = mountAdmin(app, {
     db, google: cfg.google, baseUrl: cfg.baseUrl, adminUrl: cfg.adminUrl, adminEmails: cfg.adminEmails,
     internalEmails, fetch: overrides.fetch,
+  });
+
+  // Gemini (Spark custom apps) registers asking for client_secret_post, takes the secret, then its
+  // redirect page fails ("Cannot Complete Request") without ever calling /token. Registered as a public
+  // client (PKCE only, no secret) it completes, as in ghchinoy/spark-agent-tools' field notes. Only
+  // clients whose every redirect is Google's relay get this; everyone else keeps the SDK default.
+  app.post("/register", express.json({ limit: "100kb" }), (req, _res, next) => {
+    const uris = (req.body as { redirect_uris?: unknown })?.redirect_uris;
+    if (Array.isArray(uris) && uris.length > 0
+      && uris.every((u) => typeof u === "string" && GEMINI_REDIRECT.test(u))) {
+      req.body.token_endpoint_auth_method = "none";
+    }
+    next();
   });
 
   // OAuth: /.well-known/*, /authorize, /token, /register, /revoke

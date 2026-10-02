@@ -592,6 +592,24 @@ describe("OAuth + MCP end to end", () => {
     expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-gemini"');
   });
 
+  it("registers Gemini's relay as a public client, everyone else with a secret", async () => {
+    const reg = (redirect_uris: string[]) => fetch(`${base}/register`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ redirect_uris, client_name: "Google", token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"], response_types: ["code"] }),
+    }).then(async (r) => ({ status: r.status, body: await r.json() }));
+    const g = await reg(["oauth-redirect", "oauth-redirect-sandbox", "oauth-redirect-test"].flatMap((h) =>
+      ["r", "a"].map((k) => `https://${h}.googleusercontent.com/${k}/user_bound_custom-mcp-1-camberstack_io`)));
+    expect(g.status).toBe(201);
+    expect(g.body.token_endpoint_auth_method).toBe("none");
+    expect(g.body.client_secret).toBeUndefined();
+    const other = await reg(["https://claude.ai/api/mcp/auth_callback"]);
+    expect(other.body.token_endpoint_auth_method).toBe("client_secret_post");
+    expect(other.body.client_secret).toBeTruthy();
+    const mixed = await reg(["https://oauth-redirect.googleusercontent.com/r/x", "https://evil.example/cb"]);
+    expect(mixed.body.client_secret).toBeTruthy();
+  });
+
   it("serves the pages Google's brand verification reads", async () => {
     const home = await (await fetch(`${base}/`)).text();
     expect(home).toContain('href="/privacy"');
