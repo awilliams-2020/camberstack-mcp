@@ -576,7 +576,8 @@ describe("OAuth + MCP end to end", () => {
     const c = await fetch(`${base}/google-ads-chatgpt`);
     expect(c.status).toBe(200);
     expect(await c.text()).toContain("Create MCP App");
-    const claude = await (await fetch(`${base}/google-ads-claude`)).text() + await (await fetch(`${base}/google-ads-chatgpt`)).text();
+    const claude = await (await fetch(`${base}/google-ads-claude`)).text() + await (await fetch(`${base}/google-ads-chatgpt`)).text()
+      + await (await fetch(`${base}/google-ads-gemini`)).text();
     for (const m of claude.matchAll(/src="(\/shots\/[^"]+)"/g)) {
       const img = await fetch(`${base}${m[1]}`);
       expect(img.status).toBe(200);
@@ -586,6 +587,9 @@ describe("OAuth + MCP end to end", () => {
     expect((await fetch(`${base}/shots/..%2Fserver.ts`)).status).toBe(404);
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-chatgpt`);
     expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-chatgpt"');
+    expect(claude).toContain('src="/shots/gemini-3.webp"');
+    expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-gemini`);
+    expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-gemini"');
   });
 
   it("serves the pages Google's brand verification reads", async () => {

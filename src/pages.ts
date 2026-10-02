@@ -177,6 +177,9 @@ ${COPY_JS}
 <h3>ChatGPT (Plus, Pro, Business, Enterprise)</h3>
 <p>Turn on developer mode, add it as an MCP app, then type <strong>@Camberstack</strong> in a chat.
 <a href="/google-ads-chatgpt">Step-by-step setup guide</a></p>
+<h3>Gemini (Google AI Pro or Ultra, personal accounts in the US)</h3>
+<p>Add it as a custom app under <strong>Connected Apps</strong>, then sign in with Google.
+<a href="/google-ads-gemini">Setup guide with screenshots</a></p>
 <h3>Claude Code</h3>
 <pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
 <h3>Cursor, VS Code, others</h3>
@@ -406,6 +409,73 @@ ${commonQuestions("ChatGPT")}
   });
 }
 
+/**
+ * Use-case page for "gemini google ads". Gemini takes outside MCP servers as "custom apps" (Gemini Spark), which
+ * Google limits to personal accounts, 18+, in the US, with Keep Activity on, on a Google AI Pro or Ultra plan
+ * (support.google.com/gemini/answer/17209137, read 2026-10-02). Screenshots are the operator's, mobile web, 2026-10-02.
+ * Gemini supports dynamic client registration, so Additional settings stays closed.
+ */
+export function geminiGuidePage(baseUrl: string): string {
+  const mcpUrl = `${baseUrl}/mcp`;
+  return layout({
+    baseUrl, path: "/google-ads-gemini",
+    title: "Connect Google Ads to Gemini: custom app (MCP) setup | Camberstack",
+    description: "Connect your Google Ads account to Google Gemini as a custom app. No developer token or Google Cloud project: add one URL, sign in with Google, then ask Gemini what's wasting money.",
+    jsonLd: {
+      "@context": "https://schema.org", "@type": "TechArticle",
+      headline: "Connect Google Ads to Gemini", url: `${baseUrl}/google-ads-gemini`, dateModified: "2026-10-02",
+      author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
+      about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
+    },
+    body: `
+<h1>Connect Google Ads to Gemini</h1>
+<p class="lede">Gemini can read your Google Ads account, show you where the budget goes with nothing to show for it,
+and make the fixes you approve. You add Camberstack as a custom app with one URL, then sign in with Google.
+No developer token, no Google Cloud project.</p>
+
+<h2>Before you start</h2>
+<p>Google only offers custom apps in Gemini when all of these are true. If the <strong>Custom apps</strong> option is missing, one of them is why.</p>
+<ul>
+<li><strong>A personal Google account.</strong> Work and school (Google Workspace) accounts don't get custom apps.</li>
+<li><strong>Google AI Pro or Ultra</strong>, the plans that include Gemini Spark.</li>
+<li><strong>18 or over, in the US,</strong> with Gemini set to English.</li>
+<li><strong>Keep Activity turned on</strong> in Gemini's activity settings. Custom apps are switched off without it.</li>
+</ul>
+
+<h2>Set it up</h2>
+<ol>
+<li>Open <a href="https://gemini.google.com/apps">gemini.google.com/apps</a>, or in Gemini go to <strong>Settings</strong>, then
+<strong>Connected Apps</strong>. Tap <strong>Custom apps</strong>.
+${shot("gemini-1.webp", 540, 334, "Gemini's Connected Apps page with the Custom apps filter highlighted")}</li>
+<li>Under <strong>Custom apps for Spark</strong>, paste the server URL <code>${mcpUrl}</code> and tap <strong>Next</strong>.
+${shot("gemini-2.webp", 540, 218, "The Custom apps for Spark box, with the app link field and Next button highlighted")}</li>
+<li>In <strong>Connect to an MCP server</strong>, check the URL is <code>${mcpUrl}</code> and tap <strong>Next</strong>.
+Leave <strong>Additional settings</strong> alone: Camberstack registers itself with Gemini, so there's no client ID or secret to enter.
+${shot("gemini-3.webp", 540, 655, "Gemini's Connect to an MCP server dialog, with the MCP Server URL field and Next button highlighted")}</li>
+<li>Sign in with the Google account that has access to your Google Ads. Google shows exactly what's being shared before you agree.
+It can be a different Google account from the one you use Gemini with.</li>
+<li>Start a new chat and ask your question. Gemini uses Camberstack when the question is about your Google Ads.</li>
+</ol>
+<p class="muted">Setup works on the Gemini website on a computer or phone. Once it's added, it's there in the Gemini app too.</p>
+
+${ASK_FIRST}
+
+${CAN_CHANGE}
+
+<h2>Questions</h2>
+<h3>Why does Gemini say the app "hasn't been reviewed by Google"?</h3>
+<p>Gemini shows that for every custom app. It isn't specific to Camberstack. Nothing in your account changes until you approve
+a specific proposal, every applied change can be undone, and nothing can be deleted.</p>
+<h3>Isn't Gemini already connected to my Google account?</h3>
+<p>Gemini's built-in Google apps don't include Google Ads. Camberstack adds it, with its own Google sign-in limited to Google Ads and your email address.</p>
+${commonQuestions("Gemini")}
+
+<p class="muted">Also works in <a href="/google-ads-claude">Claude</a>, <a href="/google-ads-chatgpt">ChatGPT</a>, Cursor and other MCP apps: see <a href="/#setup">all setup options</a>.</p>
+<p><a class="btn" href="/#setup">Connect Google Ads to Gemini</a></p>
+`,
+  });
+}
+
 export function privacyPage(baseUrl: string): string {
   return layout({
     baseUrl, path: "/privacy",
@@ -538,7 +608,7 @@ export function robotsTxt(baseUrl: string): string {
 }
 
 export function sitemapXml(baseUrl: string, lastmod: string): string {
-  const urls = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/privacy", "/terms"];
+  const urls = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/google-ads-gemini", "/privacy", "/terms"];
   const lm = lastmod ? `<lastmod>${lastmod.slice(0, 10)}</lastmod>` : "";
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
     .map((u) => `  <url><loc>${baseUrl}${u}</loc>${lm}</url>`).join("\n")}\n</urlset>\n`;
@@ -558,6 +628,7 @@ export function llmsTxt(baseUrl: string): string {
 - [Pricing](${baseUrl}/#pricing)
 - [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)
 - [Connect Google Ads to ChatGPT (step-by-step guide)](${baseUrl}/google-ads-chatgpt)
+- [Connect Google Ads to Gemini (custom app setup guide)](${baseUrl}/google-ads-gemini)
 - [Source (MIT)](https://github.com/awilliams-2020/camberstack-mcp)
 - [Privacy](${baseUrl}/privacy)
 - [Terms](${baseUrl}/terms)
