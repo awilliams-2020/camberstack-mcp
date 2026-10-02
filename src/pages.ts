@@ -3,7 +3,9 @@
  * reviews: they must name the app, say what it does with Google user data, and link the policy.
  */
 
+import { z } from "zod";
 import { PRO_SESSION } from "./plans.js";
+import type { ToolDoc } from "./tools.js";
 
 const CONTACT = "adam@camberstack.io";
 const UPDATED = "2026-10-01";
@@ -62,6 +64,11 @@ ol.steps>li{margin-bottom:28px}
 .pill.discarded{background:var(--code);color:var(--muted)}
 .change-foot{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
 .copy{font:inherit;font-size:13px;background:none;border:1px solid var(--line);border-radius:6px;padding:3px 9px;color:var(--fg);cursor:pointer}
+.pill.ro{background:color-mix(in srgb,#2f9e6e 16%,transparent);color:#2f9e6e}
+.pill.prep{background:color-mix(in srgb,#c78a12 18%,transparent);color:#b07a10}
+.pill.act{background:color-mix(in srgb,#c2412d 16%,transparent);color:#c2412d}
+.tool{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:12px;scroll-margin-top:16px}
+.tool h3{margin:0;font-size:18px}.tool p{margin:8px 0 0}.tool table{margin-top:10px;font-size:14px}.tool td:first-child{white-space:nowrap}
 .danger{border:1px solid color-mix(in srgb,#c2412d 40%,var(--line));border-radius:10px;padding:16px}
 .danger p{margin:0 0 12px}.danger label{display:block;margin-bottom:12px}
 .btn-danger{font:inherit;font-weight:600;background:#c2412d;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
@@ -73,6 +80,8 @@ ol.steps>li{margin-bottom:28px}
 .big{font-size:22px}
 }
 `;
+
+export const SOURCE_URL = "https://github.com/awilliams-2020/camberstack-mcp";
 
 function layout(o: { title: string; description: string; path: string; body: string; baseUrl: string; jsonLd?: object; noindex?: boolean }): string {
   return `<!doctype html>
@@ -93,7 +102,7 @@ ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</sc
 <nav><a href="/#setup">Connect</a><a href="/#pricing">Pricing</a><a href="/account">Account</a></nav></div></header>
 <main class="wrap">${o.body}</main>
 <footer><div class="wrap">
-<a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
+<a href="/tools">Tools</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
 <p>Camberstack is independent and not affiliated with or endorsed by Google. Google Ads is a trademark of Google LLC.</p>
 </div></footer>
 <script src="/e.js" defer></script>
@@ -172,7 +181,8 @@ plus 6 exact negatives. Want me to prepare that?</p>
 </table>
 <p class="muted">Turning a campaign back on, or more than doubling a budget, is flagged with a warning in the proposal before you approve it.
 It cannot create or delete campaigns, change bid strategies, touch billing, or edit anything outside Google Ads.
-Any question beyond these tools is answered with read-only queries.</p>
+Any question beyond these tools is answered with read-only queries. <a href="/tools">Every tool and what it can do</a>;
+the code is <a href="${SOURCE_URL}">open source</a>.</p>
 
 <h2 id="setup">Connect</h2>
 <p>Add this server URL to your AI app, then sign in with Google.</p>
@@ -621,24 +631,65 @@ export function errorPage(baseUrl: string, message: string): string {
     body: `<h1>That didn't work</h1><p class="lede">${esc(message)}</p><p><a href="/#setup">Connection instructions</a></p>` });
 }
 
+/** What a tool can do to the account, from its MCP annotations. */
+function effect(t: ToolDoc): { cls: string; label: string } {
+  if (t.annotations.readOnlyHint) return { cls: "ro", label: "Read-only" };
+  if (t.annotations.destructiveHint) return { cls: "act", label: "Needs your go-ahead" };
+  return { cls: "prep", label: "Changes nothing in Google Ads" };
+}
+
+/** /tools: generated from the registered tool definitions, so it can't drift from what the server offers. */
+export function toolsPage(baseUrl: string, tools: ToolDoc[]): string {
+  const params = (t: ToolDoc) => {
+    if (!t.inputSchema || !Object.keys(t.inputSchema).length) return "";
+    const js = z.toJSONSchema(z.object(t.inputSchema), { io: "input", unrepresentable: "any" }) as
+      { properties: Record<string, { description?: string; default?: unknown }>; required?: string[] };
+    const rows = Object.entries(js.properties).map(([name, p]) => {
+      const note = p.default !== undefined ? `Default ${esc(JSON.stringify(p.default))}.`
+        : js.required?.includes(name) ? "Required." : "Optional.";
+      return `<tr><td><code>${esc(name)}</code></td><td>${esc(p.description ?? "")} <span class="muted">${note}</span></td></tr>`;
+    });
+    return `<table><tr><th>Parameter</th><th>What it is</th></tr>${rows.join("")}</table>`;
+  };
+  const cards = tools.map((t) => {
+    const e = effect(t);
+    return `<div class="tool" id="${esc(t.name)}"><div class="change-top"><h3><code>${esc(t.name)}</code> ${esc(t.title)}</h3>
+<span class="pill ${e.cls}">${e.label}</span></div><p>${esc(t.description)}</p>${params(t)}</div>`;
+  }).join("\n");
+  return layout({
+    baseUrl, path: "/tools",
+    title: "Camberstack tools: every Google Ads MCP tool and parameter",
+    description: `The ${tools.length} tools your AI gets when you connect Camberstack to Google Ads: what each reads, what it can change, and its parameters.`,
+    body: `
+<h1>Every Camberstack tool</h1>
+<p class="lede">These are the ${tools.length} tools your AI assistant gets when you connect Camberstack. This page is built from the
+same definitions the server uses, so it always matches what's live, and the descriptions are the ones your AI reads. The code is open source: <a href="${SOURCE_URL}">read it on GitHub</a>.</p>
+<p><span class="pill ro">Read-only</span> tools never change anything. <span class="pill prep">Changes nothing in Google Ads</span>
+tools prepare or manage proposals. Only <code>apply_changes</code> edits your ads, and only after you approve a specific proposal.
+<code>disconnect</code> asks you to confirm before it revokes access.</p>
+${cards}
+<p class="muted">You don't call these yourself: ask your AI in plain English and it picks the tools. <a href="/#setup">Connect Camberstack</a>.</p>`,
+  });
+}
+
 export function robotsTxt(baseUrl: string): string {
   return `User-agent: *\nAllow: /\nDisallow: /oauth/\nDisallow: /authorize\nDisallow: /token\nDisallow: /register\nDisallow: /account\n\nSitemap: ${baseUrl}/sitemap.xml\n`;
 }
 
 export function sitemapXml(baseUrl: string, lastmod: string): string {
-  const urls = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/privacy", "/terms"];
+  const urls = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/tools", "/privacy", "/terms"];
   const lm = lastmod ? `<lastmod>${lastmod.slice(0, 10)}</lastmod>` : "";
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
     .map((u) => `  <url><loc>${baseUrl}${u}</loc>${lm}</url>`).join("\n")}\n</urlset>\n`;
 }
 
-export function llmsTxt(baseUrl: string): string {
+export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
   return `# Camberstack
 
 > Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or any MCP client; the AI diagnoses wasted spend and applies only changes the user approves.
 
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
-- Tools: list_accounts, account_overview, find_wasted_spend, keyword_ideas, keyword_metrics, run_gaql, propose_changes, apply_changes, undo_changes, discard_proposal, change_history, billing, disconnect
+- Tools: ${tools.map((t) => t.name).join(", ")}
 - Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget. Every applied change can be undone.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
 - Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes plus a 30-minute call or written review of the account's ads with the founder. Undo is always free.
@@ -646,7 +697,8 @@ export function llmsTxt(baseUrl: string): string {
 - [Pricing](${baseUrl}/#pricing)
 - [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)
 - [Connect Google Ads to ChatGPT (step-by-step guide)](${baseUrl}/google-ads-chatgpt)
-- [Source (MIT)](https://github.com/awilliams-2020/camberstack-mcp)
+- [Every tool, with its parameters](${baseUrl}/tools)
+- [Source (MIT)](${SOURCE_URL})
 - [Privacy](${baseUrl}/privacy)
 - [Terms](${baseUrl}/terms)
 `;

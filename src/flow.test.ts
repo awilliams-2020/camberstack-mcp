@@ -616,6 +616,31 @@ describe("OAuth + MCP end to end", () => {
     expect((await fetch(`${base}/.well-known/glama.json`)).status).toBe(404);
   });
 
+  it("documents every registered tool on /tools and in llms.txt", async () => {
+    const res = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    const listed = (await res.json()).result.tools;
+    const names: string[] = listed.map((t: any) => t.name);
+    // /tools shows each parameter's description, so every one needs one.
+    for (const t of listed) for (const [k, v] of Object.entries<any>(t.inputSchema.properties ?? {})) expect(v.description, `${t.name}.${k}`).toBeTruthy();
+    const page = await (await fetch(`${base}/tools`)).text();
+    const llms = await (await fetch(`${base}/llms.txt`)).text();
+    for (const n of names) {
+      expect(page, n).toContain(`id="${n}"`);
+      expect(llms, n).toContain(n);
+    }
+    expect(page).toContain(`${names.length} tools`);
+    // Parameters come from the schemas: defaults and descriptions, not hand-written copy.
+    expect(page).toContain("<code>location_ids</code>");
+    expect(page).toContain("Default [&quot;2840&quot;].");
+    expect(page).toContain("https://github.com/awilliams-2020/camberstack-mcp");
+    expect(page).toContain('<span class="pill act">Needs your go-ahead</span>');
+    expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/tools`);
+  });
+
   it("serves the Claude guide and lists it in the sitemap", async () => {
     const g = await fetch(`${base}/google-ads-claude`);
     expect(g.status).toBe(200);

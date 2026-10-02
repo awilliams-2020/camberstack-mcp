@@ -9,14 +9,14 @@ import { now, openDb, sweep, type DB } from "./db.js";
 import { deriveKey } from "./crypto.js";
 import { CamberstackProvider, MCP_SCOPE } from "./provider.js";
 import { UserSession, type SessionDeps } from "./session.js";
-import { buildServer, SERVER_VERSION } from "./tools.js";
+import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
 import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
 import { mountAdmin } from "./admin.js";
 import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
-import { errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
+import { errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage, toolsPage } from "./pages.js";
 
 /** brand/ sits beside src/ and dist/ at the package root. */
 const BRAND_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "..", "brand");
@@ -214,10 +214,12 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   app.get("/google-ads-claude", page(claudeGuidePage(cfg.baseUrl)));
   app.get("/google-ads-chatgpt", page(chatgptGuidePage(cfg.baseUrl)));
   app.get("/google-ads-gemini", page(geminiGuidePage(cfg.baseUrl)));
+  const tools = toolCatalog();
+  app.get("/tools", page(toolsPage(cfg.baseUrl, tools)));
   app.get("/privacy", page(privacyPage(cfg.baseUrl)));
   app.get("/terms", page(termsPage(cfg.baseUrl)));
   app.get("/robots.txt", (_q, r) => { r.type("text/plain").send(robotsTxt(cfg.baseUrl)); });
-  app.get("/llms.txt", (_q, r) => { r.type("text/plain").send(llmsTxt(cfg.baseUrl)); });
+  app.get("/llms.txt", (_q, r) => { r.type("text/plain").send(llmsTxt(cfg.baseUrl, tools)); });
   app.get("/sitemap.xml", (_q, r) => { r.type("application/xml").send(sitemapXml(cfg.baseUrl, cfg.gitCommitDate)); });
   // Brand assets: the SVG is the source; the PNGs are rendered from it (brand/).
   const brand = (file: string, type: string) => (_q: express.Request, r: express.Response) => {

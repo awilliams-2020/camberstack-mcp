@@ -40,7 +40,10 @@ export interface ToolCall {
   bytes: number;
 }
 
-export function buildServer(session: () => UserSession, log: (c: ToolCall) => void = () => {}): McpServer {
+/** What the /tools page and llms.txt show about each tool; filled as buildServer registers them. */
+export interface ToolDoc { name: string; title: string; description: string; inputSchema?: z.ZodRawShape; annotations: ToolAnnotations }
+
+export function buildServer(session: () => UserSession, log: (c: ToolCall) => void = () => {}, catalog: ToolDoc[] = []): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: INSTRUCTIONS });
   const wrap = <A>(name: string, fn: (a: A) => Promise<unknown> | unknown) => {
     return async (a: A) => {
@@ -61,8 +64,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   // annotations.title repeats each tool's title: Claude's connector directory reads the name from there.
   // `as never`: registerTool infers its handler type from a literal inputSchema, which a helper cannot pass through.
   const tool = <A>(name: string, config: { title: string; description: string; inputSchema?: z.ZodRawShape; annotations: ToolAnnotations },
-    fn: (a: A) => Promise<unknown> | unknown) =>
-    server.registerTool(name, { ...config, annotations: { ...config.annotations, title: config.title } }, wrap(name, fn) as never);
+    fn: (a: A) => Promise<unknown> | unknown) => (catalog.push({ name, ...config }),
+    server.registerTool(name, { ...config, annotations: { ...config.annotations, title: config.title } }, wrap(name, fn) as never));
   const read = { readOnlyHint: true, openWorldHint: true } as const;
 
   tool("list_accounts", {
@@ -112,7 +115,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       url: z.string().url().optional().describe("A page to pull ideas from, such as the ad's landing page"),
       location_ids: locationIds, language_id: languageId,
       min_searches: z.number().int().min(0).default(0).describe("Drop ideas below this many average monthly searches"),
-      limit: z.number().int().min(1).max(200).default(50),
+      limit: z.number().int().min(1).max(200).default(50).describe("Most ideas to return"),
     },
     annotations: read,
   }, ({ customer_id, ...o }: { customer_id: string; keywords?: string[]; url?: string; location_ids: string[]; language_id: string; min_searches: number; limit: number }) =>
@@ -147,21 +150,21 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   tool("undo_changes", {
     title: "Undo an applied proposal",
     description: "Builds a new proposal that reverses an applied one (removes the negatives it added, restores statuses and budgets). Like any proposal, it must be approved and applied.",
-    inputSchema: { proposal_id: z.string() },
+    inputSchema: { proposal_id: z.string().describe("The id of an applied proposal, from change_history or apply_changes") },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, ({ proposal_id }: { proposal_id: string }) => session().undo(proposal_id));
 
   tool("discard_proposal", {
     title: "Discard a proposal",
     description: "Marks an open proposal as discarded so it cannot be applied.",
-    inputSchema: { proposal_id: z.string() },
+    inputSchema: { proposal_id: z.string().describe("The id returned by propose_changes") },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   }, ({ proposal_id }: { proposal_id: string }) => session().discard(proposal_id));
 
   tool("change_history", {
     title: "Change history",
     description: "Every proposal made through Camberstack, with what was applied, what failed, and what was undone.",
-    inputSchema: { customer_id: customerId.optional(), limit: z.number().int().min(1).max(100).default(20) },
+    inputSchema: { customer_id: customerId.optional(), limit: z.number().int().min(1).max(100).default(20).describe("Most proposals to return, newest first") },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, ({ customer_id, limit }: { customer_id?: string; limit: number }) => session().history(customer_id, limit));
 
@@ -179,4 +182,11 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   }, () => session().disconnect());
 
   return server;
+}
+
+/** Every tool in registration (workflow) order, without a session: nothing is ever called. */
+export function toolCatalog(): ToolDoc[] {
+  const catalog: ToolDoc[] = [];
+  buildServer(() => { throw new Error("catalog only"); }, undefined, catalog);
+  return catalog;
 }
