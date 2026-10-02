@@ -81,6 +81,26 @@ const CONVERSION_ACTIONS = [
   { id: "5002", name: "Online booking", category: "SUBMIT_LEAD_FORM", status: "ENABLED", primaryForGoal: true, type: "WEBPAGE" },
   { id: "5003", name: "Thank-you page view", category: "PAGE_VIEW", status: "ENABLED", primaryForGoal: false, type: "WEBPAGE" },
 ];
+/** Keyword Planner sample: [text, avg monthly searches, competition, low bid, high bid]. Fictional, US-plumbing-shaped. */
+const PLANNER: [string, number, string, number, number][] = [
+  ["plumber near me", 246000, "MEDIUM", 9.8, 38.5], ["emergency plumber", 40500, "MEDIUM", 14.2, 61.0],
+  ["emergency plumber near me", 33100, "MEDIUM", 15.1, 64.3], ["24 hour plumber", 14800, "MEDIUM", 13.0, 55.2],
+  ["24 hour plumber near me", 12100, "HIGH", 13.6, 58.9], ["plumbing companies near me", 22200, "MEDIUM", 10.4, 41.7],
+  ["water heater repair", 27100, "HIGH", 8.9, 34.0], ["water heater installation", 14800, "HIGH", 9.7, 39.8],
+  ["water heater replacement", 18100, "HIGH", 10.2, 42.6], ["tankless water heater", 49500, "HIGH", 2.1, 9.4],
+  ["tankless water heater installation", 9900, "HIGH", 11.3, 44.1], ["water heater repair near me", 12100, "HIGH", 9.4, 36.2],
+  ["drain cleaning", 18100, "MEDIUM", 7.6, 29.9], ["drain cleaning near me", 14800, "MEDIUM", 8.3, 32.4],
+  ["clogged drain", 9900, "LOW", 3.2, 14.8], ["hydro jetting", 6600, "MEDIUM", 9.1, 35.5],
+  ["sewer line repair", 8100, "HIGH", 16.4, 72.0], ["sewer line replacement", 5400, "HIGH", 18.9, 80.3],
+  ["sewer camera inspection", 3600, "MEDIUM", 8.0, 30.1], ["burst pipe repair", 2900, "MEDIUM", 11.8, 46.0],
+  ["water leak repair", 4400, "MEDIUM", 10.6, 40.2], ["slab leak repair", 3600, "HIGH", 14.7, 59.1],
+  ["leak detection", 9900, "MEDIUM", 9.3, 37.4], ["diy drain cleaning", 2400, "LOW", 0.8, 3.1],
+  ["plumber salary", 27100, "LOW", 0.6, 2.2], ["plumber jobs near me", 14800, "LOW", 0.9, 3.6],
+];
+/** Seasonal shape for the demo's monthly searches, January first (frozen pipes in winter). */
+const MONTH_NAMES = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
+const SEASON = [1.25, 1.2, 1.0, 0.92, 0.88, 0.86, 0.9, 0.92, 0.95, 1.0, 1.08, 1.24];
+
 /** Searches Google hides below its privacy threshold: campaign totals run this much above their terms. */
 const HIDDEN_SHARE = 1.12;
 
@@ -197,6 +217,26 @@ export class DemoAds {
       rows = rows.sort((a, b) => cmp(get(a, path), get(b, path)) * (desc ? -1 : 1));
     }
     return q.limit ? rows.slice(0, q.limit) : rows;
+  }
+
+  /** Keyword Planner over PLANNER: ideas share a word with a seed (or everything, for a URL seed); metrics are exact matches. */
+  async keywordPlan(_cid: string, method: "generateKeywordIdeas" | "generateKeywordHistoricalMetrics", req: any): Promise<{ results?: any[] }> {
+    const metrics = ([, vol, comp, low, high]: typeof PLANNER[number]) => ({
+      avgMonthlySearches: String(vol), competition: comp,
+      lowTopOfPageBidMicros: String(Math.round(low * 1e6)), highTopOfPageBidMicros: String(Math.round(high * 1e6)),
+      monthlySearchVolumes: Array.from({ length: 12 }, (_, i) => {
+        const d = new Date(Date.UTC(2025, 9 + i, 1));  // the 12 months to September 2026
+        return { year: String(d.getUTCFullYear()), month: MONTH_NAMES[d.getUTCMonth()], monthlySearches: String(Math.round(vol * SEASON[d.getUTCMonth()]!)) };
+      }),
+    });
+    if (method === "generateKeywordHistoricalMetrics") {
+      const want = new Set((req.keywords as string[]).map((k) => k.toLowerCase()));
+      return { results: PLANNER.filter((p) => want.has(p[0])).map((p) => ({ text: p[0], keywordMetrics: metrics(p) })) };
+    }
+    const seeds: string[] = req.keywordSeed?.keywords ?? req.keywordAndUrlSeed?.keywords ?? [];
+    const words = new Set(seeds.flatMap((k) => k.toLowerCase().split(/\s+/)).filter((w) => w.length > 2));
+    const hits = words.size ? PLANNER.filter((p) => p[0].split(" ").some((w) => words.has(w))) : PLANNER;
+    return { results: hits.map((p) => ({ text: p[0], keywordIdeaMetrics: metrics(p) })) };
   }
 
   async mutate(_cid: string, service: string, operations: any[], opts: { validateOnly?: boolean } = {}): Promise<{ results: { resourceName?: string }[] }> {

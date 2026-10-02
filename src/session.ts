@@ -44,7 +44,7 @@ export interface SessionDeps {
 export class NotConnectedError extends Error {}
 
 /** The Google Ads calls the tools make; the demo account answers the same ones. */
-type Ads = Pick<AdsClient, "listAccessibleCustomers" | "search" | "mutate">;
+type Ads = Pick<AdsClient, "listAccessibleCustomers" | "search" | "mutate" | "keywordPlan">;
 
 /** Sends the demo account's calls to the demo and everything else to Google. */
 function routed(google: Ads, demo: DemoAds): Ads {
@@ -52,6 +52,7 @@ function routed(google: Ads, demo: DemoAds): Ads {
     listAccessibleCustomers: () => google.listAccessibleCustomers(),
     search: (cid, query, login) => (cid === DEMO_CID ? demo.search(cid, query) : google.search(cid, query, login)),
     mutate: (cid, service, ops, opts) => (cid === DEMO_CID ? demo.mutate(cid, service, ops, opts) : google.mutate(cid, service, ops, opts)),
+    keywordPlan: (cid, method, req, login) => (cid === DEMO_CID ? demo.keywordPlan(cid, method, req) : google.keywordPlan(cid, method, req, login)),
   };
 }
 
@@ -276,6 +277,73 @@ export class UserSession {
     return { ...demoNote(a.customerId), rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
   }
 
+  /** Keyword Planner ideas from seed keywords and/or a URL, biggest first, flagged where the account already has them. */
+  async keywordIdeas(customerId: string, o: KeywordPlanOpts & { keywords?: string[]; url?: string; min_searches: number; limit: number }) {
+    const a = await this.account(customerId);
+    const keywords = [...new Set((o.keywords ?? []).map((k) => k.trim()).filter(Boolean))];
+    if (!keywords.length && !o.url) throw new Error("Give at least one seed keyword or a URL.");
+    const seed = keywords.length && o.url ? { keywordAndUrlSeed: { keywords, url: o.url } }
+      : keywords.length ? { keywordSeed: { keywords } } : { urlSeed: { url: o.url } };
+    const [res, have] = await Promise.all([
+      this.ads.keywordPlan(a.customerId, "generateKeywordIdeas", { ...planTarget(o), includeAdultKeywords: false, ...seed }, a.loginCustomerId),
+      this.keywordsInAccount(a),
+    ]);
+    const ideas = (res.results ?? [])
+      .map((r) => keywordRow(r.text, r.keywordIdeaMetrics, have))
+      .filter((k) => k.avg_monthly_searches !== null && k.avg_monthly_searches >= o.min_searches)
+      .sort((x, y) => y.avg_monthly_searches! - x.avg_monthly_searches!);
+    return {
+      account: { customer_id: a.customerId, name: a.name, currency: a.currency },
+      ...demoNote(a.customerId),
+      target: { location_ids: o.location_ids, language_id: o.language_id },
+      ideas: ideas.slice(0, o.limit), total_ideas: ideas.length,
+    };
+  }
+
+  /** Keyword Planner volume, competition and bids for an exact list, with the last 12 months of searches. */
+  async keywordMetrics(customerId: string, o: KeywordPlanOpts & { keywords: string[] }) {
+    const a = await this.account(customerId);
+    const keywords = [...new Set(o.keywords.map((k) => k.trim()).filter(Boolean))];
+    const [res, have] = await Promise.all([
+      this.ads.keywordPlan(a.customerId, "generateKeywordHistoricalMetrics", { ...planTarget(o), includeAdultKeywords: false, keywords }, a.loginCustomerId),
+      this.keywordsInAccount(a),
+    ]);
+    const rows = (res.results ?? []).map((r) => ({
+      ...keywordRow(r.text, r.keywordMetrics, have),
+      ...(r.closeVariants?.length ? { close_variants: r.closeVariants } : {}),
+      monthly: monthly(r.keywordMetrics?.monthlySearchVolumes),
+    }));
+    // Google omits keywords it has no data for; say so rather than dropping them silently.
+    const covered = new Set(rows.flatMap((r) => [r.keyword, ...(r.close_variants ?? [])].map((k: string) => k.toLowerCase())));
+    return {
+      account: { customer_id: a.customerId, name: a.name, currency: a.currency },
+      ...demoNote(a.customerId),
+      target: { location_ids: o.location_ids, language_id: o.language_id },
+      keywords: rows,
+      no_data: keywords.filter((k) => !covered.has(k.toLowerCase())),
+    };
+  }
+
+  /** Lowercased keyword text → "keyword" or "negative", across the whole account. */
+  private async keywordsInAccount(a: Account): Promise<Map<string, "keyword" | "negative">> {
+    const [kw, neg] = await Promise.all([
+      this.ads.search(a.customerId, `SELECT ad_group_criterion.keyword.text, ad_group_criterion.negative
+        FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'`, a.loginCustomerId),
+      this.ads.search(a.customerId, `SELECT campaign_criterion.keyword.text
+        FROM campaign_criterion WHERE campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = true`, a.loginCustomerId),
+    ]);
+    const m = new Map<string, "keyword" | "negative">();
+    for (const r of kw) {
+      const t = r.adGroupCriterion?.keyword?.text?.toLowerCase();
+      if (t) m.set(t, r.adGroupCriterion.negative ? "negative" : "keyword");
+    }
+    for (const r of neg) {
+      const t = r.campaignCriterion?.keyword?.text?.toLowerCase();
+      if (t && !m.has(t)) m.set(t, "negative");
+    }
+    return m;
+  }
+
   // ---------------------------------------------------------------- write
 
   async propose(customerId: string, rawChanges: unknown[], undoOf?: string): Promise<{ proposal_id: string; summary: string; changes: number; skipped: string[] }> {
@@ -398,6 +466,34 @@ export class UserSession {
     this.deps.db.prepare("DELETE FROM tokens WHERE user_id = ?").run(this.user.id);
     return { disconnected: true, note: "Google access revoked and stored credentials deleted. To delete your change history too, email adam@camberstack.io." };
   }
+}
+
+export interface KeywordPlanOpts { location_ids: string[]; language_id: string }
+
+const planTarget = (o: KeywordPlanOpts) => ({
+  language: `languageConstants/${o.language_id}`,
+  geoTargetConstants: o.location_ids.map((id) => `geoTargetConstants/${id}`),
+  keywordPlanNetwork: "GOOGLE_SEARCH",
+});
+
+/** One Keyword Planner result, bids in the account's currency; `metrics` is keywordIdeaMetrics or keywordMetrics. */
+function keywordRow(text: string, metrics: any, have: Map<string, "keyword" | "negative">) {
+  const bid = (m: unknown) => (m == null ? null : round(micros(m)));
+  const inAccount = have.get(String(text).toLowerCase());
+  return {
+    keyword: String(text),
+    avg_monthly_searches: metrics?.avgMonthlySearches == null ? null : Number(metrics.avgMonthlySearches),
+    competition: metrics?.competition ?? null,
+    top_of_page_bid: { low: bid(metrics?.lowTopOfPageBidMicros), high: bid(metrics?.highTopOfPageBidMicros) },
+    ...(inAccount ? { in_account: inAccount } : {}),
+  };
+}
+
+const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
+/** Last 12 months of searches as { "2026-08": 1900, ... }, oldest first. */
+function monthly(volumes: { year?: number | string; month?: string; monthlySearches?: number | string }[] | undefined) {
+  return Object.fromEntries((volumes ?? []).slice(-12).map((v) =>
+    [`${v.year}-${String(MONTHS.indexOf(v.month ?? "") + 1).padStart(2, "0")}`, Number(v.monthlySearches ?? 0)]));
 }
 
 export function dateRange(days: number): string {

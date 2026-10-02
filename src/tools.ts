@@ -12,9 +12,16 @@ Workflow: list_accounts → account_overview → find_wasted_spend → propose_c
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
 Free accounts get 3 applied changes; undo is always free. If apply_changes reports the limit, show the user the upgrade link it returns, word for word.
 Read find_wasted_spend's "tracking" section before recommending cuts: if conversion tracking is broken or warning, say so first.
+To grow an account, keyword_ideas finds what people search for around a seed or a landing page; keyword_metrics checks volume and bids for a given list. Pass the account's own market: location_ids default to the United States.
 Account 000-000-0001 is a demo with sample data: anyone can try every tool on it, and changes there never touch Google. Always say when you are using it.`;
 
 const customerId = z.string().describe("Google Ads customer ID, with or without dashes (from list_accounts)");
+const locationIds = z.array(z.string().regex(/^\d+$/)).min(1).max(10).default(["2840"])
+  .describe("Google geo target IDs. 2840 United States, 2826 United Kingdom, 2124 Canada, 2036 Australia, 2356 India. "
+    + "For a state, city or other country, look the ID up with run_gaql: SELECT geo_target_constant.id, geo_target_constant.canonical_name "
+    + "FROM geo_target_constant WHERE geo_target_constant.name = 'Denver'");
+const languageId = z.string().regex(/^\d+$/).default("1000")
+  .describe("Google language ID. 1000 English, 1003 Spanish, 1002 French, 1001 German, 1014 Portuguese");
 const days = z.number().int().min(1).max(365).default(30).describe("Look-back window in days, ending yesterday");
 
 function ok(data: unknown) {
@@ -95,6 +102,33 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     inputSchema: { customer_id: customerId, query: z.string().describe("A GAQL SELECT statement") },
     annotations: read,
   }, ({ customer_id, query }: { customer_id: string; query: string }) => session().runQuery(customer_id, query));
+
+  tool("keyword_ideas", {
+    title: "Keyword ideas (Keyword Planner)",
+    description: "Google Keyword Planner ideas from seed keywords and/or a landing-page URL: average monthly searches, competition and the top-of-page bid range in the account's currency, biggest first. Ideas the account already targets, or already blocks as negatives, are marked in_account. Changes nothing.",
+    inputSchema: {
+      customer_id: customerId,
+      keywords: z.array(z.string().min(1).max(80)).max(20).optional().describe("Up to 20 seed keywords"),
+      url: z.string().url().optional().describe("A page to pull ideas from, such as the ad's landing page"),
+      location_ids: locationIds, language_id: languageId,
+      min_searches: z.number().int().min(0).default(0).describe("Drop ideas below this many average monthly searches"),
+      limit: z.number().int().min(1).max(200).default(50),
+    },
+    annotations: read,
+  }, ({ customer_id, ...o }: { customer_id: string; keywords?: string[]; url?: string; location_ids: string[]; language_id: string; min_searches: number; limit: number }) =>
+    session().keywordIdeas(customer_id, o));
+
+  tool("keyword_metrics", {
+    title: "Keyword volume and bids (Keyword Planner)",
+    description: "Google Keyword Planner numbers for an exact list of keywords: average monthly searches, the last 12 months, competition and the top-of-page bid range in the account's currency. Use it to size keywords before adding them or to check a trend. Changes nothing.",
+    inputSchema: {
+      customer_id: customerId,
+      keywords: z.array(z.string().min(1).max(80)).min(1).max(100).describe("Keywords to look up"),
+      location_ids: locationIds, language_id: languageId,
+    },
+    annotations: read,
+  }, ({ customer_id, ...o }: { customer_id: string; keywords: string[]; location_ids: string[]; language_id: string }) =>
+    session().keywordMetrics(customer_id, o));
 
   tool("propose_changes", {
     title: "Propose changes (writes nothing)",

@@ -65,6 +65,22 @@ class FakeAds {
     }
     return [];
   }
+  plannerCalls: { method: string; req: any }[] = [];
+  async keywordPlan(_cid: string, method: string, req: any) {
+    this.plannerCalls.push({ method, req });
+    if (method === "generateKeywordIdeas") {
+      return { results: [
+        { text: "invoice", keywordIdeaMetrics: { avgMonthlySearches: "90500", competition: "HIGH", lowTopOfPageBidMicros: "2100000", highTopOfPageBidMicros: "9800000" } },
+        { text: "invoice software", keywordIdeaMetrics: { avgMonthlySearches: "12100", competition: "HIGH", lowTopOfPageBidMicros: "8000000", highTopOfPageBidMicros: "31000000" } },
+        { text: "free invoice maker", keywordIdeaMetrics: { avgMonthlySearches: "40", competition: "LOW" } },
+        { text: "invoice template docx" },
+      ] };
+    }
+    return { results: [{ text: "invoice software", closeVariants: ["invoicing software"], keywordMetrics: {
+      avgMonthlySearches: "12100", competition: "HIGH",
+      monthlySearchVolumes: [{ year: "2026", month: "AUGUST", monthlySearches: "11000" }, { year: "2026", month: "SEPTEMBER", monthlySearches: "13000" }],
+    } }] };
+  }
   async mutate(_cid: string, service: string, operations: any[], opts: { validateOnly?: boolean } = {}) {
     this.mutations.push({ service, operations, validateOnly: !!opts.validateOnly });
     if (opts.validateOnly) return { results: [] };
@@ -377,6 +393,29 @@ describe("OAuth + MCP end to end", () => {
     expect(r.json.note).toContain("demo");
   });
 
+  it("gets Keyword Planner ideas and metrics without changing anything", async () => {
+    const before = ads.mutations.length;
+    const i = await call(token, "keyword_ideas", { customer_id: "111-222-3333", keywords: ["invoice"], url: "https://acme.test/", min_searches: 100 });
+    expect(i.isError).toBe(false);
+    const sent = ads.plannerCalls.at(-1)!;
+    expect(sent.method).toBe("generateKeywordIdeas");
+    expect(sent.req).toMatchObject({ language: "languageConstants/1000", geoTargetConstants: ["geoTargetConstants/2840"],
+      keywordAndUrlSeed: { keywords: ["invoice"], url: "https://acme.test/" } });
+    // Biggest first; below min_searches and no-data ideas dropped; bids in currency units, not micros.
+    expect(i.json.ideas.map((x: any) => x.keyword)).toEqual(["invoice", "invoice software"]);
+    expect(i.json.ideas[1].top_of_page_bid).toEqual({ low: 8, high: 31 });
+    expect(i.json.ideas[0].in_account).toBe("keyword");
+    expect(i.json.ideas[1].in_account).toBeUndefined();
+
+    const m = await call(token, "keyword_metrics", { customer_id: "1112223333", keywords: ["Invoicing Software", "zzz"], location_ids: ["2826"] });
+    expect(ads.plannerCalls.at(-1)!.req.geoTargetConstants).toEqual(["geoTargetConstants/2826"]);
+    expect(m.json.keywords[0]).toMatchObject({ keyword: "invoice software", avg_monthly_searches: 12100, monthly: { "2026-08": 11000, "2026-09": 13000 } });
+    expect(m.json.no_data).toEqual(["zzz"]);
+
+    expect((await call(token, "keyword_ideas", { customer_id: "1112223333" })).isError).toBe(true);  // needs a seed
+    expect(ads.mutations.length).toBe(before);
+  });
+
   it("runs the whole flow on the demo account without touching Google or the free allowance", async () => {
     const before = ads.mutations.length;
     const left = (await call(token, "billing", {})).json;
@@ -412,6 +451,13 @@ describe("OAuth + MCP end to end", () => {
     const reverted = (await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).json;
     expect(reverted.campaigns.find((c: any) => c.campaign_id === "2003").status).toBe("ENABLED");
     expect(reverted.campaigns.find((c: any) => c.campaign_id === "2001").daily_budget).toBe(40);
+
+    const ideas = (await call(token, "keyword_ideas", { customer_id: "0000000001", keywords: ["water heater"] })).json;
+    expect(ideas.note).toContain("Sample data");
+    expect(ideas.ideas[0].keyword).toBe("tankless water heater");
+    expect(ideas.ideas.find((x: any) => x.keyword === "water heater repair").in_account).toBe("keyword");
+    const kws = (await call(token, "keyword_metrics", { customer_id: "0000000001", keywords: ["sewer line repair"] })).json;
+    expect(Object.keys(kws.keywords[0].monthly)).toHaveLength(12);
 
     expect(ads.mutations.length).toBe(before);  // Google was never called
     const now = (await call(token, "billing", {})).json;  // allowance untouched (the signed link's expiry may tick)

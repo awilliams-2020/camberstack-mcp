@@ -160,6 +160,19 @@ export class AdsClient {
     return (JSON.parse(await AdsClient.body(res)) as { results?: any[] }[]).flatMap((b) => b.results ?? []);
   }
 
+  /** Keyword Planner (KeywordPlanIdeaService). Read-only: needs Basic access or above on the developer token. */
+  async keywordPlan(
+    customerId: string, method: "generateKeywordIdeas" | "generateKeywordHistoricalMetrics", request: object, loginCustomerId?: string | null,
+  ): Promise<{ results?: any[] }> {
+    const res = await this.f(`${ADS_API}/customers/${customerId}:${method}`, {
+      method: "POST",
+      headers: await this.headers(loginCustomerId),
+      body: JSON.stringify(request),
+    });
+    const body = await AdsClient.body(res);
+    return body ? JSON.parse(body) : {};
+  }
+
   /** `service` is the REST collection, e.g. "campaignCriteria". Atomic unless partialFailure. */
   async mutate(
     customerId: string, service: string, operations: object[],
