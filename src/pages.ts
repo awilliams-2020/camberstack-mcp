@@ -412,7 +412,8 @@ ${commonQuestions("ChatGPT")}
 /**
  * Use-case page for "gemini google ads". Gemini takes outside MCP servers as "custom apps" (Gemini Spark), which
  * Google limits to personal accounts, 18+, in the US, with Keep Activity on, on a Google AI Pro or Ultra plan
- * (support.google.com/gemini/answer/17209137, read 2026-10-02). Screenshots are the operator's, mobile web, 2026-10-02.
+ * (support.google.com/gemini/answer/17209137, read 2026-10-02). Screenshots are the operator's, mobile web, 2026-10-02; the path (Settings, Personal Intelligence,
+ * Connected Apps, Custom apps) confirmed by the operator the same day.
  * Gemini supports dynamic client registration, so Additional settings stays closed.
  */
 export function geminiGuidePage(baseUrl: string): string {
@@ -444,8 +445,10 @@ No developer token, no Google Cloud project.</p>
 
 <h2>Set it up</h2>
 <ol>
-<li>Open <a href="https://gemini.google.com/apps">gemini.google.com/apps</a>, or in Gemini go to <strong>Settings</strong>, then
-<strong>Connected Apps</strong>. Tap <strong>Custom apps</strong>.
+<li>In Gemini, open <strong>Settings</strong> and choose <strong>Personal Intelligence</strong>.
+${shot("gemini-menu.webp", 540, 285, "Gemini's settings menu with Personal Intelligence highlighted")}</li>
+<li>Open <strong>Connected Apps</strong>, then tap <strong>Custom apps</strong>.
+(Shortcut: <a href="https://gemini.google.com/apps">gemini.google.com/apps</a> opens Connected Apps directly.)
 ${shot("gemini-1.webp", 540, 334, "Gemini's Connected Apps page with the Custom apps filter highlighted")}</li>
 <li>Under <strong>Custom apps for Spark</strong>, paste the server URL <code>${mcpUrl}</code> and tap <strong>Next</strong>.
 ${shot("gemini-2.webp", 540, 218, "The Custom apps for Spark box, with the app link field and Next button highlighted")}</li>
