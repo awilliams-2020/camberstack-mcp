@@ -132,12 +132,12 @@ export function homePage(baseUrl: string): string {
   const mcpUrl = `${baseUrl}/mcp`;
   return layout({
     baseUrl, path: "/",
-    title: "Camberstack: Google Ads MCP that finds wasted spend",
-    description: "Connect Google Ads to Claude or ChatGPT. Your AI finds where the budget is wasted, proposes fixes, and applies only the changes you approve. Every change is logged and can be undone.",
+    title: "Camberstack: hosted Google Ads MCP for Claude and ChatGPT",
+    description: "A hosted Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or Cursor with a Google sign-in: no developer token or Google Cloud project. Read your account, and make a small set of changes you approve, with undo.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Camberstack",
       applicationCategory: "BusinessApplication", operatingSystem: "Web", url: baseUrl,
-      description: "Google Ads MCP connector for Claude and ChatGPT: diagnose wasted spend, then apply approved changes.",
+      description: "Hosted Google Ads MCP server for Claude, ChatGPT and other MCP apps: read-only queries, a waste check, and a small set of approved changes with undo.",
       offers: [
         { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD",
           description: "Unlimited diagnosis and proposals, change history and undo, plus 3 applied changes." },
@@ -146,23 +146,19 @@ export function homePage(baseUrl: string): string {
       ],
     },
     body: `
-<h1>Let Claude or ChatGPT fix your Google Ads</h1>
-<p class="lede">Nothing changes until you approve it. Camberstack connects your Google Ads account to Claude, ChatGPT and other AI assistants (it's an MCP server).
-Ask where the budget went: it finds the search terms and keywords that spend without converting, and prepares the fix.</p>
-<p><a class="btn" href="#setup">Connect in 2 minutes</a> <span class="muted">&nbsp;Free plan, no card</span></p>
+<h1>A hosted Google Ads MCP server</h1>
+<p class="lede">Connect your Google Ads account to Claude, ChatGPT, Cursor or any MCP app with one URL and a Google sign-in.
+No developer token, no Google Cloud project, nothing to install. Your AI can read the account, and can make a short list of
+changes, each one only after you approve it.</p>
+<ul>
+<li>Works with manager (MCC) accounts.</li>
+<li>Any question about your account is answered with read-only queries.</li>
+<li>Changes are limited to negative keywords, pausing or re-enabling, and daily budgets. Each applied change can be undone.</li>
+</ul>
+<p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;Free plan, no card</span></p>
 
-<div class="convo" aria-label="Example conversation">
-<p class="who">You</p><p class="said">Where did my Google Ads budget go last month, and what should I cut?</p>
-<p class="who">Claude, with Camberstack</p>
-<p>Conversion tracking looks healthy (1 primary action: "Purchase"). You spent $2,140 at $61 per conversion.
-$486 went to search terms that never converted. The biggest: <code>free invoice template</code> ($112, 41 clicks) and
-<code>invoice clerk jobs</code> ($64). I can add "free" and "jobs" as phrase negatives to your Search campaign,
-plus 6 exact negatives. Want me to prepare that?</p>
-<p class="who">You</p><p class="said">Yes, but keep "free trial".</p>
-<p class="muted">An illustration of the workflow, not a real account.</p>
-</div>
-
-<h2>What it checks, in order</h2>
+<h2>Built-in waste check</h2>
+<p>Ask "what's wasting money?" and the <code>find_wasted_spend</code> tool checks, in order (see <a href="/google-ads-claude">a run on our own account</a>):</p>
 <ol>
 <li>Conversion tracking. With no primary conversion action, or a page view counted as a conversion, every other number is misleading, so it tells you that first.</li>
 <li>Search terms that cost more than a conversion usually does and didn't convert. Your own cost per conversion sets the bar.</li>
@@ -212,8 +208,10 @@ Changes there never reach Google and don't use your free changes. A Google login
 
 <h2>Questions</h2>
 <h3>Can the AI change my account without asking?</h3>
-<p>No. Changes are only ever stored as a proposal first. Applying one is a separate step that your AI app asks you to allow,
-and the server refuses anything that wasn't proposed first, is older than 24 hours, or belongs to someone else.</p>
+<p>Not without a proposal. Every change is first stored as a proposal and checked with Google; applying it is a separate
+tool call, and the server refuses anything that wasn't proposed first, is older than 24 hours, or belongs to someone else.
+Claude and ChatGPT normally ask you before running a tool that changes things, but if you've set that tool to "always allow",
+the AI could propose and apply in one go. Keep the confirmation on for <code>apply_changes</code>.</p>
 <h3>What data do you keep?</h3>
 <p>Your Google email, an encrypted Google refresh token, and the proposals you make (with their results, so you can undo them).
 Reports and query results are not stored. Details in the <a href="/privacy">privacy policy</a>.</p>
@@ -389,9 +387,9 @@ ${shot("chatgpt-4.webp", 540, 994, "ChatGPT's New Plugin form with the Name, ser
 <p>ChatGPT shows that warning for every custom MCP server, which is the only way to add one that isn't in
 ChatGPT's plugin directory yet. It isn't specific to Camberstack. What protects your account here:</p>
 <ul>
-<li>Nothing changes until you approve it. The AI can only <em>propose</em> changes; applying is a separate step, and ChatGPT
-also asks you to confirm each one.</li>
-<li>Every applied change can be undone, exactly, with one more message.</li>
+<li>Changes are stored as a proposal and checked with Google first; applying is a separate tool call. ChatGPT asks you to
+confirm tool calls that change things unless you've turned that off.</li>
+<li>Every applied change can be undone with one more message.</li>
 <li>Changes are limited to negative keywords, pausing or re-enabling, and daily budgets. Nothing can be deleted.</li>
 </ul>
 
