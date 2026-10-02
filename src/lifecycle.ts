@@ -14,7 +14,7 @@ import type { DB } from "./db.js";
 import { now } from "./db.js";
 import { DEMO_CID } from "./demo.js";
 import { deriveKey, safeEqual, sign } from "./crypto.js";
-import { PRO_PRICE_LABEL } from "./billing.js";
+import { PRO_PRICE_LABEL, PRO_SESSION } from "./plans.js";
 
 export interface MailConfig { apiKey: string; from: string; replyTo: string }
 
@@ -168,14 +168,14 @@ function limitReached(base: string, free: number, upgrade: string | null) {
 
 Camberstack has applied your ${free} free changes. You can see each one, and undo any of them, at ${base}/account
 
-Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is ${PRO_PRICE_LABEL}, cancel any time${upgrade ? `:\n${upgrade}\n(personal link, valid for 7 days)` : ` from ${base}/account`}.
+Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is ${PRO_PRICE_LABEL}, cancel any time, and includes ${PRO_SESSION}${upgrade ? `:\n${upgrade}\n(personal link, valid for 7 days)` : ` from ${base}/account`}.
 
 This is the only email about it. Questions? Just reply.
 
 Adam
 Camberstack`,
     html: wrap(p("Hi,") + p(`Camberstack has applied your ${free} free changes. You can see each one, and undo any of them, on <a href="${base}/account">your account page</a>.`)
-      + p(`Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is ${PRO_PRICE_LABEL}, cancel any time.`)
+      + p(`Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is ${PRO_PRICE_LABEL}, cancel any time, and includes ${PRO_SESSION}.`)
       + `<p style="margin:0 0 18px"><a href="${upgrade ?? `${base}/account?upgrade=1`}" style="display:inline-block;background:#1f5f4a;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:600">Upgrade to Pro</a></p>`
       + p("This is the only email about it. Questions? Just reply.") + p("Adam<br>Camberstack")),
   };

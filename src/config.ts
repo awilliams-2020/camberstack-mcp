@@ -36,6 +36,8 @@ export interface Config {
   conversions?: import("./adconversions.js").ConversionConfig;
   /** Lifecycle emails via Resend (lifecycle.ts); unset = none are sent. */
   mail?: import("./lifecycle.js").MailConfig;
+  /** Booking page for the call Pro includes. Shown only to paying subscribers; unset = they're asked to email. */
+  bookingUrl?: string;
   /** Glama ownership token for /.well-known/glama.json (from Glama's claim panel); unset = 404. */
   glamaClaim?: string;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
@@ -71,6 +73,7 @@ export function loadConfig(): Config {
     adminUrl: process.env.ADMIN_URL?.replace(/\/+$/, "") || undefined,
     adminEmails: emails(process.env.ADMIN_EMAILS),
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
+    bookingUrl: process.env.BOOKING_URL || undefined,
     mail: process.env.RESEND_API_KEY
       ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" }
       : undefined,

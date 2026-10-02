@@ -132,7 +132,7 @@ beforeAll(async () => {
   const cfg: Config = {
     baseUrl: "http://localhost", port: 0, dataDir: ":memory:", encryptionKey: key,
     google: { clientId: "gid", clientSecret: "gsecret" },
-    freeApplies: 3, stripe: { secretKey: "sk_test_x", proPriceId: "price_pro" }, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "",
+    freeApplies: 3, stripe: { secretKey: "sk_test_x", proPriceId: "price_pro" }, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "", bookingUrl: "https://calendar.example/book",
   };
   // Bind first so baseUrl (the OAuth issuer) is the real test origin.
   server = await new Promise<Server>((resolve) => { const s = createApp(cfg, db).app.listen(0, () => resolve(s)); });
@@ -332,6 +332,9 @@ describe("OAuth + MCP end to end", () => {
     const doneHtml = await done.text();
     expect(doneHtml).toContain("on Camberstack Pro");
     expect(doneHtml).toContain('href="/account"');
+    // The included session, with the private booking link, is offered right after paying.
+    expect(doneHtml).toContain('href="https://calendar.example/book"');
+    expect(doneHtml).toContain("Read only");
     expect(paidNoTab.json.free_applies_left).toBeUndefined();
 
     const pro = await call(token, "billing", {});

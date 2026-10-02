@@ -10,7 +10,7 @@ import type { UserSession } from "./session.js";
 import { SignIn } from "./signin.js";
 import { appPage, esc, infoPage } from "./pages.js";
 import { DEMO_CID } from "./demo.js";
-import { PRO_PRICE_LABEL } from "./billing.js";
+import { PRO_PRICE_LABEL, proSessionHtml } from "./plans.js";
 
 export interface AccountDeps {
   db: DB;
@@ -19,6 +19,7 @@ export interface AccountDeps {
   fetch?: typeof fetch;
   session: (userId: string) => UserSession;
   billingLink: (kind: "upgrade" | "billing", userId: string) => string | null;
+  bookingUrl?: string;
 }
 
 /** "Oct 1, 19:44 UTC" */
@@ -139,6 +140,7 @@ ${canUndo ? `<div class="change-foot"><span>To reverse it, paste this into your 
     res.type("html").send(shell("Your account", `<div class="acct">
 <div class="acct-head"><h1>Your account</h1><form method="post" action="/account/logout" class="who muted">${esc(u.email)} · <button class="linkish">Sign out</button></form></div>
 <div class="grid">${planCard}${connCard}</div>
+${plan.plan === "pro" && !("complimentary" in plan) ? `<div class="card" style="margin-top:16px">${proSessionHtml(d.bookingUrl)}</div>` : ""}
 <h2>Changes</h2>
 ${entries.length ? changes : `<div class="card"><p class="muted">No changes yet. Ask your AI <em>"What's wasting money in my Google Ads account?"</em> to start.</p></div>`}
 <h2 id="disconnect">Disconnect</h2>

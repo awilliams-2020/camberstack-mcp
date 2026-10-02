@@ -3,6 +3,8 @@
  * reviews: they must name the app, say what it does with Google user data, and link the policy.
  */
 
+import { PRO_SESSION } from "./plans.js";
+
 const CONTACT = "adam@camberstack.io";
 const UPDATED = "2026-10-01";
 
@@ -105,7 +107,7 @@ export function homePage(baseUrl: string): string {
       offers: [
         { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD",
           description: "Unlimited diagnosis and proposals, change history and undo, plus 3 applied changes." },
-        { "@type": "Offer", name: "Pro", price: "49", priceCurrency: "USD", description: "Unlimited applied changes.",
+        { "@type": "Offer", name: "Pro", price: "49", priceCurrency: "USD", description: `Unlimited applied changes, plus ${PRO_SESSION}.`,
           priceSpecification: { "@type": "UnitPriceSpecification", price: "49", priceCurrency: "USD", billingDuration: "P1M", unitCode: "MON" } },
       ],
     },
@@ -176,7 +178,7 @@ Changes there never reach Google and don't use your free changes. A Google login
 <div class="grid">
 <div class="card"><h3>Free</h3><p>Unlimited diagnosis and proposals, change history and undo, plus <strong>3 applied changes</strong>. No card. Free stays free.</p>
 <p><a class="btn" href="#setup">Connect for free</a></p></div>
-<div class="card"><h3>Pro: $49/month</h3><p>Everything in Free, with <strong>unlimited applied changes</strong>. Cancel any time; you keep Pro until the end of the month you paid for.</p>
+<div class="card"><h3>Pro: $49/month</h3><p>Everything in Free, with <strong>unlimited applied changes</strong>, plus ${PRO_SESSION}. Cancel any time; you keep Pro until the end of the month you paid for.</p>
 <p><a class="btn" href="/account?upgrade=1">Upgrade to Pro</a></p><p class="muted" style="font-size:14px">Connect Camberstack to your AI app first; you'll sign in with the same Google account.</p></div>
 </div>
 
@@ -224,7 +226,7 @@ const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer t
 <p>No. It gets Google Ads access and your email address, nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
 <h3>What does it cost?</h3>
 <p>The free plan includes unlimited diagnosis and proposals, change history, undo and 3 applied changes. Pro is $49/month for
-unlimited applied changes. See <a href="/#pricing">pricing</a>.</p>
+unlimited applied changes, plus ${PRO_SESSION}. See <a href="/#pricing">pricing</a>.</p>
 <h3>Does it work with manager (MCC) accounts?</h3>
 <p>Yes. It lists every client account your login can reach.</p>`;
 
@@ -518,7 +520,7 @@ export function llmsTxt(baseUrl: string): string {
 - Tools: list_accounts, account_overview, find_wasted_spend, run_gaql, propose_changes, apply_changes, undo_changes, discard_proposal, change_history, billing, disconnect
 - Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget. Every applied change can be undone.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
-- Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes. Undo is always free.
+- Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes plus a 30-minute call or written review of the account's ads with the founder. Undo is always free.
 - [Setup](${baseUrl}/#setup)
 - [Pricing](${baseUrl}/#pricing)
 - [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)

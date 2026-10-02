@@ -43,7 +43,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   app.set("trust proxy", 1); // behind Traefik: one hop
   app.disable("x-powered-by");
   const adConversions = new AdConversions(db, cfg.conversions, cfg.baseUrl.startsWith("https://"), overrides.adsConversionFetch);
-  const billing = new Billing({ db, baseUrl: cfg.baseUrl, stripe: cfg.stripe, fetch: overrides.stripeFetch,
+  const billing = new Billing({ db, baseUrl: cfg.baseUrl, stripe: cfg.stripe, bookingUrl: cfg.bookingUrl, fetch: overrides.stripeFetch,
     signingKey: deriveKey(cfg.encryptionKey, "billing-links") });
   const internalEmails = new Set([...cfg.adminEmails, ...cfg.proEmails]);
   const lifecycle = new Lifecycle({
@@ -108,7 +108,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
 
   const account = mountAccount(app, {
     db, google: cfg.google, baseUrl: cfg.baseUrl, fetch: overrides.fetch,
-    session: (userId) => UserSession.load(deps, userId), billingLink: (kind, userId) => billing.link(kind, userId),
+    session: (userId) => UserSession.load(deps, userId), billingLink: (kind, userId) => billing.link(kind, userId), bookingUrl: cfg.bookingUrl,
   });
 
   app.get("/oauth/google/callback", async (req, res) => {

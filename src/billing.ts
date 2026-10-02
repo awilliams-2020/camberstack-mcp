@@ -12,9 +12,9 @@ import type { Express, Request, Response } from "express";
 import type { DB, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { safeEqual, sign } from "./crypto.js";
+import { proSessionHtml } from "./plans.js";
 import { esc } from "./pages.js";
 
-export const PRO_PRICE_LABEL = "$49/month";
 const LINK_TTL = 7 * 86400;
 /** Subscription statuses that keep Pro (past_due: Stripe is still retrying the card). */
 const LIVE = new Set(["active", "trialing", "past_due"]);
@@ -26,6 +26,7 @@ export interface BillingDeps {
   /** Signs billing links; derived from ENCRYPTION_KEY so no new secret is needed. */
   signingKey: Buffer;
   stripe?: { secretKey: string; proPriceId: string };
+  bookingUrl?: string;
   fetch?: typeof fetch;
 }
 
@@ -170,6 +171,7 @@ export class Billing {
         if (!ok) return send(res, 400, "Payment not complete", `<p>We could not confirm this payment. If you were charged, email us and we will sort it out.</p>`);
         send(res, 200, "You're on Pro", `<p><strong>Thanks, you're on Camberstack Pro.</strong></p>
 <p>Go back to your AI assistant and ask it to apply the proposal again. Applying changes is now unlimited.</p>
+${proSessionHtml(this.d.bookingUrl)}
 <p><a class="btn" href="/account">Go to your account</a></p>
 <p class="muted">Change your card or cancel any time from your account page.</p>`);
       } catch (e) {

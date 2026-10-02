@@ -7,7 +7,7 @@ import type { DB, ProposalRow, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { decrypt } from "./crypto.js";
 import { AdsClient, micros, refreshGoogleToken, revokeGoogleToken, type GoogleCreds } from "./google.js";
-import { PRO_PRICE_LABEL } from "./billing.js";
+import { PRO_PRICE_LABEL } from "./plans.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DemoAds } from "./demo.js";
 import { analyzeWaste, round, type CampaignRow, type ConversionActionRow, type KeywordRow, type SearchTermRow } from "./analysis.js";
 import {
@@ -127,7 +127,7 @@ export class UserSession {
             : { complimentary: true, manage_billing: null }) }
       : { plan: "free", account_page, free_applies_left: left, free_applies_total: this.deps.freeApplies,
           always_free: "diagnosis, proposals, change history and undo",
-          pro: `unlimited applied changes, ${PRO_PRICE_LABEL}, cancel any time`, upgrade_url: upgrade,
+          pro: `unlimited applied changes plus one 30-minute call or written review of their ads with the founder, ${PRO_PRICE_LABEL}, cancel any time`, upgrade_url: upgrade,
           note: upgrade ? "Show the user upgrade_url as a link; it is personal and expires in 7 days." : "Upgrades are not open yet." };
   }
 
