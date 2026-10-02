@@ -248,7 +248,7 @@ describe("OAuth + MCP end to end", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     const tools = (await res.json()).result.tools;
-    expect(tools.map((t: any) => t.name)).toEqual(expect.arrayContaining(["list_accounts", "find_wasted_spend", "keyword_ideas", "keyword_metrics", "propose_changes", "apply_changes", "undo_changes"]));
+    expect(tools.map((t: any) => t.name)).toEqual(expect.arrayContaining(["list_accounts", "account_overview", "keyword_ideas", "keyword_metrics", "propose_changes", "apply_changes", "undo_changes"]));
     // The AI sees what each change field means, and never the undo-only change type.
     const propose = JSON.stringify(tools.find((t: any) => t.name === "propose_changes").inputSchema);
     expect(propose).toContain("not micros");
@@ -262,11 +262,10 @@ describe("OAuth + MCP end to end", () => {
     }
   });
 
-  it("finds wasted spend and suggests a phrase negative", async () => {
-    const r = await call(token, "find_wasted_spend", { customer_id: "111-222-3333" });
+  it("reads an account overview", async () => {
+    const r = await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 });
     expect(r.isError).toBe(false);
-    expect(r.json.tracking.status).toBe("ok");
-    expect(r.json.suggestedNegatives).toContainEqual(expect.objectContaining({ text: "free", matchType: "PHRASE" }));
+    expect(r.json.campaigns.length).toBeGreaterThan(0);
   });
 
   it("proposes without writing, applies, and undoes", async () => {
@@ -415,14 +414,9 @@ describe("OAuth + MCP end to end", () => {
   it("runs the whole flow on the demo account without touching Google or the free allowance", async () => {
     const before = ads.mutations.length;
     const left = (await call(token, "billing", {})).json;
-    const w = (await call(token, "find_wasted_spend", { customer_id: "000-000-0001", days: 180 })).json;
+    const w = (await call(token, "account_overview", { customer_id: "000-000-0001", days: 180 })).json;
     expect(w.note).toContain("Sample data");
-    expect(w.tracking.status).toBe("ok");
-    expect(w.campaignsToReview.map((c: any) => c.name)).toContain("Drain Cleaning – Search");
-    const neg = w.suggestedNegatives.map((n: any) => `${n.campaignName}|${n.text}`);
-    expect(neg).toContain("Emergency Plumbing – Search|jobs");
-    // "free" converted in Water Heaters, so it is never suggested there.
-    expect(neg.some((n: string) => n.startsWith("Water Heaters") && n.endsWith("|free"))).toBe(false);
+    expect(w.campaigns.map((c: any) => c.name)).toContain("Drain Cleaning – Search");
 
     const q = (await call(token, "run_gaql", { customer_id: "0000000001",
       query: "SELECT ad_group_criterion.keyword.text, metrics.cost_micros FROM keyword_view WHERE campaign.id = 2003 AND segments.date DURING LAST_30_DAYS ORDER BY metrics.cost_micros DESC LIMIT 2" })).json;
@@ -462,12 +456,12 @@ describe("OAuth + MCP end to end", () => {
   it("logs each tool call by name, without arguments or results", async () => {
     const rows = db.prepare("SELECT * FROM tool_calls ORDER BY id").all() as any[];
     const tools = rows.map((r) => r.tool);
-    expect(tools).toContain("find_wasted_spend");
+    expect(tools).toContain("account_overview");
     expect(tools).toContain("apply_changes");
-    const wasted = rows.find((r) => r.tool === "find_wasted_spend");
-    expect(wasted).toMatchObject({ ok: 1, error: null, customer_id: "1112223333" });
-    expect(wasted.client_id).toBeTruthy();
-    expect(wasted.bytes).toBeGreaterThan(0);
+    const overview = rows.find((r) => r.tool === "account_overview" && r.customer_id === "1112223333");
+    expect(overview).toMatchObject({ ok: 1, error: null, customer_id: "1112223333" });
+    expect(overview.client_id).toBeTruthy();
+    expect(overview.bytes).toBeGreaterThan(0);
     const failed = rows.find((r) => r.ok === 0);
     expect(failed?.error).toBeTruthy();
     expect(failed?.error).not.toMatch(/^Error: /);
@@ -491,7 +485,7 @@ describe("OAuth + MCP end to end", () => {
     const page = await fetch(`${admin}/?days=30&internal=1`, { headers: { cookie } });
     expect(page.status).toBe(200);
     const html = await page.text();
-    expect(html).toContain("find_wasted_spend");
+    expect(html).toContain("account_overview");
     expect(html).toContain("owner@example.com");
     // The operator's own account is internal: hidden unless asked for.
     const json = await (await fetch(`${admin}/?format=json`, { headers: { cookie } })).json();

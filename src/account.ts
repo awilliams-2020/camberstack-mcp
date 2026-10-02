@@ -139,7 +139,7 @@ ${canUndo ? `<div class="change-foot"><span>To reverse it, paste this into your 
 <div class="acct-head"><h1>Your account</h1><form method="post" action="/account/logout" class="who muted">${esc(u.email)} · <button class="linkish">Sign out</button></form></div>
 <div class="grid">${planCard}${connCard}</div>
 <h2>Changes</h2>
-${entries.length ? changes : `<div class="card"><p class="muted">No changes yet. Ask your AI <em>"What's wasting money in my Google Ads account?"</em> to start.</p></div>`}
+${entries.length ? changes : `<div class="card"><p class="muted">No changes yet. Ask your AI about your Google Ads account to start.</p></div>`}
 <h2 id="disconnect">Disconnect</h2>
 ${u.enc_refresh ? `<form method="post" action="/account/disconnect" class="danger"><p>Revokes Camberstack's Google access and deletes the stored credentials. Your AI app stops working with Camberstack until you connect again. Your change history stays here.</p>
 <label><input type="checkbox" name="confirm" value="yes" required> I want to disconnect</label><button class="btn-danger">Disconnect Google Ads</button></form>`

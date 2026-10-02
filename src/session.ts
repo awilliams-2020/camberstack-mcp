@@ -9,7 +9,6 @@ import { decrypt } from "./crypto.js";
 import { AdsClient, micros, refreshGoogleToken, revokeGoogleToken, type GoogleCreds } from "./google.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, accountsLabel } from "./plans.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DemoAds } from "./demo.js";
-import { analyzeWaste, round, type CampaignRow, type ConversionActionRow, type KeywordRow, type SearchTermRow } from "./analysis.js";
 import {
   ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, resolveChange, summarize,
   type Change, type ResolvedChange,
@@ -259,57 +258,6 @@ export class UserSession {
     };
   }
 
-  async wastedSpend(customerId: string, days: number, campaignId?: string) {
-    const a = await this.account(customerId);
-    const scope = campaignId ? ` AND campaign.id = ${Number(campaignId)}` : "";
-    const [campaignRows, termRows, kwRows, actionRows, negRows] = await Promise.all([
-      this.ads.search(a.customerId, `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
-          metrics.cost_micros, metrics.clicks, metrics.conversions
-        FROM campaign WHERE ${dateRange(days)} AND campaign.status != 'REMOVED'${scope}`, a.loginCustomerId),
-      this.ads.search(a.customerId, `SELECT search_term_view.search_term, campaign.id, campaign.name,
-          metrics.cost_micros, metrics.clicks, metrics.conversions
-        FROM search_term_view WHERE ${dateRange(days)}${scope}`, a.loginCustomerId),
-      this.ads.search(a.customerId, `SELECT campaign.id, campaign.name, ad_group.id, ad_group.name,
-          ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
-          ad_group_criterion.status, metrics.cost_micros, metrics.clicks, metrics.conversions
-        FROM keyword_view WHERE ${dateRange(days)}${scope}`, a.loginCustomerId),
-      this.ads.search(a.customerId, `SELECT conversion_action.id, conversion_action.name, conversion_action.category,
-          conversion_action.status, conversion_action.primary_for_goal, conversion_action.type
-        FROM conversion_action WHERE conversion_action.status != 'REMOVED'`, a.loginCustomerId),
-      this.ads.search(a.customerId, `SELECT campaign.id, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type
-        FROM campaign_criterion WHERE campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = true${scope}`,
-        a.loginCustomerId),
-    ]);
-    const terms = aggregate<SearchTermRow>(termRows, (r) => `${r.campaign.id}|${r.searchTermView.searchTerm}`, (r) => ({
-      term: r.searchTermView.searchTerm, campaignId: String(r.campaign.id), campaignName: r.campaign.name,
-      cost: 0, clicks: 0, conversions: 0,
-    }));
-    const keywords = aggregate<KeywordRow>(kwRows, (r) => `${r.adGroup.id}~${r.adGroupCriterion.criterionId}`, (r) => ({
-      campaignId: String(r.campaign.id), campaignName: r.campaign.name, adGroupId: String(r.adGroup.id),
-      adGroupName: r.adGroup.name, criterionId: String(r.adGroupCriterion.criterionId),
-      text: r.adGroupCriterion.keyword?.text ?? "", matchType: r.adGroupCriterion.keyword?.matchType ?? "",
-      status: r.adGroupCriterion.status, cost: 0, clicks: 0, conversions: 0,
-    }));
-    const campaigns = aggregate<CampaignRow>(campaignRows, (r) => String(r.campaign.id), (r) => ({
-      campaignId: String(r.campaign.id), name: r.campaign.name, type: r.campaign.advertisingChannelType,
-      status: r.campaign.status, cost: 0, clicks: 0, conversions: 0,
-    }));
-    const actions: ConversionActionRow[] = actionRows.map((r) => ({
-      id: String(r.conversionAction.id), name: r.conversionAction.name, category: r.conversionAction.category,
-      status: r.conversionAction.status, primaryForGoal: !!r.conversionAction.primaryForGoal, type: r.conversionAction.type,
-    }));
-    const existingNegatives = new Set(negRows.map((r) =>
-      `${r.campaign.id}|${String(r.campaignCriterion.keyword?.text ?? "").toLowerCase()}|${r.campaignCriterion.keyword?.matchType}`));
-    let accountTotals: { cost: number; conversions: number } | undefined;
-    if (campaignId) {
-      const all = await this.ads.search(a.customerId, `SELECT campaign.id, metrics.cost_micros, metrics.conversions
-        FROM campaign WHERE ${dateRange(days)} AND campaign.status != 'REMOVED'`, a.loginCustomerId);
-      accountTotals = { cost: all.reduce((s, r) => s + micros(r.metrics.costMicros), 0), conversions: all.reduce((s, r) => s + Number(r.metrics.conversions ?? 0), 0) };
-    }
-    const report = analyzeWaste({ window: `last ${days} days`, currency: a.currency, terms, keywords, campaigns, actions, existingNegatives, accountTotals });
-    return { account: { customer_id: a.customerId, name: a.name, currency: a.currency }, ...demoNote(a.customerId), ...report };
-  }
-
   async runQuery(customerId: string, query: string) {
     if (!/^\s*select\b/i.test(query)) throw new Error("Only SELECT (read-only GAQL) queries are allowed. Use propose_changes to change anything.");
     const a = await this.account(customerId);
@@ -526,6 +474,9 @@ export function dateRange(days: number): string {
 }
 
 /** Sum rows' cost, clicks and conversions per key (Google returns one row per segment); `add` sums any extra metrics. */
+/** Two decimals, for money and fractional conversions. */
+const round = (n: number) => Math.round(n * 100) / 100;
+
 function aggregate<T extends { cost: number; clicks: number; conversions: number }>(
   rows: any[], key: (r: any) => string, init: (r: any) => T, add?: (e: T, r: any) => void,
 ): T[] {

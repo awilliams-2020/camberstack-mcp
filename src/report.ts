@@ -26,7 +26,7 @@ export function buildReport(db: DB, o: ReportOptions) {
     used_a_tool:  n("SELECT count(DISTINCT c.user_id) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE u.created_at >= ? AND c.ok = 1", from),
     // Demo activity is its own stage; every stage after it counts real accounts only.
     tried_demo:   n(`SELECT count(DISTINCT c.user_id) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE u.created_at >= ? AND c.ok = 1 AND c.customer_id = '${DEMO_CID}'`, from),
-    diagnosed:    n(`SELECT count(DISTINCT c.user_id) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE u.created_at >= ? AND c.ok = 1 AND c.tool = 'find_wasted_spend' AND c.customer_id != '${DEMO_CID}'`, from),
+    used_real:    n(`SELECT count(DISTINCT c.user_id) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE u.created_at >= ? AND c.ok = 1 AND c.customer_id IS NOT NULL AND c.customer_id != '${DEMO_CID}'`, from),
     proposed:     n(`SELECT count(DISTINCT p.user_id) n FROM proposals p JOIN {U} u ON u.id = p.user_id WHERE u.created_at >= ? AND p.customer_id != '${DEMO_CID}'`, from),
     applied:      n(`SELECT count(DISTINCT p.user_id) n FROM proposals p JOIN {U} u ON u.id = p.user_id WHERE u.created_at >= ? AND p.status = 'applied' AND p.customer_id != '${DEMO_CID}'`, from),
     paid:         n("SELECT count(*) n FROM {U} u WHERE created_at >= ? AND plan != 'free'", from),

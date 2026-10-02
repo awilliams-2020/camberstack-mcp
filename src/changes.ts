@@ -16,7 +16,7 @@ export const MAX_CHANGES = 50;
 export const PROPOSAL_TTL = 24 * 3600;
 
 const id = z.string().regex(/^\d+$/, "numeric id");
-const campaignId = id.describe("Campaign id, digits only (campaign_id from account_overview or find_wasted_spend)");
+const campaignId = id.describe("Campaign id, digits only (campaign_id from account_overview or run_gaql)");
 const adGroupId = id.describe("Ad group id, digits only (ad_group.id from run_gaql)");
 const criterionId = id.describe("Keyword criterion id, digits only (ad_group_criterion.criterion_id from run_gaql)");
 

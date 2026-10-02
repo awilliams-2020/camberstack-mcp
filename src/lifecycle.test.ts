@@ -32,14 +32,14 @@ describe("lifecycle emails", () => {
     const { lc, sent, user, call } = setup();
     user("quiet", "quiet@example.com", 3);
     user("fresh", "fresh@example.com", 1);          // too soon
-    user("active", "active@example.com", 3); call("active", "find_wasted_spend");
+    user("active", "active@example.com", 3); call("active", "account_overview");
     user("listed", "listed@example.com", 3); call("listed", "list_accounts");  // listing accounts isn't using it
     user("me", "me@example.com", 3);                 // internal
     expect(await lc.run()).toBe(2);
     expect(sent.map((m) => m.to[0]).sort()).toEqual(["listed@example.com", "quiet@example.com"]);
     const m = sent[0];
     expect(m.subject).toBe("The first thing to ask Camberstack");
-    expect(m.text).toContain("What's wasting money in my Google Ads account");
+    expect(m.text).toContain("How did each of my Google Ads campaigns do last month?");
     expect(m.text).toContain("demo account");
     expect(m.headers["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
     expect(m.reply_to).toBe("adam@camberstack.io");

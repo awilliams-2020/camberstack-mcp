@@ -32,7 +32,7 @@ export interface LifecycleDeps {
 export const lifecycleSigningKey = (encryptionKey: Buffer) => deriveKey(encryptionKey, "email-links");
 
 const DAY = 86400;
-const USED_TOOLS = "('account_overview','find_wasted_spend','run_gaql','propose_changes')";
+const USED_TOOLS = "('account_overview','run_gaql','keyword_ideas','keyword_metrics','propose_changes')";
 
 export class Lifecycle {
   constructor(private d: LifecycleDeps) {}
@@ -134,16 +134,16 @@ const p = (s: string) => `<p style="margin:0 0 14px">${s}</p>`;
 const wrap = (body: string) => `<div style="font:16px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;color:#1c1b19;max-width:560px">${body}</div>`;
 
 function firstSteps(days: number) {
-  const ask = "What's wasting money in my Google Ads account over the last 90 days?";
+  const ask = "How did each of my Google Ads campaigns do last month?";
   return {
     subject: "The first thing to ask Camberstack",
     text: `Hi,
 
-You connected Camberstack to Google Ads ${days} days ago but haven't asked it anything yet. The best first question, in Claude or ChatGPT:
+You connected Camberstack to Google Ads ${days} days ago but haven't asked it anything yet. A good first question, in Claude or ChatGPT:
 
   "${ask}"
 
-It checks your conversion tracking first, then shows the search terms, keywords and campaigns that spend without converting, and suggests fixes. Nothing changes until you approve.
+From there, ask whatever you'd ask about your account: search terms, keywords, budgets. Nothing changes until you approve it.
 
 Rather try it on sample data first? Ask: "Show me Camberstack's demo account."
 
@@ -151,9 +151,9 @@ If something didn't work when you tried, just reply. I read every email.
 
 Adam
 Camberstack`,
-    html: wrap(p("Hi,") + p(`You connected Camberstack to Google Ads ${days} days ago but haven't asked it anything yet. The best first question, in Claude or ChatGPT:`)
+    html: wrap(p("Hi,") + p(`You connected Camberstack to Google Ads ${days} days ago but haven't asked it anything yet. A good first question, in Claude or ChatGPT:`)
       + `<p style="margin:0 0 14px;padding:12px 14px;background:#f1eee7;border-radius:8px"><strong>“${ask}”</strong></p>`
-      + p("It checks your conversion tracking first, then shows the search terms, keywords and campaigns that spend without converting, and suggests fixes. Nothing changes until you approve.")
+      + p("From there, ask whatever you'd ask about your account: search terms, keywords, budgets. Nothing changes until you approve it.")
       + p(`Rather try it on sample data first? Ask: <em>“Show me Camberstack's demo account.”</em>`)
       + p("If something didn't work when you tried, just reply. I read every email.") + p("Adam<br>Camberstack")),
   };

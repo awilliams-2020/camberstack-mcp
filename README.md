@@ -1,7 +1,7 @@
 # Camberstack: a Google Ads MCP server
 
-Connect Google Ads to Claude, ChatGPT, Cursor or any MCP client. Your AI checks conversion
-tracking, finds the spend that never converted, and proposes fixes. **Nothing
+Connect Google Ads to Claude, ChatGPT, Cursor or any MCP client. Your AI reads the account with
+read-only tools and can propose a small set of changes. **Nothing
 changes in the account until you approve a specific proposal, and every applied change can be
 undone.**
 
@@ -13,7 +13,6 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, 
 |---|---|---|
 | `list_accounts` | no | every account the login reaches, including client accounts under a manager (MCC) |
 | `account_overview` | no | spend, conversions, cost per conversion per campaign |
-| `find_wasted_spend` | no | tracking check → campaigns with no conversions → search terms over their campaign's cost per conversion → low-intent patterns (free, jobs, how-to, login) that never converted in that campaign → keywords to review. Returns ready-to-propose negatives |
 | `keyword_ideas` | no | Keyword Planner ideas from seed keywords and/or a URL: monthly searches, competition, top-of-page bid range; marks ideas the account already targets or blocks |
 | `keyword_metrics` | no | Keyword Planner numbers for an exact list, with the last 12 months of searches |
 | `run_gaql` | no | any read-only GAQL `SELECT` |

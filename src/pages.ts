@@ -137,7 +137,7 @@ export function homePage(baseUrl: string): string {
     jsonLd: {
       "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Camberstack",
       applicationCategory: "BusinessApplication", operatingSystem: "Web", url: baseUrl,
-      description: "Hosted Google Ads MCP server for Claude, ChatGPT and other MCP apps: read-only queries, a waste check, and a small set of approved changes with undo.",
+      description: "Hosted Google Ads MCP server for Claude, ChatGPT and other MCP apps: read-only queries and a small set of approved changes with undo.",
       offers: [
         { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD",
           description: "Every tool, with unlimited applied changes, on 1 Google Ads account." },
@@ -156,15 +156,6 @@ changes, each one only after you approve it.</p>
 <li>Changes are limited to negative keywords, pausing or re-enabling, and daily budgets. Each applied change can be undone.</li>
 </ul>
 <p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;Free plan, no card</span></p>
-
-<h2>Built-in waste check</h2>
-<p>Ask "what's wasting money?" and the <code>find_wasted_spend</code> tool checks, in order (see <a href="/google-ads-claude">a run on our own account</a>):</p>
-<ol>
-<li>Conversion tracking. With no primary conversion action, or a page view counted as a conversion, every other number is misleading, so it tells you that first.</li>
-<li>Search terms that cost more than a conversion usually does and didn't convert. Your own cost per conversion sets the bar.</li>
-<li>Low-intent searches like "free", "jobs", "how to" and "login", but only where they've never converted for you.</li>
-<li>Keywords that spent twice your cost per conversion and never converted.</li>
-</ol>
 
 <h2 id="changes">What it can change</h2>
 <table>
@@ -195,7 +186,7 @@ ${cmd(`{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }`)}
 <p class="muted">Your AI app handles sign-in. Google will show "Camberstack wants to access your Google Ads" before anything is shared.</p>
 <h3>Want to look first?</h3>
 <p>Connect, then ask <em>"Show me Camberstack's demo account"</em>. It's a sample plumbing business with six months of
-campaigns and search terms, so you can try diagnosis, proposals, applying and undo without touching a real account.
+campaigns and search terms, so you can try questions, proposals, applying and undo without touching a real account.
 Changes there never reach Google, and the demo doesn't count as one of your plan's accounts. A Google login with no Google Ads access gets the demo automatically.</p>
 
 <h2 id="pricing">Pricing</h2>
@@ -233,9 +224,9 @@ checkout link. An account stops counting ${ACCOUNT_WINDOW_DAYS} days after you l
 
 const ASK_FIRST = `<h2>What to ask first</h2>
 <ul>
-<li><em>"What's wasting money in my Google Ads account over the last 90 days?"</em></li>
-<li><em>"Is my conversion tracking set up right?"</em></li>
-<li><em>"Block the search terms that spent money without converting. Show me the changes first."</em></li>
+<li><em>"How did each campaign do last month: spend, clicks, conversions?"</em></li>
+<li><em>"Which search terms cost the most in the last 30 days?"</em></li>
+<li><em>"Add 'jobs' as a negative keyword to my Search campaign. Show me the change first."</em></li>
 <li><em>"What did you change this week? Undo the last change."</em></li>
 <li>Not ready to use your real account? <em>"Show me Camberstack's demo account."</em></li>
 </ul>`;
@@ -254,15 +245,14 @@ const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer t
 
 /**
  * Use-case page for "claude google ads" / "google ads claude" / "google ads mcp server" (keyword data:
- * project-research/keywords-ads-mcp.json). The worked example is a real find_wasted_spend run on our
- * own account (2026-10-01, 180 days); keep its numbers true to a real run if you edit it.
+ * project-research/keywords-ads-mcp.json).
  */
 export function claudeGuidePage(baseUrl: string): string {
   const mcpUrl = `${baseUrl}/mcp`;
   return layout({
     baseUrl, path: "/google-ads-claude",
     title: "Connect Google Ads to Claude: MCP setup in 2 minutes | Camberstack",
-    description: "Connect your Google Ads account to Claude with an MCP server. No developer token or Google Cloud project: sign in with Google, then ask Claude what's wasting money.",
+    description: "Connect your Google Ads account to Claude with an MCP server. No developer token or Google Cloud project: sign in with Google, then ask Claude about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
       headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-02",
@@ -271,8 +261,8 @@ export function claudeGuidePage(baseUrl: string): string {
     },
     body: `
 <h1>Connect Google Ads to Claude</h1>
-<p class="lede">Claude can read your Google Ads account, find the spend that never converted,
-and make the fixes you approve. It takes one connector URL and a Google sign-in. No developer token, no Google Cloud project.</p>
+<p class="lede">Claude can read your Google Ads account, answer questions about it,
+and make the changes you approve. It takes one connector URL and a Google sign-in. No developer token, no Google Cloud project.</p>
 
 <h2>Set it up</h2>
 <p>Camberstack is a hosted Google Ads MCP server. MCP (Model Context Protocol) is how Claude connects to outside tools.</p>
@@ -298,20 +288,6 @@ ${COPY_JS}
 <p class="muted">Also works in <a href="/google-ads-chatgpt">ChatGPT</a>, Cursor and other MCP apps: see <a href="/#setup">all setup options</a>.</p>
 
 ${ASK_FIRST}
-
-<h2>A real example</h2>
-<p>We ran it on our own Google Ads account, which runs ads for three products, over 180 days. The account had spent
-<strong>$2,080 for 9 conversions</strong> ($231 each). What Claude came back with:</p>
-<ol>
-<li>It checked tracking before anything else. All four primary conversion actions counted real outcomes (purchases,
-sign-ups, calls), so a search term with no conversions really had produced nothing.</li>
-<li>One campaign had spent <strong>$1,188 with no conversions</strong>, more than five times the account's cost per conversion.</li>
-<li>Nine "how to…" searches, such as "how to create a qr code", had cost $56.54 without converting. Claude suggested
-<code>"how to"</code> as a phrase negative keyword on that campaign.</li>
-<li>Searches containing "free" cost $187 across the account, but some of them converted. So Claude suggested blocking
-"free" only in the two campaigns where it never had ($87 and $86).</li>
-</ol>
-<p>Nothing changed until we approved it.</p>
 
 ${CAN_CHANGE}
 
@@ -341,7 +317,7 @@ export function chatgptGuidePage(baseUrl: string): string {
   return layout({
     baseUrl, path: "/google-ads-chatgpt",
     title: "Connect Google Ads to ChatGPT: MCP setup, step by step | Camberstack",
-    description: "Connect your Google Ads account to ChatGPT with a plugin. No developer token or Google Cloud project: turn on developer mode, add one URL, sign in with Google, then ask what's wasting money.",
+    description: "Connect your Google Ads account to ChatGPT with a plugin. No developer token or Google Cloud project: turn on developer mode, add one URL, sign in with Google, then ask about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
       headline: "Connect Google Ads to ChatGPT", url: `${baseUrl}/google-ads-chatgpt`, dateModified: "2026-10-02",
@@ -350,8 +326,8 @@ export function chatgptGuidePage(baseUrl: string): string {
     },
     body: `
 <h1>Connect Google Ads to ChatGPT</h1>
-<p class="lede">ChatGPT can read your Google Ads account, find the spend that never converted,
-and make the fixes you approve. Setup takes a few menus in ChatGPT's settings and a Google sign-in. No developer token,
+<p class="lede">ChatGPT can read your Google Ads account, answer questions about it,
+and make the changes you approve. Setup takes a few menus in ChatGPT's settings and a Google sign-in. No developer token,
 no Google Cloud project.</p>
 
 <h2>Before you start</h2>
@@ -381,7 +357,7 @@ ${shot("chatgpt-3.webp", 540, 582, "The New Plugin dialog with Create MCP App hi
 ${shot("chatgpt-4.webp", 540, 994, "ChatGPT's New Plugin form with the Name, server URL, Authentication and I understand checkbox highlighted")}</li>
 <li>Sign in with the Google account that has access to your Google Ads. Google shows exactly what's being shared before you agree.</li>
 <li>In a chat, type <strong>@</strong> and the name you gave it, then your question:
-<em>"@Camberstack what's wasting money in my Google Ads account?"</em></li>
+<em>"@Camberstack how did my campaigns do last month?"</em></li>
 </ol>
 
 <h2>About the "Custom MCP servers introduce risk" warning</h2>
@@ -429,7 +405,7 @@ export function geminiGuidePage(baseUrl: string): string {
   return layout({
     baseUrl, path: "/google-ads-gemini", noindex: true,
     title: "Connect Google Ads to Gemini: custom app (MCP) setup | Camberstack",
-    description: "Connect your Google Ads account to Google Gemini as a custom app. No developer token or Google Cloud project: add one URL, sign in with Google, then ask Gemini what's wasting money.",
+    description: "Connect your Google Ads account to Google Gemini as a custom app. No developer token or Google Cloud project: add one URL, sign in with Google, then ask Gemini about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
       headline: "Connect Google Ads to Gemini", url: `${baseUrl}/google-ads-gemini`, dateModified: "2026-10-02",
@@ -441,8 +417,8 @@ export function geminiGuidePage(baseUrl: string): string {
 <div class="card"><p><strong>Not working yet.</strong> Gemini accepts Camberstack and you can sign in, but Gemini then stops
 before finishing the connection, with "Cannot Complete Request". We've reported it to Google. Until it's fixed, use
 <a href="/google-ads-claude">Claude</a> or <a href="/google-ads-chatgpt">ChatGPT</a>. The steps below are kept for when it works.</p></div>
-<p class="lede">Gemini can read your Google Ads account, find the spend that never converted,
-and make the fixes you approve. You add Camberstack as a custom app with one URL, then sign in with Google.
+<p class="lede">Gemini can read your Google Ads account, answer questions about it,
+and make the changes you approve. You add Camberstack as a custom app with one URL, then sign in with Google.
 No developer token, no Google Cloud project.</p>
 
 <h2>Before you start</h2>
@@ -512,7 +488,7 @@ change your Google Ads account. This policy explains what we access, why, and wh
 
 <h2>How we use it</h2>
 <ul>
-<li>To answer the requests your AI assistant makes on your behalf (reports, waste diagnosis, read-only queries).</li>
+<li>To answer the requests your AI assistant makes on your behalf (reports and read-only queries).</li>
 <li>To apply changes to your Google Ads account <strong>only</strong> when you approve a specific proposal, and to reverse them if you ask.</li>
 </ul>
 <p>We do not sell your data, use it for advertising, share it with data brokers, or use it to train AI or machine-learning models.
@@ -674,7 +650,7 @@ export function sitemapXml(baseUrl: string, lastmod: string): string {
 export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
   return `# Camberstack
 
-> Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or any MCP client; the AI diagnoses wasted spend and applies only changes the user approves.
+> Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or any MCP client; the AI reads the account and applies only changes the user approves.
 
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
 - Tools: ${tools.map((t) => t.name).join(", ")}

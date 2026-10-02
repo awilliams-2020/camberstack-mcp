@@ -8,15 +8,14 @@ export const SERVER_NAME = "camberstack";
 export const SERVER_VERSION = "0.2.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
-Workflow: list_accounts → account_overview → find_wasted_spend → propose_changes → show the user the summary and ask for approval → apply_changes.
+Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
 The Free plan covers 1 Google Ads account (Pro covers 10), counted as accounts used in the last 30 days; undo and change history always work. If a tool reports the plan limit, explain it and show the upgrade link it returns, word for word.
-Read find_wasted_spend's "tracking" section before recommending cuts: if conversion tracking is broken or warning, say so first.
 To grow an account, keyword_ideas finds what people search for around a seed or a landing page; keyword_metrics checks volume and bids for a given list. Pass the account's own market: location_ids default to the United States.
 Account 000-000-0001 is a demo with sample data: anyone can try every tool on it, and changes there never touch Google. Always say when you are using it.`;
 
 /** Tools that read or propose on one Google Ads account, so count toward the plan's accounts (session.ts checkAccount). */
-const GATED = new Set(["account_overview", "find_wasted_spend", "run_gaql", "keyword_ideas", "keyword_metrics", "propose_changes"]);
+const GATED = new Set(["account_overview", "run_gaql", "keyword_ideas", "keyword_metrics", "propose_changes"]);
 
 const customerId = z.string().describe("Google Ads customer ID, with or without dashes (from list_accounts)");
 const locationIds = z.array(z.string().regex(/^\d+$/)).min(1).max(10).default(["2840"])
@@ -96,14 +95,6 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     inputSchema: { customer_id: customerId, days },
     annotations: read,
   }, ({ customer_id, days }: { customer_id: string; days: number }) => session().overview(customer_id, days));
-
-  tool("find_wasted_spend", {
-    title: "Find wasted spend",
-    description: "Diagnoses spend that isn't converting: checks conversion tracking first, then search terms that spent a conversion's worth with none, low-intent patterns (free, jobs, how-to, login) that never converted, and keywords to review. Returns suggested negative keywords ready to pass to propose_changes.",
-    inputSchema: { customer_id: customerId, days, campaign_id: z.string().optional().describe("Limit to one campaign") },
-    annotations: read,
-  }, ({ customer_id, days, campaign_id }: { customer_id: string; days: number; campaign_id?: string }) =>
-    session().wastedSpend(customer_id, days, campaign_id));
 
   tool("run_gaql", {
     title: "Run a read-only GAQL query",
