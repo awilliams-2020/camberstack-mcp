@@ -14,6 +14,8 @@ Hosted: **https://camberstack.io/mcp** (free plan: unlimited diagnosis + 3 appli
 | `list_accounts` | no | every account the login reaches, including client accounts under a manager (MCC) |
 | `account_overview` | no | spend, conversions, cost per conversion per campaign |
 | `find_wasted_spend` | no | tracking check → campaigns with no conversions → search terms over their campaign's cost per conversion → low-intent patterns (free, jobs, how-to, login) that never converted in that campaign → keywords to review. Returns ready-to-propose negatives |
+| `keyword_ideas` | no | Keyword Planner ideas from seed keywords and/or a URL: monthly searches, competition, top-of-page bid range; marks ideas the account already targets or blocks |
+| `keyword_metrics` | no | Keyword Planner numbers for an exact list, with the last 12 months of searches |
 | `run_gaql` | no | any read-only GAQL `SELECT` |
 | `propose_changes` | no | resolves changes against the live account, dry-runs them with Google (`validateOnly`), stores a proposal with a plain-English summary |
 | `apply_changes` | **yes** | applies a stored proposal (the user's own, un-applied, under 24h old); records each change's inverse |

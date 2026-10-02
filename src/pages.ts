@@ -638,7 +638,7 @@ export function llmsTxt(baseUrl: string): string {
 > Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or any MCP client; the AI diagnoses wasted spend and applies only changes the user approves.
 
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
-- Tools: list_accounts, account_overview, find_wasted_spend, run_gaql, propose_changes, apply_changes, undo_changes, discard_proposal, change_history, billing, disconnect
+- Tools: list_accounts, account_overview, find_wasted_spend, keyword_ideas, keyword_metrics, run_gaql, propose_changes, apply_changes, undo_changes, discard_proposal, change_history, billing, disconnect
 - Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget. Every applied change can be undone.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
 - Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes plus a 30-minute call or written review of the account's ads with the founder. Undo is always free.
