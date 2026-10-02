@@ -561,6 +561,11 @@ describe("OAuth + MCP end to end", () => {
     const root = await (await fetch(`${base}/.well-known/oauth-protected-resource`)).json();
     const sdk = await (await fetch(`${base}/.well-known/oauth-protected-resource/mcp`)).json();
     expect(root).toEqual(sdk);
+    // Issuer is the bare origin (no trailing slash), and the two documents agree on it.
+    const as = await (await fetch(`${base}/.well-known/oauth-authorization-server`)).json();
+    expect(as.issuer).toBe(new URL(base).origin);
+    expect(sdk.authorization_servers).toEqual([as.issuer]);
+    expect(as.token_endpoint).toBe(`${new URL(base).origin}/token`);
     expect((await fetch(`${base}/geo-audit`)).status).toBe(410);
     expect((await fetch(`${base}/.well-known/glama.json`)).status).toBe(404);
   });

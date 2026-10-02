@@ -96,6 +96,29 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     next();
   });
 
+  // Issuer without the trailing slash the SDK always adds ("https://camberstack.io/"): for a bare origin
+  // RFC 8414 derives the metadata URL from "https://camberstack.io", and Gemini abandoned the flow after
+  // /register with the slashed form. Served ahead of the SDK router; every other field is the SDK's.
+  const issuer = new URL(cfg.baseUrl).origin;
+  const resourceMetadata = {
+    resource: mcpUrl.href, authorization_servers: [issuer], scopes_supported: [MCP_SCOPE],
+    resource_name: RESOURCE_NAME, resource_documentation: `${cfg.baseUrl}/#setup`,
+  };
+  app.get(["/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource"], (_q, r) => {
+    r.set("Access-Control-Allow-Origin", "*").json(resourceMetadata);
+  });
+  app.get("/.well-known/oauth-authorization-server", (_q, r) => {
+    r.set("Access-Control-Allow-Origin", "*").json({
+      issuer, service_documentation: `${cfg.baseUrl}/#setup`,
+      authorization_endpoint: `${issuer}/authorize`, response_types_supported: ["code"],
+      code_challenge_methods_supported: ["S256"],
+      token_endpoint: `${issuer}/token`, token_endpoint_auth_methods_supported: ["client_secret_post", "none"],
+      grant_types_supported: ["authorization_code", "refresh_token"], scopes_supported: [MCP_SCOPE],
+      revocation_endpoint: `${issuer}/revoke`, revocation_endpoint_auth_methods_supported: ["client_secret_post"],
+      registration_endpoint: `${issuer}/register`,
+    });
+  });
+
   // OAuth: /.well-known/*, /authorize, /token, /register, /revoke
   app.use(mcpAuthRouter({
     provider,
@@ -106,11 +129,6 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     serviceDocumentationUrl: new URL(`${cfg.baseUrl}/#setup`),
   }));
 
-  // Some MCP clients probe the root form before the path-suffixed one the SDK serves; same document.
-  app.get("/.well-known/oauth-protected-resource", (_q, r) => {
-    r.json({ resource: mcpUrl.href, authorization_servers: [new URL(cfg.baseUrl).href], scopes_supported: [MCP_SCOPE],
-      resource_name: RESOURCE_NAME, resource_documentation: `${cfg.baseUrl}/#setup` });
-  });
   if (cfg.glamaClaim) {
     app.get("/.well-known/glama.json", (_q, r) => {
       r.json({ $schema: "https://glama.ai/mcp/schemas/connector.json", claim: cfg.glamaClaim });
