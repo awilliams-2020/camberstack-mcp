@@ -3,7 +3,7 @@
   "name": "io.camberstack/google-ads",
   "title": "Camberstack: Google Ads",
   "description": "Google Ads MCP that acts: finds wasted spend, applies only the changes you approve, undoes them.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "websiteUrl": "https://camberstack.io",
   "repository": {
     "url": "https://github.com/awilliams-2020/camberstack-mcp",

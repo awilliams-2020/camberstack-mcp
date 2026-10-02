@@ -5,7 +5,7 @@ import { PublicChangeSchema } from "./changes.js";
 import { isDemo, type UserSession } from "./session.js";
 
 export const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.1.0";
+export const SERVER_VERSION = "0.2.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Workflow: list_accounts → account_overview → find_wasted_spend → propose_changes → show the user the summary and ask for approval → apply_changes.
