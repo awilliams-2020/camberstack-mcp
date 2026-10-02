@@ -413,7 +413,8 @@ ${commonQuestions("ChatGPT")}
  * Connected Apps, Custom apps) confirmed by the operator the same day.
  * Gemini supports dynamic client registration, so Additional settings stays closed.
  * NOT WORKING as of 2026-10-02: Gemini registers and the user signs in, but Gemini never calls /token (code issued, never
- * redeemed; same with Google sign-in bypassed). Page is noindex and unlinked until it does; reported to Google.
+ * redeemed; same with Google sign-in bypassed). Page is noindex and unlinked until it does. Reported to Google:
+ * https://discuss.ai.google.dev/t/186405 (and in-app feedback). Re-list it in homePage, sitemapXml and llmsTxt when fixed.
  */
 export function geminiGuidePage(baseUrl: string): string {
   const mcpUrl = `${baseUrl}/mcp`;
