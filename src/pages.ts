@@ -72,13 +72,13 @@ ol.steps>li{margin-bottom:28px}
 }
 `;
 
-function layout(o: { title: string; description: string; path: string; body: string; baseUrl: string; jsonLd?: object }): string {
+function layout(o: { title: string; description: string; path: string; body: string; baseUrl: string; jsonLd?: object; noindex?: boolean }): string {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${o.title}</title>
 <meta name="description" content="${o.description}">
-<link rel="canonical" href="${o.baseUrl}${o.path}">
+<link rel="canonical" href="${o.baseUrl}${o.path}">${o.noindex ? '\n<meta name="robots" content="noindex">' : ""}
 <meta property="og:title" content="${o.title}"><meta property="og:description" content="${o.description}">
 <meta property="og:url" content="${o.baseUrl}${o.path}"><meta property="og:type" content="website">
 <meta property="og:image" content="${o.baseUrl}/logo.png">
@@ -177,9 +177,6 @@ ${COPY_JS}
 <h3>ChatGPT (Plus, Pro, Business, Enterprise)</h3>
 <p>Turn on developer mode, add it as an MCP app, then type <strong>@Camberstack</strong> in a chat.
 <a href="/google-ads-chatgpt">Step-by-step setup guide</a></p>
-<h3>Gemini (Google AI Pro or Ultra, personal accounts in the US)</h3>
-<p>Add it as a custom app under <strong>Connected Apps</strong>, then sign in with Google.
-<a href="/google-ads-gemini">Setup guide with screenshots</a></p>
 <h3>Claude Code</h3>
 <pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
 <h3>Cursor, VS Code, others</h3>
@@ -415,11 +412,13 @@ ${commonQuestions("ChatGPT")}
  * (support.google.com/gemini/answer/17209137, read 2026-10-02). Screenshots are the operator's, mobile web, 2026-10-02; the path (Settings, Personal Intelligence,
  * Connected Apps, Custom apps) confirmed by the operator the same day.
  * Gemini supports dynamic client registration, so Additional settings stays closed.
+ * NOT WORKING as of 2026-10-02: Gemini registers and the user signs in, but Gemini never calls /token (code issued, never
+ * redeemed; same with Google sign-in bypassed). Page is noindex and unlinked until it does; reported to Google.
  */
 export function geminiGuidePage(baseUrl: string): string {
   const mcpUrl = `${baseUrl}/mcp`;
   return layout({
-    baseUrl, path: "/google-ads-gemini",
+    baseUrl, path: "/google-ads-gemini", noindex: true,
     title: "Connect Google Ads to Gemini: custom app (MCP) setup | Camberstack",
     description: "Connect your Google Ads account to Google Gemini as a custom app. No developer token or Google Cloud project: add one URL, sign in with Google, then ask Gemini what's wasting money.",
     jsonLd: {
@@ -430,6 +429,9 @@ export function geminiGuidePage(baseUrl: string): string {
     },
     body: `
 <h1>Connect Google Ads to Gemini</h1>
+<div class="card"><p><strong>Not working yet.</strong> Gemini accepts Camberstack and you can sign in, but Gemini then stops
+before finishing the connection, with "Cannot Complete Request". We've reported it to Google. Until it's fixed, use
+<a href="/google-ads-claude">Claude</a> or <a href="/google-ads-chatgpt">ChatGPT</a>. The steps below are kept for when it works.</p></div>
 <p class="lede">Gemini can read your Google Ads account, show you where the budget goes with nothing to show for it,
 and make the fixes you approve. You add Camberstack as a custom app with one URL, then sign in with Google.
 No developer token, no Google Cloud project.</p>
@@ -613,7 +615,7 @@ export function robotsTxt(baseUrl: string): string {
 }
 
 export function sitemapXml(baseUrl: string, lastmod: string): string {
-  const urls = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/google-ads-gemini", "/privacy", "/terms"];
+  const urls = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/privacy", "/terms"];
   const lm = lastmod ? `<lastmod>${lastmod.slice(0, 10)}</lastmod>` : "";
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
     .map((u) => `  <url><loc>${baseUrl}${u}</loc>${lm}</url>`).join("\n")}\n</urlset>\n`;
@@ -633,7 +635,6 @@ export function llmsTxt(baseUrl: string): string {
 - [Pricing](${baseUrl}/#pricing)
 - [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)
 - [Connect Google Ads to ChatGPT (step-by-step guide)](${baseUrl}/google-ads-chatgpt)
-- [Connect Google Ads to Gemini (custom app setup guide)](${baseUrl}/google-ads-gemini)
 - [Source (MIT)](https://github.com/awilliams-2020/camberstack-mcp)
 - [Privacy](${baseUrl}/privacy)
 - [Terms](${baseUrl}/terms)

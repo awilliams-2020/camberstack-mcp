@@ -593,8 +593,10 @@ describe("OAuth + MCP end to end", () => {
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-chatgpt`);
     expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-chatgpt"');
     expect(claude).toContain('src="/shots/gemini-3.webp"');
-    expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-gemini`);
-    expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-gemini"');
+    // Gemini doesn't complete the connection yet: the guide stays up but unlisted.
+    expect(await (await fetch(`${base}/sitemap.xml`)).text()).not.toContain(`${base}/google-ads-gemini`);
+    expect(await (await fetch(`${base}/`)).text()).not.toContain('href="/google-ads-gemini"');
+    expect(await (await fetch(`${base}/google-ads-gemini`)).text()).toContain('<meta name="robots" content="noindex">');
   });
 
   it("hands back a Gemini-sized state (~1.4k chars, base64url) byte for byte", async () => {
