@@ -10,10 +10,13 @@ export const SERVER_VERSION = "0.2.0";
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Workflow: list_accounts → account_overview → find_wasted_spend → propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
-Free accounts get 3 applied changes; undo is always free. If apply_changes reports the limit, show the user the upgrade link it returns, word for word.
+The Free plan covers 1 Google Ads account (Pro covers 10), counted as accounts used in the last 30 days; undo and change history always work. If a tool reports the plan limit, explain it and show the upgrade link it returns, word for word.
 Read find_wasted_spend's "tracking" section before recommending cuts: if conversion tracking is broken or warning, say so first.
 To grow an account, keyword_ideas finds what people search for around a seed or a landing page; keyword_metrics checks volume and bids for a given list. Pass the account's own market: location_ids default to the United States.
 Account 000-000-0001 is a demo with sample data: anyone can try every tool on it, and changes there never touch Google. Always say when you are using it.`;
+
+/** Tools that read or propose on one Google Ads account, so count toward the plan's accounts (session.ts checkAccount). */
+const GATED = new Set(["account_overview", "find_wasted_spend", "run_gaql", "keyword_ideas", "keyword_metrics", "propose_changes"]);
 
 const customerId = z.string().describe("Google Ads customer ID, with or without dashes (from list_accounts)");
 const locationIds = z.array(z.string().regex(/^\d+$/)).min(1).max(10).default(["2840"])
@@ -48,9 +51,12 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   const wrap = <A>(name: string, fn: (a: A) => Promise<unknown> | unknown) => {
     return async (a: A) => {
       const t0 = Date.now();
-      let out: ReturnType<typeof ok> | ReturnType<typeof fail>;
-      try { out = ok(await fn(a)); } catch (e) { out = fail(e); }
       const cid = (a as { customer_id?: unknown } | undefined)?.customer_id;
+      let out: ReturnType<typeof ok> | ReturnType<typeof fail>;
+      try {
+        if (GATED.has(name) && typeof cid === "string") await session().checkAccount(cid);
+        out = ok(await fn(a));
+      } catch (e) { out = fail(e); }
       try {
         log({
           tool: name, customerId: typeof cid === "string" ? cid.replace(/-/g, "") : null,
@@ -170,7 +176,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   tool("billing", {
     title: "Plan and billing",
-    description: "Shows the user's Camberstack plan: free applied changes left, or Pro. Returns a personal link to upgrade (free) or to change card and cancel (Pro). Diagnosis, proposals, history and undo are always free.",
+    description: "Shows the user's Camberstack plan: the Google Ads accounts used in the last 30 days against the number the plan covers (Free 1, Pro 10). Returns a personal link to upgrade (Free) or to change card and cancel (Pro).",
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => session().plan());
 

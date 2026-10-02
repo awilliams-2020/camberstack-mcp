@@ -4,11 +4,11 @@
  */
 
 import { z } from "zod";
-import { PRO_SESSION } from "./plans.js";
+import { ACCOUNT_WINDOW_DAYS, PRO_PRICE_LABEL } from "./plans.js";
 import type { ToolDoc } from "./tools.js";
 
 const CONTACT = "adam@camberstack.io";
-const UPDATED = "2026-10-01";
+const UPDATED = "2026-10-02";
 
 const CSS = `
 .linkish{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
@@ -140,8 +140,8 @@ export function homePage(baseUrl: string): string {
       description: "Hosted Google Ads MCP server for Claude, ChatGPT and other MCP apps: read-only queries, a waste check, and a small set of approved changes with undo.",
       offers: [
         { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD",
-          description: "Unlimited diagnosis and proposals, change history and undo, plus 3 applied changes." },
-        { "@type": "Offer", name: "Pro", price: "49", priceCurrency: "USD", description: `Unlimited applied changes, plus ${PRO_SESSION}.`,
+          description: "Every tool, with unlimited applied changes, on 1 Google Ads account." },
+        { "@type": "Offer", name: "Pro", price: "49", priceCurrency: "USD", description: "Every tool on up to 10 Google Ads accounts.",
           priceSpecification: { "@type": "UnitPriceSpecification", price: "49", priceCurrency: "USD", billingDuration: "P1M", unitCode: "MON" } },
       ],
     },
@@ -196,13 +196,13 @@ ${cmd(`{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }`)}
 <h3>Want to look first?</h3>
 <p>Connect, then ask <em>"Show me Camberstack's demo account"</em>. It's a sample plumbing business with six months of
 campaigns and search terms, so you can try diagnosis, proposals, applying and undo without touching a real account.
-Changes there never reach Google and don't use your free changes. A Google login with no Google Ads access gets the demo automatically.</p>
+Changes there never reach Google, and the demo doesn't count as one of your plan's accounts. A Google login with no Google Ads access gets the demo automatically.</p>
 
 <h2 id="pricing">Pricing</h2>
 <div class="grid">
-<div class="card"><h3>Free</h3><p>Unlimited diagnosis and proposals, change history and undo, plus <strong>3 applied changes</strong>. No card.</p>
+<div class="card"><h3>Free</h3><p>Every tool, with unlimited applied changes and undo, on <strong>1 Google Ads account</strong>. No card.</p>
 <p><a class="btn" href="#setup">Connect for free</a></p></div>
-<div class="card"><h3>Pro: $49/month</h3><p>Everything in Free, with <strong>unlimited applied changes</strong>, plus ${PRO_SESSION}. Cancel any time; you keep Pro until the end of the month you paid for.</p>
+<div class="card"><h3>Pro: ${PRO_PRICE_LABEL}</h3><p>Everything in Free, on <strong>up to 10 Google Ads accounts</strong>, for agencies and anyone managing clients through a manager (MCC) account. Cancel any time; you keep Pro until the end of the month you paid for.</p>
 <p><a class="btn" href="/account?upgrade=1">Upgrade to Pro</a></p><p class="muted" style="font-size:14px">Connect Camberstack to your AI app first; you'll sign in with the same Google account.</p></div>
 </div>
 
@@ -219,9 +219,10 @@ Reports and query results are not stored. Details in the <a href="/privacy">priv
 <p>Sign in at <a href="/account">camberstack.io/account</a> and choose <strong>Disconnect Google Ads</strong>, or remove Camberstack at
 <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>. You can also ask your AI to use the <code>disconnect</code>
 tool, though some apps (ChatGPT, for one) block disconnect requests from chat.</p>
-<h3>What happens after my 3 free changes?</h3>
-<p>Diagnosis, proposals, history and undo keep working, free, with no time limit. Applying a fourth change asks you to upgrade:
-your AI shows a personal checkout link, and once you've paid you ask it to apply again. Undo is never paywalled.</p>
+<h3>What counts as an account?</h3>
+<p>Each Google Ads account you actually use Camberstack on in the last ${ACCOUNT_WINDOW_DAYS} days, not every account your login can see.
+A manager (MCC) account and the demo account don't count. On Free, using a second account asks you to upgrade: your AI shows a personal
+checkout link. An account stops counting ${ACCOUNT_WINDOW_DAYS} days after you last used it, so you can switch. Undo and change history always work.</p>
 <h3>Does it work with a manager (MCC) account?</h3>
 <p>Yes. It lists the client accounts under any manager your login can reach.</p>
 `,
@@ -249,7 +250,7 @@ const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer t
 <h3>Does ${app} see my whole Google account?</h3>
 <p>No. It gets Google Ads access and your email address, nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
 <h3>What does it cost?</h3>
-<p>Free for diagnosis, proposals and undo, with 3 applied changes. <a href="/#pricing">Pro</a> is $49/month.</p>`;
+<p>Free on one Google Ads account, with every tool and unlimited changes. <a href="/#pricing">Pro</a> covers up to 10 accounts for ${PRO_PRICE_LABEL}.</p>`;
 
 /**
  * Use-case page for "claude google ads" / "google ads claude" / "google ads mcp server" (keyword data:
@@ -529,7 +530,7 @@ Humans at Camberstack do not read your Google Ads data unless you ask us to for 
 <tr><td>A sign-in session for the account page (a cookie; we store only its hash)</td><td>Keep you signed in to camberstack.io/account</td><td>7 days, or until you sign out</td></tr>
 <tr><td>Tokens we issue to your AI app (stored as hashes)</td><td>Authenticate your AI app</td><td>Expiry (1 hour access, 90 days refresh) or disconnect</td></tr>
 <tr><td>Proposals: the changes requested, their summary and results</td><td>Show what changed and let you undo it</td><td>You ask us to delete them</td></tr>
-<tr><td>A usage log: which tool ran, for which Google Ads account ID, when, how long it took and any error message. Never the tool's inputs or results</td><td>Find and fix failures, and see which features are used</td><td>You ask us to delete it</td></tr>
+<tr><td>A usage log: which tool ran, for which Google Ads account ID, when, how long it took and any error message. Never the tool's inputs or results</td><td>Find and fix failures, see which features are used, and count how many Google Ads accounts you use for your plan</td><td>You ask us to delete it</td></tr>
 </table>
 <p>Reports, search-term lists and query results are computed on request and returned to your AI assistant. We do not store them.
 Standard web server logs (IP address, time, path) are kept for a limited period for security and then deleted.</p>
@@ -542,7 +543,7 @@ Standard web server logs (IP address, time, path) are kept for a limited period 
 
 <h2>Emails</h2>
 <p>We may send you up to two short emails about using Camberstack: one if you connect but don't try it within a couple of days,
-and one if you use all your free changes. Each is sent once, from adam@camberstack.io, to the email address of the Google account
+and one if you try Camberstack on more Google Ads accounts than the Free plan covers. Each is sent once, from adam@camberstack.io, to the email address of the Google account
 you connected. They never contain your Google Ads data. Every email has an unsubscribe link, and replies reach a person.</p>
 
 <h2>Our own Google ads</h2>
@@ -679,7 +680,7 @@ export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
 - Tools: ${tools.map((t) => t.name).join(", ")}
 - Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget. Every applied change can be undone.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
-- Pricing: Free plan (unlimited diagnosis and proposals, history, undo, 3 applied changes); Pro $49/month for unlimited applied changes plus a 30-minute call or written review of the account's ads with the founder. Undo is always free.
+- Pricing: Free plan covers 1 Google Ads account (every tool, unlimited applied changes); Pro ${PRO_PRICE_LABEL} covers up to 10. Accounts are counted as those used in the last ${ACCOUNT_WINDOW_DAYS} days; manager (MCC) and demo accounts don't count. Undo is always free.
 - [Setup](${baseUrl}/#setup)
 - [Pricing](${baseUrl}/#pricing)
 - [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)

@@ -10,7 +10,7 @@ import type { UserSession } from "./session.js";
 import { SignIn } from "./signin.js";
 import { appPage, COPY_JS, esc, infoPage } from "./pages.js";
 import { DEMO_CID } from "./demo.js";
-import { PRO_PRICE_LABEL, proSessionHtml } from "./plans.js";
+import { ACCOUNT_WINDOW_DAYS, PRO_PRICE_LABEL } from "./plans.js";
 
 export interface AccountDeps {
   db: DB;
@@ -19,7 +19,6 @@ export interface AccountDeps {
   fetch?: typeof fetch;
   session: (userId: string) => UserSession;
   billingLink: (kind: "upgrade" | "billing", userId: string) => string | null;
-  bookingUrl?: string;
 }
 
 /** "Oct 1, 19:44 UTC" */
@@ -106,15 +105,14 @@ Your AI app can no longer use Camberstack until you connect again.</p>
 
     const planCard = plan.plan === "pro"
       ? `<div class="card"><p class="label">Plan</p><p class="big">Pro${"complimentary" in plan ? ` <span class="chip">complimentary</span>` : ""}</p>
-<p class="muted">Unlimited applied changes.${"complimentary" in plan ? " No subscription on this account, so nothing to manage or cancel." : ""}</p>
+<p class="muted">${plan.accounts_in_use.length} of ${plan.accounts_included} Google Ads accounts in use (last ${ACCOUNT_WINDOW_DAYS} days).${"complimentary" in plan ? " No subscription on this account, so nothing to manage or cancel." : ""}</p>
 ${"manage_billing" in plan && plan.manage_billing ? `<a class="btn" href="${esc(plan.manage_billing)}">Manage billing</a>` : ""}</div>`
       : (() => {
-        const left = "free_applies_left" in plan ? plan.free_applies_left ?? 0 : 0;
-        const total = ("free_applies_total" in plan ? plan.free_applies_total : undefined) ?? 3;
-        const used = Math.max(0, total - left);
+        const used = plan.accounts_in_use;
         return `<div class="card"><p class="label">Plan</p><p class="big">Free</p>
-<div class="meter" aria-label="${used} of ${total} free applied changes used">${Array.from({ length: total }, (_, i) => `<i class="${i < used ? "on" : ""}"></i>`).join("")}</div>
-<p class="muted"><strong style="color:var(--fg)">${left} of ${total}</strong> free applied changes left. Diagnosis, proposals, history and undo are always free.</p>
+<p class="muted">Every tool, with unlimited applied changes, on ${plan.accounts_included} Google Ads account.
+${used.length ? `In use (last ${ACCOUNT_WINDOW_DAYS} days): <strong style="color:var(--fg)">${used.map((c) => esc(fmtCid(c))).join(", ")}</strong>.` : "Not used on an account yet."}
+Pro covers up to 10.</p>
 ${"upgrade_url" in plan && plan.upgrade_url ? `<a class="btn" href="${esc(plan.upgrade_url)}">Upgrade to Pro · ${PRO_PRICE_LABEL}</a>` : ""}</div>`;
       })();
 
@@ -140,7 +138,6 @@ ${canUndo ? `<div class="change-foot"><span>To reverse it, paste this into your 
     res.type("html").send(shell("Your account", `<div class="acct">
 <div class="acct-head"><h1>Your account</h1><form method="post" action="/account/logout" class="who muted">${esc(u.email)} · <button class="linkish">Sign out</button></form></div>
 <div class="grid">${planCard}${connCard}</div>
-${plan.plan === "pro" && !("complimentary" in plan) ? `<div class="card" style="margin-top:16px">${proSessionHtml(d.bookingUrl)}</div>` : ""}
 <h2>Changes</h2>
 ${entries.length ? changes : `<div class="card"><p class="muted">No changes yet. Ask your AI <em>"What's wasting money in my Google Ads account?"</em> to start.</p></div>`}
 <h2 id="disconnect">Disconnect</h2>

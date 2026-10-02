@@ -1,7 +1,7 @@
 /**
  * Two lifecycle emails, each sent at most once per user, through Resend:
  *   first_steps    connected 2–14 days ago and never asked anything real → the first question to ask, and the demo
- *   limit_reached  used every free applied change, still free 3+ days later → one note: what's still free, the upgrade link
+ *   limit_reached  a tool refused a second Google Ads account (the Free plan's limit), still free 3+ days later → one note: what Pro covers, the upgrade link
  * Never sent to internal accounts (ADMIN_EMAILS, PRO_EMAILS), Pro users, the disconnected, or anyone who unsubscribed.
  *
  * Content stays generic on purpose: counts and links, never campaign names or other Google Ads data
@@ -12,9 +12,8 @@
 import express, { type Express } from "express";
 import type { DB } from "./db.js";
 import { now } from "./db.js";
-import { DEMO_CID } from "./demo.js";
 import { deriveKey, safeEqual, sign } from "./crypto.js";
-import { PRO_PRICE_LABEL, PRO_SESSION } from "./plans.js";
+import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL } from "./plans.js";
 
 export interface MailConfig { apiKey: string; from: string; replyTo: string }
 
@@ -23,7 +22,6 @@ export interface LifecycleDeps {
   baseUrl: string;
   mail?: MailConfig;
   signingKey: Buffer;
-  freeApplies: number;
   /** Never emailed: the operator and testers. */
   internalEmails: Set<string>;
   upgradeLink: (userId: string) => string | null;
@@ -57,12 +55,12 @@ export class Lifecycle {
       AND u.created_at BETWEEN ? AND ? AND ${notSent("first_steps")}
       AND NOT EXISTS (SELECT 1 FROM tool_calls c WHERE c.user_id = u.id AND c.ok = 1 AND c.tool IN ${USED_TOOLS})`)
       .all(t - 14 * DAY, t - 2 * DAY) as { id: string; email: string; created_at: number }[];
-    // Every free applied change used (real accounts, not undos), the last one 3–30 days ago.
-    const limit = this.d.db.prepare(`SELECT u.id, u.email, max(p.applied_at) last, count(*) n
-      FROM users u JOIN proposals p ON p.user_id = u.id AND p.status = 'applied' AND p.undo_of IS NULL AND p.customer_id != '${DEMO_CID}'
+    // Refused a second account by the plan gate (session.ts checkAccount), the last refusal 3–30 days ago.
+    const limit = this.d.db.prepare(`SELECT u.id, u.email, max(c.at) last
+      FROM users u JOIN tool_calls c ON c.user_id = u.id AND c.ok = 0 AND c.error LIKE ?
       WHERE ${eligible} AND ${notSent("limit_reached")}
-      GROUP BY u.id HAVING n >= ? AND last BETWEEN ? AND ?`)
-      .all(this.d.freeApplies, t - 30 * DAY, t - 3 * DAY) as { id: string; email: string; last: number }[];
+      GROUP BY u.id HAVING last BETWEEN ? AND ?`)
+      .all(`${PLAN_LIMIT_PREFIX}%`, t - 30 * DAY, t - 3 * DAY) as { id: string; email: string; last: number }[];
     const ok = (e: string) => !this.d.internalEmails.has(e.toLowerCase());
     return [
       ...first.filter((u) => ok(u.email)).map((u) => ({ kind: "first_steps" as const, id: u.id, email: u.email, days: Math.floor((t - u.created_at) / DAY) })),
@@ -78,7 +76,7 @@ export class Lifecycle {
       const claim = this.d.db.prepare("INSERT OR IGNORE INTO email_log (user_id, kind, sent_at) VALUES (?, ?, ?)").run(u.id, u.kind, now());
       if (!claim.changes) continue;
       try {
-        await this.send(u.email, u.kind === "first_steps" ? firstSteps(u.days) : limitReached(this.d.baseUrl, this.d.freeApplies, this.d.upgradeLink(u.id)), u.id);
+        await this.send(u.email, u.kind === "first_steps" ? firstSteps(u.days) : limitReached(this.d.baseUrl, this.d.upgradeLink(u.id)), u.id);
         sent++;
       } catch (e) {
         this.d.db.prepare("DELETE FROM email_log WHERE user_id = ? AND kind = ?").run(u.id, u.kind);
@@ -109,7 +107,7 @@ export class Lifecycle {
   /** Operator check: send one sample of each email to `to`, with placeholder links. */
   async preview(to: string): Promise<void> {
     await this.send(to, firstSteps(3), "preview");
-    await this.send(to, limitReached(this.d.baseUrl, this.d.freeApplies, `${this.d.baseUrl}/account?upgrade=1`), "preview");
+    await this.send(to, limitReached(this.d.baseUrl, `${this.d.baseUrl}/account?upgrade=1`), "preview");
   }
 
   mount(app: Express, page: (title: string, body: string) => string): void {
@@ -161,21 +159,22 @@ Camberstack`,
   };
 }
 
-function limitReached(base: string, free: number, upgrade: string | null) {
+function limitReached(base: string, upgrade: string | null) {
   return {
-    subject: `You've used your ${free} free changes`,
+    subject: "Using Camberstack on more than one Google Ads account",
     text: `Hi,
 
-Camberstack has applied your ${free} free changes. You can see each one, and undo any of them, at ${base}/account
+Camberstack stopped when you tried it on a second Google Ads account. The Free plan covers one account at a time (an account
+drops out ${ACCOUNT_WINDOW_DAYS} days after you last used it), with every tool and unlimited changes. Undo and history always work: ${base}/account
 
-Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is ${PRO_PRICE_LABEL}, cancel any time, and includes ${PRO_SESSION}${upgrade ? `:\n${upgrade}\n(personal link, valid for 7 days)` : ` from ${base}/account`}.
+Camberstack Pro covers up to 10 accounts, for ${PRO_PRICE_LABEL}, cancel any time${upgrade ? `:\n${upgrade}\n(personal link, valid for 7 days)` : ` from ${base}/account`}.
 
 This is the only email about it. Questions? Just reply.
 
 Adam
 Camberstack`,
-    html: wrap(p("Hi,") + p(`Camberstack has applied your ${free} free changes. You can see each one, and undo any of them, on <a href="${base}/account">your account page</a>.`)
-      + p(`Finding wasted spend, proposals, history and undo stay free. To keep applying changes from your chat, Camberstack Pro is ${PRO_PRICE_LABEL}, cancel any time, and includes ${PRO_SESSION}.`)
+    html: wrap(p("Hi,") + p(`Camberstack stopped when you tried it on a second Google Ads account. The Free plan covers one account at a time (an account drops out ${ACCOUNT_WINDOW_DAYS} days after you last used it), with every tool and unlimited changes. Undo and history always work, on <a href="${base}/account">your account page</a>.`)
+      + p(`Camberstack Pro covers up to 10 accounts, for ${PRO_PRICE_LABEL}, cancel any time.`)
       + `<p style="margin:0 0 18px"><a href="${upgrade ?? `${base}/account?upgrade=1`}" style="display:inline-block;background:#1f5f4a;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:600">Upgrade to Pro</a></p>`
       + p("This is the only email about it. Questions? Just reply.") + p("Adam<br>Camberstack")),
   };

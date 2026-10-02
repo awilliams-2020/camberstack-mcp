@@ -22,8 +22,9 @@ export interface Config {
     /** Sent when set. Google moved access decisions to the Cloud project on 2026-09-10. */
     developerToken?: string;
   };
-  /** Applied proposals a free user gets (undo never counts). Pro is unlimited. */
-  freeApplies: number;
+  /** Google Ads accounts a plan covers, counted as distinct accounts used in the last 30 days (plans.ts). */
+  freeAccounts: number;
+  proAccounts: number;
   /** Pro subscription; unset = no upgrade links (free users stop at the limit with no way to pay). */
   stripe?: { secretKey: string; proPriceId: string };
   /** Emails treated as Pro regardless of billing (the operator, testers). */
@@ -36,8 +37,6 @@ export interface Config {
   conversions?: import("./adconversions.js").ConversionConfig;
   /** Lifecycle emails via Resend (lifecycle.ts); unset = none are sent. */
   mail?: import("./lifecycle.js").MailConfig;
-  /** Booking page for the call Pro includes. Shown only to paying subscribers; unset = they're asked to email. */
-  bookingUrl?: string;
   /** Glama ownership token for /.well-known/glama.json (from Glama's claim panel); unset = 404. */
   glamaClaim?: string;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
@@ -65,7 +64,8 @@ export function loadConfig(): Config {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
       developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || undefined,
     },
-    freeApplies: Number(process.env.FREE_APPLIES ?? 3),
+    freeAccounts: Number(process.env.FREE_ACCOUNTS ?? 1),
+    proAccounts: Number(process.env.PRO_ACCOUNTS ?? 10),
     stripe: process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRO_PRICE_ID
       ? { secretKey: process.env.STRIPE_SECRET_KEY, proPriceId: process.env.STRIPE_PRO_PRICE_ID }
       : undefined,
@@ -73,7 +73,6 @@ export function loadConfig(): Config {
     adminUrl: process.env.ADMIN_URL?.replace(/\/+$/, "") || undefined,
     adminEmails: emails(process.env.ADMIN_EMAILS),
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
-    bookingUrl: process.env.BOOKING_URL || undefined,
     mail: process.env.RESEND_API_KEY
       ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" }
       : undefined,

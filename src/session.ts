@@ -7,7 +7,7 @@ import type { DB, ProposalRow, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { decrypt } from "./crypto.js";
 import { AdsClient, micros, refreshGoogleToken, revokeGoogleToken, type GoogleCreds } from "./google.js";
-import { PRO_PRICE_LABEL } from "./plans.js";
+import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, accountsLabel } from "./plans.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DemoAds } from "./demo.js";
 import { analyzeWaste, round, type CampaignRow, type ConversionActionRow, type KeywordRow, type SearchTermRow } from "./analysis.js";
 import {
@@ -31,7 +31,9 @@ export interface SessionDeps {
   baseUrl: string;
   google: GoogleCreds;
   encryptionKey: Buffer;
-  freeApplies: number;
+  /** Google Ads accounts each plan covers, over ACCOUNT_WINDOW_DAYS (config.ts). */
+  freeAccounts: number;
+  proAccounts: number;
   proEmails: Set<string>;
   /** Asks Stripe whether this user just paid; true when that made them Pro (billing.ts refreshPlan). */
   refreshPlan?: (userId: string) => Promise<boolean>;
@@ -106,29 +108,67 @@ export class UserSession {
     return this.user.plan === "pro" || this.deps.proEmails.has(this.user.email.toLowerCase());
   }
 
-  /** Free applies left; null for Pro (unlimited). Undo proposals never count. */
-  freeAppliesLeft(): number | null {
-    if (this.isPro) return null;
-    // Demo changes never count: trying the product must not spend the real allowance.
-    const used = (this.deps.db.prepare("SELECT count(*) n FROM proposals WHERE user_id = ? AND status = 'applied' AND undo_of IS NULL AND customer_id != ?")
-      .get(this.user.id, DEMO_CID) as { n: number }).n;
-    return Math.max(0, this.deps.freeApplies - used);
+  get accountLimit(): number {
+    return this.isPro ? this.deps.proAccounts : this.deps.freeAccounts;
+  }
+
+  /**
+   * Google Ads accounts this user has run tools on in the window: what a plan is sized by. Accounts used,
+   * not accounts reachable, so a manager login that can see 50 clients isn't charged for 50. The demo never
+   * counts, and nor do failed calls (a call the gate refused is logged as failed).
+   */
+  accountsInUse(): string[] {
+    return (this.deps.db.prepare(`SELECT DISTINCT customer_id c FROM tool_calls
+        WHERE user_id = ? AND ok = 1 AND customer_id IS NOT NULL AND customer_id != ? AND at >= ?`)
+      .all(this.user.id, DEMO_CID, now() - ACCOUNT_WINDOW_DAYS * 86400) as { c: string }[]).map((r) => r.c);
+  }
+
+  /**
+   * The plan gate, run before every tool that reads or proposes on a Google Ads account. An account already
+   * in use always passes, so the gate only ever stops a NEW account. Manager accounts don't count: they are
+   * how a login reaches its clients, not an account anyone advertises from. Undo, history and billing take
+   * no account and are never gated: nothing may stand between a user and reversing a change.
+   */
+  async checkAccount(customerId: string): Promise<void> {
+    const cid = bareCid(customerId);
+    if (isDemo(cid)) return;
+    const used = this.accountsInUse();
+    if (used.includes(cid) || used.length < this.accountLimit) return;
+    const managers = new Set((await this.accounts().catch(() => [] as Account[])).filter((a) => a.manager).map((a) => a.customerId));
+    if (managers.has(cid)) return;
+    const counted = used.filter((c) => !managers.has(c));
+    if (counted.length < this.accountLimit) return;
+    // Someone who paid and closed the tab before /upgraded must not be blocked for an hour: ask Stripe first.
+    if (!this.isPro && await this.deps.refreshPlan?.(this.user.id)) {
+      this.user.plan = "pro";
+      if (counted.length < this.accountLimit) return;
+    }
+    const window = `in the last ${ACCOUNT_WINDOW_DAYS} days`;
+    if (this.isPro) {
+      throw new Error(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(counted.length)} ${window}; Pro covers ${this.deps.proAccounts}. `
+        + `Accounts drop out ${ACCOUNT_WINDOW_DAYS} days after their last use. For more, the user can email adam@camberstack.io.`);
+    }
+    const url = this.deps.billingLink?.("upgrade", this.user.id);
+    throw new Error(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(counted.length)} ${window} (${counted.join(", ")}); `
+      + `the Free plan covers ${this.deps.freeAccounts}. Camberstack Pro (${PRO_PRICE_LABEL}, cancel any time) covers up to ${this.deps.proAccounts}. `
+      + (url ? `Show the user this personal upgrade link: ${url} — then try again once they have paid. ` : `Upgrades open soon; see ${this.deps.baseUrl}/#pricing. `)
+      + `Otherwise keep using the account already in use; an account drops out ${ACCOUNT_WINDOW_DAYS} days after its last use. Undo and change history always work.`);
   }
 
   plan() {
-    const left = this.freeAppliesLeft();
     const upgrade = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
     const account_page = `${this.deps.baseUrl}/account`;
+    const usage = { accounts_in_use: this.accountsInUse(), accounts_included: this.accountLimit, window_days: ACCOUNT_WINDOW_DAYS };
     return this.isPro
-      ? { plan: "pro", account_page, applies: "unlimited",
+      ? { plan: "pro", account_page, ...usage,
           // Paid Pro is plan = 'pro' (a live subscription). Pro any other way is complimentary (PRO_EMAILS):
           // nothing to manage or cancel, even if an old Stripe customer is still on record.
           ...(this.user.plan === "pro" && this.user.stripe_customer
             ? { manage_billing: this.deps.billingLink?.("billing", this.user.id) ?? null }
             : { complimentary: true, manage_billing: null }) }
-      : { plan: "free", account_page, free_applies_left: left, free_applies_total: this.deps.freeApplies,
-          always_free: "diagnosis, proposals, change history and undo",
-          pro: `unlimited applied changes plus one 30-minute call or written review of their ads with the founder, ${PRO_PRICE_LABEL}, cancel any time`, upgrade_url: upgrade,
+      : { plan: "free", account_page, ...usage,
+          included: "every tool on 1 Google Ads account, with unlimited applied changes; undo and history always work",
+          pro: `up to ${accountsLabel(this.deps.proAccounts)}, ${PRO_PRICE_LABEL}, cancel any time`, upgrade_url: upgrade,
           note: upgrade ? "Show the user upgrade_url as a link; it is personal and expires in 7 days." : "Upgrades are not open yet." };
   }
 
@@ -368,19 +408,6 @@ export class UserSession {
 
   async apply(proposalId: string) {
     const p = this.proposal(proposalId);
-    // Undo is always free: a paywall must never stand between a user and reversing a change.
-    let left = p.undo_of || isDemo(p.customer_id) ? null : this.freeAppliesLeft();
-    // At the paywall, check Stripe first: someone who paid and closed the tab must not be blocked for an hour.
-    if (left === 0 && await this.deps.refreshPlan?.(this.user.id)) {
-      this.user.plan = "pro";
-      left = null;
-    }
-    if (left === 0) {
-      const url = this.deps.billingLink?.("upgrade", this.user.id);
-      throw new Error(`This account has used its ${this.deps.freeApplies} free applied changes. Camberstack Pro (${PRO_PRICE_LABEL}, cancel any time) applies changes without limit. `
-        + (url ? `Show the user this personal upgrade link: ${url} — then apply proposal ${p.id} again once they have paid (it stays open for 24 hours). ` : `Upgrades open soon; see ${this.deps.baseUrl}/#pricing. `)
-        + "Diagnosis, proposals, change history and undo stay free.");
-    }
     if (p.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${p.status}.`);
     if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
     const changes = JSON.parse(p.changes) as Change[];
@@ -408,12 +435,6 @@ export class UserSession {
       status: allOk ? "applied" : anyOk ? "partially applied" : "failed",
       results: publicResults(outcomes),
       undo: anyOk ? `To reverse this, call undo_changes with proposal_id "${p.id}".` : undefined,
-      ...(left !== null && anyOk ? { free_applies_left: left - 1 } : {}),
-      // The moment the last free apply is used is when Pro is easiest to explain: say it once, not as a wall.
-      ...(left === 1 && anyOk ? {
-        upgrade_url: this.deps.billingLink?.("upgrade", this.user.id) ?? null,
-        note: `That was the last of the ${this.deps.freeApplies} free applied changes. Mention once, briefly, that Camberstack Pro (${PRO_PRICE_LABEL}, cancel any time) applies changes without limit, and show upgrade_url as a link if present. Diagnosis, proposals and undo stay free.`,
-      } : {}),
     };
   }
 

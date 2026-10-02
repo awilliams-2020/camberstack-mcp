@@ -10,7 +10,7 @@ function setup() {
   const db = openDb(":memory:");
   const sent: any[] = [];
   const lc = new Lifecycle({
-    db, baseUrl: "https://camberstack.io", freeApplies: 3, signingKey: Buffer.alloc(32, 7),
+    db, baseUrl: "https://camberstack.io", signingKey: Buffer.alloc(32, 7),
     mail: { apiKey: "re_test", from: "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" },
     internalEmails: new Set(["me@example.com"]),
     upgradeLink: (u) => `https://camberstack.io/upgrade?t=${u}.sig`,
@@ -46,23 +46,20 @@ describe("lifecycle emails", () => {
     expect(await lc.run()).toBe(0);  // never twice
   });
 
-  it("sends limit_reached once, 3+ days after the last free apply, never counting demo or undo", async () => {
-    const { lc, sent, user, call, applied } = setup();
-    user("capped", "capped@example.com", 10); call("capped", "propose_changes");
-    applied("capped", 6); applied("capped", 5); applied("capped", 4);
-    user("recent", "recent@example.com", 10); call("recent", "propose_changes");
-    applied("recent", 6); applied("recent", 5); applied("recent", 1);     // last apply too recent
-    user("demo", "demo@example.com", 10); call("demo", "propose_changes");
-    applied("demo", 6, "0000000001"); applied("demo", 5, "0000000001"); applied("demo", 4, "0000000001");
-    user("undo", "undo@example.com", 10); call("undo", "propose_changes");
-    applied("undo", 6); applied("undo", 5); applied("undo", 4, "1112223333", "pX");  // one is an undo
-    user("pro", "pro@example.com", 10, "pro"); call("pro", "propose_changes");
-    applied("pro", 6); applied("pro", 5); applied("pro", 4);
+  it("sends limit_reached once, 3+ days after the plan gate refused a second account", async () => {
+    const { db, lc, sent, user, call } = setup();
+    const refused = (userId: string, daysAgo: number, error = "Plan limit: Camberstack has been used on 1 Google Ads account") =>
+      db.prepare("INSERT INTO tool_calls (at, user_id, tool, ok, error, ms, bytes) VALUES (?, ?, 'account_overview', 0, ?, 10, 10)")
+        .run(now() - daysAgo * DAY, userId, error);
+    user("capped", "capped@example.com", 10); call("capped", "propose_changes"); refused("capped", 4);
+    user("recent", "recent@example.com", 10); call("recent", "propose_changes"); refused("recent", 1);  // too recent
+    user("other", "other@example.com", 10); call("other", "propose_changes"); refused("other", 4, "Google said no");  // not the gate
+    user("pro", "pro@example.com", 10, "pro"); call("pro", "propose_changes"); refused("pro", 4);
     expect(await lc.run()).toBe(1);
     expect(sent[0].to).toEqual(["capped@example.com"]);
-    expect(sent[0].subject).toBe("You've used your 3 free changes");
+    expect(sent[0].subject).toBe("Using Camberstack on more than one Google Ads account");
     expect(sent[0].text).toContain("https://camberstack.io/upgrade?t=capped.sig");
-    expect(sent[0].text).not.toMatch(/campaign "/);  // no Google Ads data in emails
+    expect(sent[0].text).toContain("up to 10 accounts");
     expect(await lc.run()).toBe(0);
   });
 
@@ -89,7 +86,7 @@ describe("lifecycle emails", () => {
   it("retries a failed send next run instead of marking it sent", async () => {
     const { db, user } = setup();
     let fail = true; const sent: any[] = [];
-    const lc = new Lifecycle({ db, baseUrl: "https://camberstack.io", freeApplies: 3, signingKey: Buffer.alloc(32), internalEmails: new Set(),
+    const lc = new Lifecycle({ db, baseUrl: "https://camberstack.io", signingKey: Buffer.alloc(32), internalEmails: new Set(),
       mail: { apiKey: "k", from: "f", replyTo: "r" }, upgradeLink: () => null,
       fetch: (async (_u: string, init: RequestInit) => { if (fail) return new Response("down", { status: 500 }); sent.push(init.body); return new Response("{}"); }) as any });
     user("quiet", "quiet@example.com", 3);

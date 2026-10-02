@@ -12,7 +12,6 @@ import type { Express, Request, Response } from "express";
 import type { DB, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { safeEqual, sign } from "./crypto.js";
-import { proSessionHtml } from "./plans.js";
 import { esc } from "./pages.js";
 
 const LINK_TTL = 7 * 86400;
@@ -26,7 +25,6 @@ export interface BillingDeps {
   /** Signs billing links; derived from ENCRYPTION_KEY so no new secret is needed. */
   signingKey: Buffer;
   stripe?: { secretKey: string; proPriceId: string };
-  bookingUrl?: string;
   fetch?: typeof fetch;
 }
 
@@ -170,8 +168,7 @@ export class Billing {
         const ok = this.settle(await this.stripe(`checkout/sessions/${id}`));
         if (!ok) return send(res, 400, "Payment not complete", `<p>We could not confirm this payment. If you were charged, email us and we will sort it out.</p>`);
         send(res, 200, "You're on Pro", `<p><strong>Thanks, you're on Camberstack Pro.</strong></p>
-<p>Go back to your AI assistant and ask it to apply the proposal again. Applying changes is now unlimited.</p>
-${proSessionHtml(this.d.bookingUrl)}
+<p>Go back to your AI assistant and ask it to try again. Pro covers up to 10 Google Ads accounts.</p>
 <p><a class="btn" href="/account">Go to your account</a></p>
 <p class="muted">Change your card or cancel any time from your account page.</p>`);
       } catch (e) {

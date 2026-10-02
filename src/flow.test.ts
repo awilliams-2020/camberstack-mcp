@@ -148,7 +148,7 @@ beforeAll(async () => {
   const cfg: Config = {
     baseUrl: "http://localhost", port: 0, dataDir: ":memory:", encryptionKey: key,
     google: { clientId: "gid", clientSecret: "gsecret" },
-    freeApplies: 3, stripe: { secretKey: "sk_test_x", proPriceId: "price_pro" }, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "", bookingUrl: "https://calendar.example/book",
+    freeAccounts: 1, proAccounts: 10, stripe: { secretKey: "sk_test_x", proPriceId: "price_pro" }, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "",
   };
   // Bind first so baseUrl (the OAuth issuer) is the real test origin.
   server = await new Promise<Server>((resolve) => { const s = createApp(cfg, db).app.listen(0, () => resolve(s)); });
@@ -299,32 +299,31 @@ describe("OAuth + MCP end to end", () => {
     expect(h.json.map((x: any) => x.status)).toEqual(["applied", "applied"]);
   });
 
-  it("gives 3 free applied changes, then a personal upgrade link; undo is never paywalled", async () => {
-    // The previous test used 1 apply (its undo doesn't count).
+  it("covers 1 account on Free with unlimited changes, asks to upgrade on a second; undo is never gated", async () => {
     const negative = async (text: string) => {
       const p = await call(token, "propose_changes", { customer_id: "1112223333",
         changes: [{ type: "add_negative_keywords", campaign_id: "10", keywords: [{ text, match_type: "PHRASE" }] }] });
       return p.json.proposal_id as string;
     };
-    expect((await call(token, "apply_changes", { proposal_id: await negative("jobs") })).json.free_applies_left).toBe(1);
-    const third = await negative("login");
-    const last = (await call(token, "apply_changes", { proposal_id: third })).json;
-    expect(last.free_applies_left).toBe(0);
-    expect(last.upgrade_url).toContain("/upgrade?t=");
+    // The account already in use takes any number of changes.
+    for (const t of ["jobs", "login", "how to"]) expect((await call(token, "apply_changes", { proposal_id: await negative(t) })).json.status).toBe("applied");
+    const third = (await call(token, "change_history", {})).json[0].proposal_id as string;
 
-    const fourth = await negative("how to");
-    const blocked = await call(token, "apply_changes", { proposal_id: fourth });
+    // A second account is refused before any Google call, with a personal upgrade link.
+    const blocked = await call(token, "account_overview", { customer_id: "999-888-7777", days: 30 });
     expect(blocked.isError).toBe(true);
-    expect(blocked.text).toContain("3 free applied changes");
+    expect(blocked.text).toContain("Plan limit:");
+    expect(blocked.text).toContain("1 Google Ads account in the last 30 days (1112223333)");
     const link = blocked.text.match(/https?:\/\/\S+\/upgrade\?t=[\w.-]+/)![0];
-    expect(ads.negatives.map((n) => n.text)).not.toContain("how to");
+    // A refused call doesn't count as use, and the demo never counts.
+    expect((await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).isError).toBe(false);
 
-    // Undo still works at the limit.
+    // Undo still works.
     const u = await call(token, "undo_changes", { proposal_id: third });
     expect((await call(token, "apply_changes", { proposal_id: u.json.proposal_id })).json.status).toBe("applied");
 
     const plan = await call(token, "billing", {});
-    expect(plan.json).toMatchObject({ plan: "free", free_applies_left: 0 });
+    expect(plan.json).toMatchObject({ plan: "free", accounts_in_use: ["1112223333"], accounts_included: 1, window_days: 30 });
     expect(plan.json.upgrade_url).toContain("/upgrade?t=");
 
     // A tampered link is refused; the real one goes to Stripe Checkout as a subscription for this user.
@@ -336,10 +335,10 @@ describe("OAuth + MCP end to end", () => {
     expect(form.get("mode")).toBe("subscription");
     expect(form.get("customer_email")).toBe("owner@example.com");
 
-    // Paid, but closed the tab before /upgraded: the paywall asks Stripe first, so the very next apply works.
+    // Paid, but closed the tab before /upgraded: the gate asks Stripe first, so the very next call gets through.
     expect(db.prepare("SELECT plan FROM users WHERE email = 'owner@example.com'").get()).toEqual({ plan: "free" });
-    const paidNoTab = await call(token, "apply_changes", { proposal_id: fourth });
-    expect(paidNoTab.json.status).toBe("applied");
+    const paidNoTab = await call(token, "account_overview", { customer_id: "999-888-7777", days: 30 });
+    expect(paidNoTab.text).not.toContain("Plan limit:");  // past the gate; this login just can't read that account
     expect(db.prepare("SELECT plan FROM users WHERE email = 'owner@example.com'").get()).toEqual({ plan: "pro" });
 
     // /upgraded is still fine afterwards (settling is idempotent).
@@ -348,10 +347,7 @@ describe("OAuth + MCP end to end", () => {
     const doneHtml = await done.text();
     expect(doneHtml).toContain("on Camberstack Pro");
     expect(doneHtml).toContain('href="/account"');
-    // The included session, with the private booking link, is offered right after paying.
-    expect(doneHtml).toContain('href="https://calendar.example/book"');
-    expect(doneHtml).toContain("Read only");
-    expect(paidNoTab.json.free_applies_left).toBeUndefined();
+    expect(doneHtml).toContain("up to 10 Google Ads accounts");
 
     const pro = await call(token, "billing", {});
     expect(pro.json.plan).toBe("pro");
@@ -441,7 +437,6 @@ describe("OAuth + MCP end to end", () => {
     expect(p.summary).toContain('Pause campaign "Drain Cleaning – Search"');
     const a = (await call(token, "apply_changes", { proposal_id: p.proposal_id })).json;
     expect(a.status).toBe("applied");
-    expect(a.free_applies_left).toBeUndefined();
     const after = (await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).json;
     expect(after.campaigns.find((c: any) => c.campaign_id === "2003").status).toBe("PAUSED");
     expect(after.campaigns.find((c: any) => c.campaign_id === "2001").daily_budget).toBe(50);
@@ -461,7 +456,7 @@ describe("OAuth + MCP end to end", () => {
 
     expect(ads.mutations.length).toBe(before);  // Google was never called
     const now = (await call(token, "billing", {})).json;  // allowance untouched (the signed link's expiry may tick)
-    expect({ plan: now.plan, left: now.free_applies_left }).toEqual({ plan: left.plan, left: left.free_applies_left });
+    expect({ plan: now.plan, used: now.accounts_in_use }).toEqual({ plan: left.plan, used: left.accounts_in_use });
   });
 
   it("logs each tool call by name, without arguments or results", async () => {
