@@ -570,6 +570,11 @@ describe("OAuth + MCP end to end", () => {
     expect(html).toContain(`${base}/mcp`);
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-claude`);
     expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-claude"');
+    const c = await fetch(`${base}/google-ads-chatgpt`);
+    expect(c.status).toBe(200);
+    expect(await c.text()).toContain("Create MCP app");
+    expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-chatgpt`);
+    expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-chatgpt"');
   });
 
   it("serves the pages Google's brand verification reads", async () => {

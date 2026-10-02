@@ -157,11 +157,13 @@ Any question beyond these tools is answered with read-only queries.</p>
 <p>Server URL:</p>
 <pre>${mcpUrl}</pre>
 <h3>Claude (claude.ai or desktop) · <a href="/google-ads-claude">step-by-step guide</a></h3>
-<p>Settings → Connectors → <em>Add custom connector</em> → paste the URL above → Connect, then sign in with Google.</p>
+<p>Customize → Connectors → <em>+ Add</em> → <em>Add custom connector</em> → paste the URL above → Connect, then sign in with Google.
+In a chat, switch it on under <strong>+</strong> → Connectors.</p>
 <h3>Claude Code</h3>
 <pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
-<h3>ChatGPT</h3>
-<p>Settings → Apps &amp; Connectors → Advanced → enable Developer mode → Create → paste the URL, authentication OAuth.</p>
+<h3>ChatGPT (Plus, Pro, Business, Enterprise) · <a href="/google-ads-chatgpt">step-by-step guide</a></h3>
+<p>Settings → Plugins → turn on <em>Developer mode</em>. Then Plugins → <em>+</em> → <em>Create app</em> → <em>Create MCP app</em> → paste the URL above, authentication OAuth, then sign in with Google.
+In a chat, type <strong>@Camberstack</strong> before your question.</p>
 <h3>Cursor, VS Code, others</h3>
 <pre>{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }</pre>
 <p class="muted">Your AI app handles sign-in. Google will show "Camberstack wants to access your Google Ads" before anything is shared.</p>
@@ -198,6 +200,34 @@ your AI shows a personal checkout link, and once you've paid you ask it to apply
   });
 }
 
+// ---------------------------------------------------------------- shared by the setup guides
+
+const ASK_FIRST = `<h2>What to ask first</h2>
+<ul>
+<li><em>"What's wasting money in my Google Ads account over the last 90 days?"</em></li>
+<li><em>"Is my conversion tracking set up right?"</em></li>
+<li><em>"Block the search terms that spent money without converting. Show me the changes first."</em></li>
+<li><em>"What did you change this week? Undo the last change."</em></li>
+<li>Not ready to use your real account? <em>"Show me Camberstack's demo account."</em></li>
+</ul>`;
+
+const CAN_CHANGE = `<h2>What it can and can't change</h2>
+<p>It can add negative keywords, pause or re-enable a campaign, ad group or keyword, and set a campaign's daily budget.
+It can't create campaigns, change bid strategies, or delete anything you built. Turning a campaign back on, or more than
+doubling a budget, comes with a warning in the proposal. Every change is first checked with Google as a dry run, shown to
+you in plain English, and logged.</p>`;
+
+/** The questions every guide answers; `app` is the AI app's name. */
+const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer token?</h3>
+<p>No. Camberstack has its own Google Ads API access. You sign in with Google and choose what to share.</p>
+<h3>Does ${app} see my whole Google account?</h3>
+<p>No. It gets Google Ads access and your email address, nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
+<h3>What does it cost?</h3>
+<p>The free plan includes unlimited diagnosis and proposals, change history, undo and 3 applied changes. Pro is $49/month for
+unlimited applied changes. See <a href="/#pricing">pricing</a>.</p>
+<h3>Does it work with manager (MCC) accounts?</h3>
+<p>Yes. It lists every client account your login can reach.</p>`;
+
 /**
  * Use-case page for "claude google ads" / "google ads claude" / "google ads mcp server" (keyword data:
  * project-research/keywords-ads-mcp.json). The worked example is a real find_wasted_spend run on our
@@ -224,22 +254,19 @@ and make the fixes you approve. It takes one connector URL and a Google sign-in.
 <p>Camberstack is a hosted Google Ads MCP server. MCP (Model Context Protocol) is how Claude connects to outside tools.</p>
 <h3>Claude on the web or desktop app</h3>
 <ol>
-<li>Open <strong>Settings → Connectors</strong> and choose <strong>Add custom connector</strong>.</li>
-<li>Paste the server URL: <code>${mcpUrl}</code></li>
+<li>Open <strong>Customize → Connectors</strong>, click <strong>+ Add</strong> and choose <strong>Add custom connector</strong>.</li>
+<li>Name it Camberstack and paste the server URL: <code>${mcpUrl}</code></li>
 <li>Click <strong>Connect</strong> and sign in with the Google account that has access to your Google Ads.
 Google shows exactly what's being shared before you agree.</li>
+<li>In a chat, click <strong>+</strong> at the bottom left, open <strong>Connectors</strong> and make sure Camberstack is switched on.</li>
 </ol>
+<p class="muted">On the Free plan you can add one custom connector. On a Team or Enterprise plan, an Owner adds it first under
+<strong>Organization settings → Connectors</strong> (Add → Custom → Web); then each member connects it under Customize → Connectors.</p>
 <h3>Claude Code</h3>
 <pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
-<p class="muted">Also works in ChatGPT, Cursor and other MCP apps: see <a href="/#setup">all setup options</a>.</p>
+<p class="muted">Also works in <a href="/google-ads-chatgpt">ChatGPT</a>, Cursor and other MCP apps: see <a href="/#setup">all setup options</a>.</p>
 
-<h2>What to ask first</h2>
-<ul>
-<li><em>"What's wasting money in my Google Ads account over the last 90 days?"</em></li>
-<li><em>"Is my conversion tracking set up right?"</em></li>
-<li><em>"Block the search terms that spent money without converting. Show me the changes first."</em></li>
-<li><em>"What did you change this week? Undo the last change."</em></li>
-</ul>
+${ASK_FIRST}
 
 <h2>A real example</h2>
 <p>We ran it on our own Google Ads account, which runs ads for three products, over 180 days. The account had spent
@@ -259,11 +286,7 @@ not account-wide.</li>
 <p>Nothing changed until we said yes. Applying a proposal is a separate step that Claude asks you to approve, and every
 applied change can be undone with one more message.</p>
 
-<h2>What it can and can't change</h2>
-<p>It can add negative keywords, pause or re-enable a campaign, ad group or keyword, and set a campaign's daily budget.
-It can't create campaigns, change bid strategies, or delete anything you built. Turning a campaign back on, or more than
-doubling a budget, comes with a warning in the proposal. Every change is first checked with Google as a dry run, shown to
-you in plain English, and logged.</p>
+${CAN_CHANGE}
 
 <h2>How it compares with Google's own Google Ads MCP</h2>
 <p>Google publishes an open-source Google Ads MCP server. As of September 2026 it is <strong>read-only</strong>, and you run it
@@ -272,17 +295,78 @@ who only want reporting. Camberstack is hosted, so you only sign in with Google,
 you approve, with undo.</p>
 
 <h2>Questions</h2>
-<h3>Do I need a Google Ads developer token?</h3>
-<p>No. Camberstack has its own Google Ads API access. You sign in with Google and choose what to share.</p>
-<h3>Does Claude see my whole Google account?</h3>
-<p>No. It gets Google Ads access and your email address, nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
-<h3>What does it cost?</h3>
-<p>The free plan includes unlimited diagnosis and proposals, change history, undo and 3 applied changes. Pro is $49/month for
-unlimited applied changes. See <a href="/#pricing">pricing</a>.</p>
-<h3>Does it work with manager (MCC) accounts?</h3>
-<p>Yes. It lists every client account your login can reach.</p>
+${commonQuestions("Claude")}
 
 <p><a class="btn" href="/#setup">Connect Google Ads to Claude</a></p>
+`,
+  });
+}
+
+/**
+ * Use-case page for "chatgpt google ads". ChatGPT only takes plugins outside its directory through developer
+ * mode, which is several menus deep and warns about "elevated risk", so this page walks through both.
+ * Menu labels, the OAuth option, @-mention use and mobile confirmed by the operator in a live account, 2026-10-01; they move, so re-check when editing.
+ */
+export function chatgptGuidePage(baseUrl: string): string {
+  const mcpUrl = `${baseUrl}/mcp`;
+  return layout({
+    baseUrl, path: "/google-ads-chatgpt",
+    title: "Connect Google Ads to ChatGPT: MCP setup, step by step | Camberstack",
+    description: "Connect your Google Ads account to ChatGPT with a plugin. No developer token or Google Cloud project: turn on developer mode, add one URL, sign in with Google, then ask what's wasting money.",
+    jsonLd: {
+      "@context": "https://schema.org", "@type": "TechArticle",
+      headline: "Connect Google Ads to ChatGPT", url: `${baseUrl}/google-ads-chatgpt`, dateModified: "2026-10-01",
+      author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
+      about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
+    },
+    body: `
+<h1>Connect Google Ads to ChatGPT</h1>
+<p class="lede">ChatGPT can read your Google Ads account, show you where the budget goes with nothing to show for it,
+and make the fixes you approve. Setup takes a few menus in ChatGPT's settings and a Google sign-in. No developer token,
+no Google Cloud project.</p>
+
+<h2>Before you start</h2>
+<ul>
+<li><strong>A paid ChatGPT plan:</strong> Plus, Pro, Business, Enterprise or Edu. The free plan can't add plugins like this one.</li>
+<li><strong>ChatGPT on the web</strong> (chatgpt.com) for setup. Once it's added, it works in the ChatGPT phone app too.</li>
+<li><strong>On Business or Enterprise,</strong> a workspace admin may need to allow developer mode first, under
+Workspace settings → Permissions &amp; roles.</li>
+</ul>
+
+<h2>Set it up</h2>
+<ol>
+<li>In ChatGPT, open <strong>Settings → Plugins</strong> and turn on <strong>Developer mode</strong>.</li>
+<li>Still in Plugins, click <strong>+</strong>, then <strong>Create app</strong>, then <strong>Create MCP app</strong>.</li>
+<li>Name it Camberstack, paste the server URL <code>${mcpUrl}</code>, and choose <strong>OAuth</strong> for authentication.</li>
+<li>Sign in with the Google account that has access to your Google Ads. Google shows exactly what's being shared before you agree.</li>
+<li>In a chat, type <strong>@</strong> and the name you gave it, then your question:
+<em>"@Camberstack what's wasting money in my Google Ads account?"</em></li>
+</ol>
+
+<h2>About the "elevated risk" warning</h2>
+<p>ChatGPT shows that warning for every plugin added through developer mode, which is the only way to add one that isn't in
+ChatGPT's plugin directory yet. It isn't specific to Camberstack. What protects your account here:</p>
+<ul>
+<li>Nothing changes until you approve it. The AI can only <em>propose</em> changes; applying is a separate step, and ChatGPT
+also asks you to confirm each one.</li>
+<li>Every applied change can be undone, exactly, with one more message.</li>
+<li>Changes are limited to negative keywords, pausing or re-enabling, and daily budgets. Nothing can be deleted.</li>
+</ul>
+
+${ASK_FIRST}
+
+${CAN_CHANGE}
+
+<h2>Questions</h2>
+<h3>Why does it take so many steps?</h3>
+<p>Until Camberstack is listed in ChatGPT's plugin directory, developer mode is how ChatGPT lets you add it. You only do it once.
+If you use Claude too, setup there is shorter: see <a href="/google-ads-claude">the Claude guide</a>.</p>
+<h3>How do I disconnect?</h3>
+<p>ChatGPT blocks disconnect requests from chat, so sign in at <a href="/account">camberstack.io/account</a> and choose
+<strong>Disconnect Google Ads</strong>, or remove Camberstack at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+${commonQuestions("ChatGPT")}
+
+<p><a class="btn" href="/#setup">Connect Google Ads to ChatGPT</a></p>
 `,
   });
 }
@@ -419,7 +503,7 @@ export function robotsTxt(baseUrl: string): string {
 }
 
 export function sitemapXml(baseUrl: string, lastmod: string): string {
-  const urls = ["/", "/google-ads-claude", "/privacy", "/terms"];
+  const urls = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/privacy", "/terms"];
   const lm = lastmod ? `<lastmod>${lastmod.slice(0, 10)}</lastmod>` : "";
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
     .map((u) => `  <url><loc>${baseUrl}${u}</loc>${lm}</url>`).join("\n")}\n</urlset>\n`;
@@ -438,6 +522,7 @@ export function llmsTxt(baseUrl: string): string {
 - [Setup](${baseUrl}/#setup)
 - [Pricing](${baseUrl}/#pricing)
 - [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)
+- [Connect Google Ads to ChatGPT (step-by-step guide)](${baseUrl}/google-ads-chatgpt)
 - [Source (MIT)](https://github.com/awilliams-2020/camberstack-mcp)
 - [Privacy](${baseUrl}/privacy)
 - [Terms](${baseUrl}/terms)

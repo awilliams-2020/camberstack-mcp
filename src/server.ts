@@ -16,7 +16,7 @@ import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
-import { errorPage, infoPage, homePage, claudeGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
+import { errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage } from "./pages.js";
 
 /** brand/ sits beside src/ and dist/ at the package root. */
 const BRAND_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "..", "brand");
@@ -179,6 +179,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   };
   app.get("/", page(homePage(cfg.baseUrl)));
   app.get("/google-ads-claude", page(claudeGuidePage(cfg.baseUrl)));
+  app.get("/google-ads-chatgpt", page(chatgptGuidePage(cfg.baseUrl)));
   app.get("/privacy", page(privacyPage(cfg.baseUrl)));
   app.get("/terms", page(termsPage(cfg.baseUrl)));
   app.get("/robots.txt", (_q, r) => { r.type("text/plain").send(robotsTxt(cfg.baseUrl)); });
