@@ -327,7 +327,8 @@ ${commonQuestions("Claude")}
  * Use-case page for "chatgpt google ads". ChatGPT only takes plugins outside its directory through developer
  * mode, which is several menus deep and warns that "custom MCP servers introduce risk", so this page walks through both.
  * Menu labels, the OAuth option, @-mention use and mobile confirmed by the operator in a live account, 2026-10-01; the Plugins path
- * (+, Create custom MCP server, Create MCP App) re-confirmed with screenshots 2026-10-02. They move, so re-check when editing.
+ * (+, Create custom MCP server, Create MCP App) re-confirmed with screenshots 2026-10-02. Developer mode IS required: with it off,
+ * Create custom MCP server is not offered (operator, 2026-10-02). They move, so re-check when editing.
  */
 export function chatgptGuidePage(baseUrl: string): string {
   const mcpUrl = `${baseUrl}/mcp`;
