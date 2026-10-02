@@ -38,6 +38,8 @@ ol.steps>li{margin-bottom:28px}
 .shot{display:block;width:100%;max-width:340px;height:auto;margin-top:12px;border:1px solid var(--line);border-radius:12px}
 .url{display:flex;align-items:center;gap:10px;background:var(--code);border-radius:8px;padding:8px 8px 8px 14px;margin:8px 0 24px}
 .url code{background:none;padding:0;flex:1;font-size:15px;overflow-x:auto;white-space:nowrap}
+.cmd{display:flex;align-items:flex-start;gap:10px;background:var(--code);border-radius:8px;padding:8px 8px 8px 14px;margin:8px 0 16px}
+.cmd pre{background:none;padding:4px 0;margin:0;flex:1}
 .acct{padding:32px 0 8px}
 .acct-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between;margin-bottom:20px}
 .acct-head h1{font-size:28px;margin:0}.acct-head .who{text-transform:none;letter-spacing:0;font-weight:400;font-size:15px}
@@ -101,6 +103,11 @@ ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</sc
 /** Copies a [data-copy] button's text to the clipboard. Include once per page. */
 export const COPY_JS = `<script>document.addEventListener("click",function(e){var b=e.target.closest("[data-copy]");if(!b||!navigator.clipboard)return;
 navigator.clipboard.writeText(b.dataset.copy).then(function(){var t=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=t},1500)})});</script>`;
+
+/** A command or config line with a Copy button; needs COPY_JS on the page. */
+export function cmd(text: string): string {
+  return `<div class="cmd"><pre>${esc(text)}</pre><button class="copy" type="button" data-copy="${esc(text)}">Copy</button></div>`;
+}
 
 /** A guide screenshot from brand/shots/ (served at /shots/). */
 const shot = (file: string, w: number, h: number, alt: string) =>
@@ -178,9 +185,9 @@ ${COPY_JS}
 <p>Turn on developer mode, add it as an MCP app, then type <strong>@Camberstack</strong> in a chat.
 <a href="/google-ads-chatgpt">Step-by-step setup guide</a></p>
 <h3>Claude Code</h3>
-<pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
+${cmd(`claude mcp add --transport http camberstack ${mcpUrl}`)}
 <h3>Cursor, VS Code, others</h3>
-<pre>{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }</pre>
+${cmd(`{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }`)}
 <p class="muted">Your AI app handles sign-in. Google will show "Camberstack wants to access your Google Ads" before anything is shared.</p>
 <h3>Want to look first?</h3>
 <p>Connect, then ask <em>"Show me Camberstack's demo account"</em>. It's a sample plumbing business with six months of
@@ -284,7 +291,8 @@ Google shows exactly what's being shared before you agree.</li>
 <p class="muted">On the Free plan you can add one custom connector. On a Team or Enterprise plan, an Owner adds it first in
 <strong>Organization settings</strong>, under <strong>Connectors</strong> (choose Add, Custom, then Web); then each member connects it from their own Settings.</p>
 <h3>Claude Code</h3>
-<pre>claude mcp add --transport http camberstack ${mcpUrl}</pre>
+${cmd(`claude mcp add --transport http camberstack ${mcpUrl}`)}
+${COPY_JS}
 <p class="muted">Also works in <a href="/google-ads-chatgpt">ChatGPT</a>, Cursor and other MCP apps: see <a href="/#setup">all setup options</a>.</p>
 
 ${ASK_FIRST}
