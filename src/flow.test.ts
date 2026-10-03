@@ -37,6 +37,7 @@ class FakeAds {
   negatives: { text: string; matchType: string; rn: string }[] = [];
   kwStatus = "ENABLED";
   campaignStatus = "ENABLED";
+  campaignEnd: string | undefined;
   async listAccessibleCustomers() { return ["1112223333"]; }
   async search(_cid: string, q: string): Promise<any[]> {
     if (q.includes("FROM customer_client")) {
@@ -49,7 +50,7 @@ class FakeAds {
       return [{ adGroupCriterion: { status: this.kwStatus, keyword: { text: "invoice", matchType: "BROAD" } }, adGroup: { name: "AG" }, campaign: { name: "Search" } }];
     }
     if (q.includes("FROM campaign")) {
-      return [{ campaign: { id: "10", name: "Search", status: this.campaignStatus, advertisingChannelType: "SEARCH" },
+      return [{ campaign: { id: "10", name: "Search", status: this.campaignStatus, endDateTime: this.campaignEnd, advertisingChannelType: "SEARCH" },
         campaignBudget: { resourceName: "customers/1112223333/campaignBudgets/99", amountMicros: "20000000", explicitlyShared: false },
         metrics: { costMicros: "200000000", clicks: "80", impressions: "900", conversions: 4, conversionsValue: 400 } }];
     }
@@ -92,6 +93,7 @@ class FakeAds {
           return { resourceName: rn };
         }
         if (op.remove) { this.negatives = this.negatives.filter((n) => n.rn !== op.remove); return { resourceName: op.remove }; }
+        if (op.update?.endDateTime) { this.campaignEnd = op.update.endDateTime; return { resourceName: op.update.resourceName }; }
         if (op.update?.status && service === "campaigns") { this.campaignStatus = op.update.status; return { resourceName: op.update.resourceName }; }
         if (op.update?.status) { this.kwStatus = op.update.status; return { resourceName: op.update.resourceName }; }
         return { resourceName: op.update?.resourceName };
@@ -427,8 +429,10 @@ describe("OAuth + MCP end to end", () => {
       { type: "pause_campaign", campaign_id: "2003" },
       { type: "add_negative_keywords", campaign_id: "2001", keywords: [{ text: "jobs", match_type: "PHRASE" }] },
       { type: "set_daily_budget", campaign_id: "2001", amount: 50 },
+      { type: "set_end_date", campaign_id: "2001", end_date: "2030-01-31" },
     ] })).json;
     expect(p.summary).toContain('Pause campaign "Drain Cleaning – Search"');
+    expect(p.summary).toContain('Set end date of campaign "Emergency Plumbing – Search" from no end date to 2030-01-31');
     const a = (await call(token, "apply_changes", { proposal_id: p.proposal_id })).json;
     expect(a.status).toBe("applied");
     const after = (await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).json;
@@ -440,6 +444,9 @@ describe("OAuth + MCP end to end", () => {
     const reverted = (await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).json;
     expect(reverted.campaigns.find((c: any) => c.campaign_id === "2003").status).toBe("ENABLED");
     expect(reverted.campaigns.find((c: any) => c.campaign_id === "2001").daily_budget).toBe(40);
+    const endQ = `SELECT campaign.end_date_time FROM campaign WHERE campaign.id = 2001`;
+    const end = (await call(token, "run_gaql", { customer_id: "0000000001", query: endQ })).json;
+    expect(end.rows[0].campaign.endDateTime).toBe("2037-12-30 23:59:59");  // undo removed it
 
     const ideas = (await call(token, "keyword_ideas", { customer_id: "0000000001", keywords: ["water heater"] })).json;
     expect(ideas.note).toContain("Sample data");
@@ -559,6 +566,35 @@ describe("OAuth + MCP end to end", () => {
     expect(big.summary).toContain("from 20.00 to 100.00 ⚠ 5.0× the current budget");
     const small = await propose([{ type: "set_daily_budget", campaign_id: "10", amount: 30 }]);
     expect(small.summary).not.toContain("⚠");
+  });
+
+  it("warns with the budget and end date a proposal sets, not the ones it replaces; end dates undo", async () => {
+    const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };
+    expect(ads.campaignStatus).toBe("PAUSED");
+
+    // Budget $20 live; the proposal lowers it to $10 and caps the run, then enables.
+    const test = await propose([
+      { type: "set_daily_budget", campaign_id: "10", amount: 10 },
+      { type: "set_end_date", campaign_id: "10", end_date: "2030-01-31" },
+      { type: "enable_campaign", campaign_id: "10" },
+    ]);
+    expect(test.summary).toContain('Set end date of campaign "Search" from no end date to 2030-01-31 (it stops serving after that day)');
+    expect(test.summary).toContain("⚠ it starts spending again, up to an average of 10.00/day until 2030-01-31");
+    expect(test.summary).not.toContain("20.00/day");
+    const applied = await call(token, "apply_changes", { proposal_id: test.proposal_id });
+    expect(applied.json.results.every((r: { ok: boolean }) => r.ok)).toBe(true);
+    expect(ads.campaignEnd).toBe("2030-01-31 23:59:59");
+    expect(ads.campaignStatus).toBe("ENABLED");
+
+    // Setting the same date again is already in place.
+    await expect(propose([{ type: "set_end_date", campaign_id: "10", end_date: "2030-01-31" }])).rejects.toThrow("already in place");
+
+    // Undo pauses, restores the budget and removes the end date (Google's 2037-12-30 stand-in).
+    const u = await call(token, "undo_changes", { proposal_id: test.proposal_id });
+    expect(u.json.summary).toContain("from 2030-01-31 to no end date");
+    await call(token, "apply_changes", { proposal_id: u.json.proposal_id });
+    expect(ads.campaignEnd).toBe("2037-12-30 23:59:59");
+    expect(ads.campaignStatus).toBe("PAUSED");
   });
 
   it("uploads one conversion for a first connection that came from our ad, and none otherwise", async () => {

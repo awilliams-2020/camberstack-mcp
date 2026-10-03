@@ -6,7 +6,8 @@
  *   apply    → only a stored, un-applied proposal belonging to this user, less than 24h old. Each
  *              change records its inverse, so any applied proposal can be undone.
  *
- * Deliberately small surface: negatives, pause/enable keyword, pause/enable ad group, daily budget.
+ * Deliberately small surface: negatives, pause/enable keyword, ad group or campaign, daily budget,
+ * campaign end date.
  * No creating campaigns, no bid strategy changes, no deleting anything a user built.
  */
 import { z } from "zod";
@@ -47,6 +48,12 @@ const PUBLIC_CHANGES = [
     amount: z.number().positive().max(1_000_000)
       .describe("New average daily budget in the account's currency, e.g. 10 for $10.00/day (not micros)"),
   }).describe("Change a campaign's daily budget (not shared budgets)"),
+  z.object({
+    type: z.literal("set_end_date"),
+    campaign_id: campaignId,
+    end_date: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"), z.literal("none")])
+      .describe('Last day the campaign runs, YYYY-MM-DD in the account\'s time zone (it stops after 23:59:59 that day), or "none" to remove the end date'),
+  }).describe("Set the last day a campaign runs, so it stops spending on its own"),
 ] as const;
 
 /** For propose_changes' input: what the AI sees. */
@@ -71,8 +78,33 @@ export interface ResolvedChange {
 }
 
 
+/** Google's stand-in for "no end date". */
+const NO_END_DATE_TIME = "2037-12-30 23:59:59";
+
+/** A campaign's end date as YYYY-MM-DD, or "none". */
+function endDateOf(endDateTime: string | undefined): string {
+  return !endDateTime || endDateTime.startsWith("2037-12-30") ? "none" : endDateTime.slice(0, 10);
+}
+
+/**
+ * Budgets and end dates a proposal sets for its own campaigns, keyed by campaign id. Each change is
+ * resolved against the live account, so without this an "enable campaign" next to a budget change
+ * warned about the old budget.
+ */
+export interface Pending { budgets: Map<string, number>; endDates: Map<string, string> }
+
+export function pendingOf(changes: Change[]): Pending {
+  const p: Pending = { budgets: new Map(), endDates: new Map() };
+  for (const c of changes) {
+    if (c.type === "set_daily_budget") p.budgets.set(c.campaign_id, c.amount);
+    if (c.type === "set_end_date") p.endDates.set(c.campaign_id, c.end_date);
+  }
+  return p;
+}
+
 export async function resolveChange(
   ads: Pick<AdsClient, "search">, customerId: string, login: string | null, change: Change,
+  pending: Pending = pendingOf([]),
 ): Promise<ResolvedChange> {
   const q = (query: string) => ads.search(customerId, query, login);
   switch (change.type) {
@@ -116,14 +148,18 @@ export async function resolveChange(
     }
     case "pause_campaign":
     case "enable_campaign": {
-      const [c] = await q(`SELECT campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared
-        FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      const [c] = await q(`SELECT campaign.name, campaign.status, campaign.end_date_time, campaign_budget.amount_micros,
+          campaign_budget.explicitly_shared FROM campaign WHERE campaign.id = ${change.campaign_id}`);
       if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
       const before = c.campaign.status as string;
       if (before === "REMOVED") throw new Error(`Campaign "${c.campaign.name}" was removed in Google Ads and can't be changed.`);
-      // Turning a campaign on is the one change that takes spend from zero to real money: say so in the summary.
+      // Turning a campaign on is the one change that takes spend from zero to real money: say so in the
+      // summary, with the budget and end date it will run under once this proposal is applied.
+      const budget = pending.budgets.get(change.campaign_id) ?? micros(c.campaignBudget?.amountMicros);
+      const end = pending.endDates.get(change.campaign_id) ?? endDateOf(c.campaign.endDateTime);
       const warn = change.type === "enable_campaign" && before !== "ENABLED"
-        ? ` ⚠ it starts spending again, up to an average of ${micros(c.campaignBudget?.amountMicros).toFixed(2)}/day${c.campaignBudget?.explicitlyShared ? " from a shared budget" : ""}`
+        ? ` ⚠ it starts spending again, up to an average of ${budget.toFixed(2)}/day` +
+          `${c.campaignBudget?.explicitlyShared ? " from a shared budget" : ""}${end === "none" ? "" : ` until ${end}`}`
         : "";
       const { campaign_id } = change;
       return toggle(change, "pause_campaign", "enable_campaign", (type) => ({ type, campaign_id }), {
@@ -156,6 +192,27 @@ export async function resolveChange(
         describe: `Set daily budget of campaign "${c.campaign.name}" from ${before.toFixed(2)} to ${change.amount.toFixed(2)}` +
           (before > 0 && change.amount > before * 2 ? ` ⚠ ${(change.amount / before).toFixed(1)}× the current budget` : ""),
         inverse: { type: "set_daily_budget", campaign_id: change.campaign_id, amount: before },
+      };
+    }
+    case "set_end_date": {
+      const [c] = await q(`SELECT campaign.name, campaign.status, campaign.end_date_time FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
+      if (c.campaign.status === "REMOVED") throw new Error(`Campaign "${c.campaign.name}" was removed in Google Ads and can't be changed.`);
+      const before = endDateOf(c.campaign.endDateTime);
+      const label = (d: string) => (d === "none" ? "no end date" : d);
+      return {
+        change,
+        service: "campaigns",
+        operations: before === change.end_date ? [] : [{
+          update: {
+            resourceName: `customers/${customerId}/campaigns/${change.campaign_id}`,
+            endDateTime: change.end_date === "none" ? NO_END_DATE_TIME : `${change.end_date} 23:59:59`,
+          },
+          updateMask: "end_date_time",
+        }],
+        describe: `Set end date of campaign "${c.campaign.name}" from ${label(before)} to ${label(change.end_date)}` +
+          (change.end_date === "none" ? "" : " (it stops serving after that day)"),
+        inverse: { type: "set_end_date", campaign_id: change.campaign_id, end_date: before },
       };
     }
     case "remove_negative_keywords": {

@@ -5,7 +5,7 @@ import { PublicChangeSchema } from "./changes.js";
 import { isDemo, type UserSession } from "./session.js";
 
 export const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.3.0";
+export const SERVER_VERSION = "0.4.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
@@ -132,7 +132,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   tool("propose_changes", {
     title: "Propose changes (writes nothing)",
-    description: "Checks a set of changes against the live account and dry-runs them with Google, then stores them as a proposal and returns a plain-English summary. Nothing is changed. Show the summary to the user and apply only after they approve. Supported: add_negative_keywords, pause_campaign, enable_campaign, pause_keyword, enable_keyword, pause_ad_group, enable_ad_group, set_daily_budget. Point out any ⚠ line in the summary to the user before they approve.",
+    description: "Checks a set of changes against the live account and dry-runs them with Google, then stores them as a proposal and returns a plain-English summary. Nothing is changed. Show the summary to the user and apply only after they approve. Supported: add_negative_keywords, pause_campaign, enable_campaign, pause_keyword, enable_keyword, pause_ad_group, enable_ad_group, set_daily_budget, set_end_date. Point out any ⚠ line in the summary to the user before they approve.",
     inputSchema: { customer_id: customerId, changes: z.array(PublicChangeSchema).min(1).describe("Changes to propose; several can go in one proposal") },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, ({ customer_id, changes }: { customer_id: string; changes: unknown[] }) => session().propose(customer_id, changes));

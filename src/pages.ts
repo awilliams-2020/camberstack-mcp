@@ -153,7 +153,7 @@ changes, each one only after you approve it.</p>
 <ul>
 <li>Works with manager (MCC) accounts.</li>
 <li>Any question about your account is answered with read-only queries.</li>
-<li>Changes are limited to negative keywords, pausing or re-enabling, and daily budgets. Each applied change can be undone.</li>
+<li>Changes are limited to negative keywords, pausing or re-enabling, daily budgets and end dates. Each applied change can be undone.</li>
 </ul>
 <p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;Free plan, no card</span></p>
 
@@ -163,6 +163,7 @@ changes, each one only after you approve it.</p>
 <tr><td>Add negative keywords to a campaign</td><td>Removes exactly the negatives it added</td></tr>
 <tr><td>Pause or re-enable a campaign, ad group or keyword</td><td>Restores the previous status</td></tr>
 <tr><td>Change a campaign's daily budget (not shared budgets)</td><td>Restores the previous amount</td></tr>
+<tr><td>Set or remove the last day a campaign runs</td><td>Restores the previous end date</td></tr>
 </table>
 <p class="muted">Turning a campaign back on, or more than doubling a budget, is flagged with a warning in the proposal before you approve it.
 It cannot create or delete campaigns, change bid strategies, touch billing, or edit anything outside Google Ads.
@@ -232,7 +233,7 @@ const ASK_FIRST = `<h2>What to ask first</h2>
 </ul>`;
 
 const CAN_CHANGE = `<h2>What it can change</h2>
-<p>Negative keywords, paused or enabled campaigns, ad groups and keywords, and daily budgets. You approve each change, and each
+<p>Negative keywords, paused or enabled campaigns, ad groups and keywords, daily budgets and end dates. You approve each change, and each
 one can be undone. <a href="/#changes">The full list</a>, and <a href="/tools">every tool</a>.</p>`;
 
 /** The questions every guide answers; `app` is the AI app's name. */
@@ -367,7 +368,7 @@ ChatGPT's plugin directory yet. It isn't specific to Camberstack. What protects 
 <li>Changes are stored as a proposal and checked with Google first; applying is a separate tool call. ChatGPT asks you to
 confirm tool calls that change things unless you've turned that off.</li>
 <li>Every applied change can be undone with one more message.</li>
-<li>Changes are limited to negative keywords, pausing or re-enabling, and daily budgets. Nothing can be deleted.</li>
+<li>Changes are limited to negative keywords, pausing or re-enabling, daily budgets and end dates. Nothing can be deleted.</li>
 </ul>
 
 ${ASK_FIRST}
@@ -654,7 +655,7 @@ export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
 
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
 - Tools: ${tools.map((t) => t.name).join(", ")}
-- Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget. Every applied change can be undone.
+- Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget, campaign end date. Every applied change can be undone.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
 - Pricing: Free plan covers 1 Google Ads account (every tool, unlimited applied changes); Pro ${PRO_PRICE_LABEL} covers up to 10. Accounts are counted as those used in the last ${ACCOUNT_WINDOW_DAYS} days; manager (MCC) and demo accounts don't count. Undo is always free.
 - [Setup](${baseUrl}/#setup)

@@ -10,7 +10,7 @@ import { AdsClient, micros, refreshGoogleToken, revokeGoogleToken, type GoogleCr
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, accountsLabel } from "./plans.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DemoAds } from "./demo.js";
 import {
-  ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, resolveChange, summarize,
+  ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, pendingOf, resolveChange, summarize,
   type Change, type ResolvedChange,
 } from "./changes.js";
 
@@ -340,7 +340,8 @@ export class UserSession {
     const count = changes.reduce((n, c) => n + (c.type === "add_negative_keywords" ? c.keywords.length : 1), 0);
     if (count > MAX_CHANGES) throw new Error(`At most ${MAX_CHANGES} changes per proposal (got ${count}). Split it.`);
     const resolved: ResolvedChange[] = [];
-    for (const c of changes) resolved.push(await resolveChange(this.ads, a.customerId, a.loginCustomerId, c));
+    const pending = pendingOf(changes);
+    for (const c of changes) resolved.push(await resolveChange(this.ads, a.customerId, a.loginCustomerId, c, pending));
     const live = resolved.filter((r) => r.operations.length);
     if (!live.length) throw new Error("Nothing to change: every requested change is already in place.");
     // Dry run against Google so problems surface now, not after the user approves.
@@ -359,12 +360,13 @@ export class UserSession {
     if (p.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${p.status}.`);
     if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
     const changes = JSON.parse(p.changes) as Change[];
+    const pending = pendingOf(changes);
     const outcomes: Outcome[] = [];
     for (const c of changes) {
       let describe = c.type as string;
       try {
         // Re-resolve: the account may have moved since the proposal was made.
-        const r = await resolveChange(this.ads, p.customer_id, p.login_customer_id, c);
+        const r = await resolveChange(this.ads, p.customer_id, p.login_customer_id, c, pending);
         describe = r.describe;
         if (!r.operations.length) { outcomes.push({ describe: `${describe} (already in place)`, ok: true }); continue; }
         const res = await this.ads.mutate(p.customer_id, r.service, r.operations, { loginCustomerId: p.login_customer_id });

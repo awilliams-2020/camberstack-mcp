@@ -109,6 +109,8 @@ const HIDDEN_SHARE = 1.12;
 interface State {
   campaignStatus: Record<string, string>;
   budget: Record<string, number>;
+  /** Optional: states saved before end dates existed have none. */
+  endDateTime?: Record<string, string>;
   adGroupStatus: Record<string, string>;
   keywordStatus: Record<string, string>;
   negatives: { resourceName: string; campaign: string; text: string; match: string }[];
@@ -147,7 +149,7 @@ export class DemoAds {
     });
     const camp = (id: string) => {
       const c = CAMPAIGNS.find((x) => x.id === id)!;
-      return { id: c.id, name: c.name, status: s.campaignStatus[c.id], advertisingChannelType: c.type, biddingStrategyType: c.bidding,
+      return { id: c.id, name: c.name, status: s.campaignStatus[c.id], endDateTime: s.endDateTime?.[c.id], advertisingChannelType: c.type, biddingStrategyType: c.bidding,
         resourceName: `customers/${DEMO_CID}/campaigns/${c.id}` };
     };
     const group = (id: string) => {
@@ -256,7 +258,8 @@ export class DemoAds {
       }
       const u = op.update;
       if (!u) throw new Error(`Unsupported demo operation on ${service}`);
-      if (service === "campaigns") s.campaignStatus[id(u.resourceName)] = u.status;
+      if (service === "campaigns" && u.endDateTime) (s.endDateTime ??= {})[id(u.resourceName)] = u.endDateTime;
+      else if (service === "campaigns") s.campaignStatus[id(u.resourceName)] = u.status;
       else if (service === "adGroups") s.adGroupStatus[id(u.resourceName)] = u.status;
       else if (service === "adGroupCriteria") s.keywordStatus[id(u.resourceName).split("~")[1]!] = u.status;
       else if (service === "campaignBudgets") s.budget[id(u.resourceName)] = Number(u.amountMicros) / 1e6;

@@ -23,7 +23,7 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, 
 | `discard_proposal`, `change_history`, `disconnect` | | |
 
 Writes are limited to: add negative keywords, pause/enable a campaign, ad group or keyword, set a
-campaign's daily budget (never a shared budget). Enabling a campaign and more-than-doubling a budget
+campaign's daily budget (never a shared budget) or its end date. Enabling a campaign and more-than-doubling a budget
 carry a ⚠ line in the proposal summary. No campaign creation, bid strategy changes or deletions of
 anything the user built.
 
