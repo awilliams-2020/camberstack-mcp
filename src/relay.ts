@@ -3,7 +3,8 @@
  * without holding a Google Ads token of their own.
  *
  *   POST /v1/conversions   Authorization: Bearer csk_…
- *   { "conversion_action_id": "7585493163", "gclid": "…", "conversion_time": "2026-10-04T21:00:00Z", "value": 0 }
+ *   { "conversion_action_id": "7585493163", "gclid": "…", "conversion_time": "2026-10-04T21:00:00Z", "value": 0, "order_id": "…" }
+ *   From the box's own containers use http://camberstack:3000/v1/conversions (shared traefik network).
  *
  * A key belongs to one Camberstack user and one Google Ads account. Conversions are queued, then
  * uploaded with THAT user's stored Google connection (the same one their AI app uses, which doesn't
@@ -36,6 +37,7 @@ const Body = z.object({
   conversion_time: z.string().datetime({ offset: true }).optional(),
   value: z.number().min(0).max(1_000_000).optional(),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  order_id: z.string().min(1).max(64).optional().describe("Google dedupes conversions sharing an order id within one action"),
 }).refine((b) => [b.gclid, b.gbraid, b.wbraid].filter(Boolean).length === 1, "exactly one of gclid, gbraid, wbraid");
 
 interface KeyRow { id: string; user_id: string; customer_id: string; login_customer_id: string | null; label: string; action_ids: string }
@@ -67,8 +69,8 @@ export class Relay {
     const at = b.conversion_time ? Math.floor(Date.parse(b.conversion_time) / 1000) : now();
     if (at > now() + 300 || at < now() - MAX_AGE_DAYS * 86400) { res.status(400).json({ error: `conversion_time must be within the last ${MAX_AGE_DAYS} days` }); return; }
     const kind = b.gclid ? "gclid" : b.gbraid ? "gbraid" : "wbraid";
-    this.deps.db.prepare(`INSERT OR IGNORE INTO relay_conversions (key_id, action_id, kind, click_id, at, value, currency) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(k.id, b.conversion_action_id, kind, b[kind]!, at, b.value ?? null, b.currency ?? null);
+    this.deps.db.prepare(`INSERT OR IGNORE INTO relay_conversions (key_id, action_id, kind, click_id, at, value, currency, order_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(k.id, b.conversion_action_id, kind, b[kind]!, at, b.value ?? null, b.currency ?? null, b.order_id ?? "");
     this.deps.db.prepare("UPDATE relay_keys SET last_used_at = ? WHERE id = ?").run(now(), k.id);
     res.status(202).json({ queued: true });
     void this.flush().catch(() => { /* retried by the sweep */ });
@@ -83,7 +85,7 @@ export class Relay {
     try {
       const rows = this.deps.db.prepare(`SELECT c.*, k.user_id, k.customer_id, k.login_customer_id FROM relay_conversions c
           JOIN relay_keys k ON k.id = c.key_id WHERE c.uploaded_at IS NULL AND c.attempts < ? AND k.revoked_at IS NULL ORDER BY c.id`)
-        .all(MAX_ATTEMPTS) as (KeyRow & { id: number; key_id: string; action_id: string; kind: string; click_id: string; at: number; value: number | null; currency: string | null })[];
+        .all(MAX_ATTEMPTS) as (KeyRow & { id: number; key_id: string; action_id: string; kind: string; click_id: string; at: number; value: number | null; currency: string | null; order_id: string })[];
       const byKey = new Map<string, typeof rows>();
       for (const r of rows) byKey.set(r.key_id, [...(byKey.get(r.key_id) ?? []), r]);
       for (const batch of byKey.values()) {
@@ -103,6 +105,7 @@ export class Relay {
             // Google's required format: "yyyy-MM-dd HH:mm:ss+00:00".
             conversionDateTime: new Date(r.at * 1000).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "+00:00"),
             ...(r.value != null ? { conversionValue: r.value, currencyCode: r.currency ?? "USD" } : {}),
+            ...(r.order_id ? { orderId: r.order_id } : {}),
           })), first.login_customer_id);
           const ok = this.deps.db.prepare("UPDATE relay_conversions SET uploaded_at = ?, error = NULL, attempts = attempts + 1 WHERE id = ?");
           batch.forEach((r, i) => (errors[i] ? fail(`rejected: ${errors[i]}`, [r.id]) : ok.run(now(), r.id)));

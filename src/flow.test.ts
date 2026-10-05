@@ -723,15 +723,18 @@ describe("OAuth + MCP end to end", () => {
     expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click", conversion_time: new Date().toISOString() })).status).toBe(202);
     expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" })).status).toBe(202);   // duplicate: accepted, stored once
     expect((await post({ conversion_action_id: "7585493163", gclid: "STALE_CLICK_ID_0001", value: 5 })).status).toBe(202);
+    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click", order_id: "in_2" })).status).toBe(202);  // same click, new order
     await relay.flush();
     const sent = ads.uploads.flatMap((u) => u.conversions.map((c) => ({ cid: u.cid, ...c })));
-    expect(sent.filter((c) => c.gclid === "Cj0KCQjw_test_click")).toHaveLength(1);
+    expect(sent.filter((c) => c.gclid === "Cj0KCQjw_test_click")).toHaveLength(2);
+    expect(sent.find((c) => c.orderId)).toMatchObject({ orderId: "in_2" });
     expect(sent[0]).toMatchObject({ cid: "1112223333", conversionAction: "customers/1112223333/conversionActions/7585493163" });
     expect(sent[0].conversionDateTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\+00:00$/);
     const rows = db.prepare("SELECT click_id, uploaded_at IS NOT NULL up, error FROM relay_conversions ORDER BY id").all() as any[];
     expect(rows).toEqual([
       { click_id: "Cj0KCQjw_test_click", up: 1, error: null },
       { click_id: "STALE_CLICK_ID_0001", up: 0, error: "rejected: The click is too old" },  // kept for the retrying sweep
+      { click_id: "Cj0KCQjw_test_click", up: 1, error: null },
     ]);
   });
 
