@@ -337,7 +337,7 @@ export class UserSession {
   async propose(customerId: string, rawChanges: unknown[], undoOf?: string): Promise<{ proposal_id: string; summary: string; changes: number; skipped: string[] }> {
     const a = await this.account(customerId);
     const changes: Change[] = rawChanges.map((c) => ChangeSchema.parse(c));
-    const count = changes.reduce((n, c) => n + (c.type === "add_negative_keywords" ? c.keywords.length : 1), 0);
+    const count = changes.reduce((n, c) => n + (c.type === "add_negative_keywords" || c.type === "add_keywords" ? c.keywords.length : 1), 0);
     if (count > MAX_CHANGES) throw new Error(`At most ${MAX_CHANGES} changes per proposal (got ${count}). Split it.`);
     const resolved: ResolvedChange[] = [];
     const pending = pendingOf(changes);

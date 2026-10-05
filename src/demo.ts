@@ -244,6 +244,19 @@ export class DemoAds {
   async mutate(_cid: string, service: string, operations: any[], opts: { validateOnly?: boolean } = {}): Promise<{ results: { resourceName?: string }[] }> {
     const s = this.load();
     const id = (rn: string) => rn.split("/").pop()!;
+    // Building (campaigns, ad groups, keywords, ads, sitelinks) is simulated: it validates and returns
+    // resource names, so propose → apply → undo all work, but the sample account's reports don't change.
+    if (service === "googleAds" || service === "adGroupAds" || (service === "adGroupCriteria" && (op0(operations).create || op0(operations).remove))
+      || ((service === "campaigns" || service === "adGroups") && op0(operations).remove)) {
+      const results = operations.map((op) => {
+        const inner = service === "googleAds" ? Object.values(op)[0] as any : op;
+        const coll = service === "googleAds" ? collectionOf(Object.keys(op)[0]!) : service;
+        if (inner.remove) return { resourceName: inner.remove as string };
+        return { resourceName: `customers/${DEMO_CID}/${coll}/${s.nextId++}` };
+      });
+      if (!opts.validateOnly) this.save(s);
+      return { results: opts.validateOnly ? [] : results };
+    }
     const results = operations.map((op) => {
       if (service === "campaignCriteria" && op.create) {
         const camp = id(op.create.campaign);
@@ -269,6 +282,13 @@ export class DemoAds {
     if (!opts.validateOnly) this.save(s);
     return { results: opts.validateOnly ? [] : results };
   }
+}
+
+const op0 = (ops: any[]) => ops[0] ?? {};
+/** "campaignBudgetOperation" → "campaignBudgets", "adGroupCriterionOperation" → "adGroupCriteria". */
+function collectionOf(opKey: string): string {
+  const base = opKey.replace(/Operation$/, "");
+  return base.endsWith("Criterion") ? base.replace(/Criterion$/, "Criteria") : `${base}s`;
 }
 
 // ---------------------------------------------------------------- a small GAQL reader

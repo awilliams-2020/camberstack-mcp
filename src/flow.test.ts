@@ -49,6 +49,12 @@ class FakeAds {
     if (q.includes("FROM ad_group_criterion")) {
       return [{ adGroupCriterion: { status: this.kwStatus, keyword: { text: "invoice", matchType: "BROAD" } }, adGroup: { name: "AG" }, campaign: { name: "Search" } }];
     }
+    if (q.includes("FROM campaign_conversion_goal")) {
+      return Object.entries(this.goals).map(([cat, biddable]) => ({ campaign: { name: "Search" }, campaignConversionGoal: {
+        resourceName: `customers/1112223333/campaignConversionGoals/10~${cat}~WEBSITE`, category: cat, origin: "WEBSITE", biddable } }));
+    }
+    if (q.includes("FROM ad_group WHERE")) return [{ adGroup: { name: "AG" }, campaign: { name: "Search", status: this.campaignStatus } }];
+    if (q.includes("campaign.name = ")) return q.includes("campaign.name = 'Search'") ? [{ campaign: { id: "10" } }] : [];
     if (q.includes("FROM campaign")) {
       return [{ campaign: { id: "10", name: "Search", status: this.campaignStatus, endDateTime: this.campaignEnd, advertisingChannelType: "SEARCH" },
         campaignBudget: { resourceName: "customers/1112223333/campaignBudgets/99", amountMicros: "20000000", explicitlyShared: false },
@@ -82,9 +88,30 @@ class FakeAds {
       monthlySearchVolumes: [{ year: "2026", month: "AUGUST", monthlySearches: "11000" }, { year: "2026", month: "SEPTEMBER", monthlySearches: "13000" }],
     } }] };
   }
+  goals: Record<string, boolean> = { PURCHASE: true, SIGNUP: true };
+  removed: string[] = [];
   async mutate(_cid: string, service: string, operations: any[], opts: { validateOnly?: boolean } = {}) {
     this.mutations.push({ service, operations, validateOnly: !!opts.validateOnly });
     if (opts.validateOnly) return { results: [] };
+    if (service === "googleAds") {
+      return { results: operations.map((op, i) => {
+        const key = Object.keys(op)[0]!, inner = op[key];
+        if (inner.remove) { this.removed.push(inner.remove); return { resourceName: inner.remove }; }
+        const coll = key.replace(/Operation$/, "").replace(/Criterion$/, "Criteria").replace(/^(?!.*Criteria$)(.*)$/, "$1s");
+        return { resourceName: `customers/1112223333/${coll}/${500 + i}` };
+      }) };
+    }
+    if (service === "campaignConversionGoals") {
+      for (const op of operations) this.goals[op.update.resourceName.split("~")[1]] = op.update.biddable;
+      return { results: operations.map((op) => ({ resourceName: op.update.resourceName })) };
+    }
+    if (operations[0]?.remove && service !== "campaignCriteria") {
+      this.removed.push(...operations.map((op) => op.remove));
+      return { results: operations.map((op) => ({ resourceName: op.remove })) };
+    }
+    if (service === "adGroupCriteria" && operations[0]?.create) {
+      return { results: operations.map((_op, i) => ({ resourceName: `customers/1112223333/adGroupCriteria/20~${700 + i}` })) };
+    }
     return {
       results: operations.map((op, i) => {
         if (op.create?.negative) {
@@ -448,6 +475,18 @@ describe("OAuth + MCP end to end", () => {
     const end = (await call(token, "run_gaql", { customer_id: "0000000001", query: endQ })).json;
     expect(end.rows[0].campaign.endDateTime).toBe("2037-12-30 23:59:59");  // undo removed it
 
+    // Building is simulated on the demo: it proposes, applies and undoes without touching Google.
+    const ad = { headlines: ["Sewer Line Repair", "Same-Day Service", "Licensed Plumbers"], descriptions: ["Call now.", "Upfront prices."], final_url: "https://example.com/sewer" };
+    const b = await call(token, "propose_changes", { customer_id: "0000000001", changes: [{ type: "create_campaign", name: "Sewer – Search", daily_budget: 15,
+      ad_groups: [{ name: "Sewer", default_max_cpc: 6, keywords: [{ text: "sewer line repair", match_type: "PHRASE" }], ads: [ad] }] },
+      { type: "add_keywords", ad_group_id: "3005", keywords: [{ text: "drain unclogging", match_type: "PHRASE" }] }] });
+    if (b.isError) throw new Error(b.text);
+    expect(b.json.summary).toContain('Create Search campaign "Sewer – Search", PAUSED');
+    expect((await call(token, "apply_changes", { proposal_id: b.json.proposal_id })).json.status).toBe("applied");
+    const bu = (await call(token, "undo_changes", { proposal_id: b.json.proposal_id })).json;
+    expect(bu.summary).toContain('Remove campaign "Sewer – Search"');
+    expect((await call(token, "apply_changes", { proposal_id: bu.proposal_id })).json.status).toBe("applied");
+
     const ideas = (await call(token, "keyword_ideas", { customer_id: "0000000001", keywords: ["water heater"] })).json;
     expect(ideas.note).toContain("Sample data");
     expect(ideas.ideas[0].keyword).toBe("tankless water heater");
@@ -595,6 +634,63 @@ describe("OAuth + MCP end to end", () => {
     await call(token, "apply_changes", { proposal_id: u.json.proposal_id });
     expect(ads.campaignEnd).toBe("2037-12-30 23:59:59");
     expect(ads.campaignStatus).toBe("PAUSED");
+  });
+
+  it("builds a paused campaign atomically, adds keywords, scopes its conversion goal, and undoes each", async () => {
+    const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };
+    const ad = { headlines: ["Cleaning Invoice Template", "Send It With a Pay Button", "Start Free"], descriptions: ["Fill it in free.", "Clients pay by card."],
+      final_url: "https://example.com/cleaning", path1: "cleaning" };
+    const campaign = { type: "create_campaign", name: "Cleaning Test", daily_budget: 20, end_date: "2030-12-03",
+      negative_keywords: [{ text: "jobs", match_type: "PHRASE" }],
+      sitelinks: [{ text: "Pricing", url: "https://example.com/pricing", description1: "Free to start", description2: "No card" }],
+      ad_groups: [{ name: "Invoicing", default_max_cpc: 4, keywords: [{ text: "cleaning invoice", match_type: "PHRASE", max_cpc: 3 }], ads: [ad] }] };
+
+    // Name clash and manual CPC with no bid are refused before anything is stored.
+    await expect(propose([{ ...campaign, name: "Search" }])).rejects.toThrow('A campaign named "Search" already exists');
+    await expect(propose([{ ...campaign, ad_groups: [{ ...campaign.ad_groups[0], default_max_cpc: undefined, keywords: [{ text: "x", match_type: "PHRASE" }] }] }]))
+      .rejects.toThrow("Manual CPC needs a bid");
+
+    const before = ads.mutations.length;
+    const p = await propose([campaign]);
+    expect(p.summary).toContain('Create Search campaign "Cleaning Test", PAUSED (nothing spends until you enable it): 20.00/day, manual CPC');
+    expect(p.summary).toContain("ends 2030-12-03");
+    expect(p.summary).toContain('"Invoicing" (1 keyword(s), bid 4.00, 1 ad(s) → https://example.com/cleaning)');
+    // One atomic, dry-run request: budget → campaign (PAUSED) → criteria → sitelink → ad group → ad → keyword.
+    const dry = ads.mutations.slice(before);
+    expect(dry).toHaveLength(1);
+    expect(dry[0]!.service).toBe("googleAds");
+    expect(dry[0]!.validateOnly).toBe(true);
+    const ops = dry[0]!.operations;
+    expect(ops[1].campaignOperation.create).toMatchObject({ status: "PAUSED", campaignBudget: ops[0].campaignBudgetOperation.create.resourceName,
+      endDateTime: "2030-12-03 23:59:59", geoTargetTypeSetting: { positiveGeoTargetType: "PRESENCE" } });
+    expect(ops.filter((o: any) => o.campaignCriterionOperation)).toHaveLength(3); // US, English, 1 negative
+    expect(ops.find((o: any) => o.adGroupCriterionOperation).adGroupCriterionOperation.create.cpcBidMicros).toBe("3000000");
+
+    const applied = await call(token, "apply_changes", { proposal_id: p.proposal_id });
+    expect(applied.json.status).toBe("applied");
+    const u = await call(token, "undo_changes", { proposal_id: p.proposal_id });
+    expect(u.json.summary).toContain('Remove campaign "Cleaning Test" that Camberstack created ⚠');
+    await call(token, "apply_changes", { proposal_id: u.json.proposal_id });
+    expect(ads.removed).toContain("customers/1112223333/campaigns/501");
+
+    // Keywords: duplicates of what's there are skipped; undo removes exactly what was added.
+    const k = await propose([{ type: "add_keywords", ad_group_id: "20", keywords: [
+      { text: "invoice", match_type: "BROAD" }, { text: "cleaning invoice", match_type: "PHRASE", max_cpc: 3 }] }]);
+    expect(k.summary).toContain('Add 1 keyword(s) to ad group "AG" (campaign "Search"): "cleaning invoice" @ 3.00 (1 already present, skipped)');
+    await call(token, "apply_changes", { proposal_id: k.proposal_id });
+    const ku = await call(token, "undo_changes", { proposal_id: k.proposal_id });
+    await call(token, "apply_changes", { proposal_id: ku.json.proposal_id });
+    expect(ads.removed).toContain("customers/1112223333/adGroupCriteria/20~700");
+
+    // Conversion goal: bid on SIGNUP only, undo restores PURCHASE.
+    await expect(propose([{ type: "set_conversion_goal", campaign_id: "10", category: "PHONE_CALL_LEAD" }])).rejects.toThrow("No PHONE_CALL_LEAD goal");
+    const g = await propose([{ type: "set_conversion_goal", campaign_id: "10", category: "SIGNUP" }]);
+    expect(g.summary).toContain('Campaign "Search" counts and bids on SIGNUP conversions only (was: PURCHASE, SIGNUP)');
+    await call(token, "apply_changes", { proposal_id: g.proposal_id });
+    expect(ads.goals).toEqual({ PURCHASE: false, SIGNUP: true });
+    const gu = await call(token, "undo_changes", { proposal_id: g.proposal_id });
+    await call(token, "apply_changes", { proposal_id: gu.json.proposal_id });
+    expect(ads.goals).toEqual({ PURCHASE: true, SIGNUP: true });
   });
 
   it("uploads one conversion for a first connection that came from our ad, and none otherwise", async () => {

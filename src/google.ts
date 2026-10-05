@@ -173,17 +173,26 @@ export class AdsClient {
     return body ? JSON.parse(body) : {};
   }
 
-  /** `service` is the REST collection, e.g. "campaignCriteria". Atomic unless partialFailure. */
+  /**
+   * `service` is the REST collection, e.g. "campaignCriteria". Atomic unless partialFailure.
+   * "googleAds" is the cross-service mutate: `operations` are MutateOperations (which may reference
+   * each other by temporary negative ids), and its per-service results are flattened to the same
+   * `{ resourceName }` shape, in order.
+   */
   async mutate(
     customerId: string, service: string, operations: object[],
     opts: { validateOnly?: boolean; loginCustomerId?: string | null } = {},
   ): Promise<{ results: { resourceName?: string }[] }> {
+    const cross = service === "googleAds";
     const res = await this.f(`${ADS_API}/customers/${customerId}/${service}:mutate`, {
       method: "POST",
       headers: await this.headers(opts.loginCustomerId),
-      body: JSON.stringify({ operations, validateOnly: !!opts.validateOnly, partialFailure: false }),
+      body: JSON.stringify({ [cross ? "mutateOperations" : "operations"]: operations, validateOnly: !!opts.validateOnly, partialFailure: false }),
     });
     const body = await AdsClient.body(res);
-    return body ? JSON.parse(body) : { results: [] };
+    const json = body ? JSON.parse(body) : {};
+    if (!cross) return json.results ? json : { results: [] };
+    return { results: (json.mutateOperationResponses ?? []).map((r: Record<string, { resourceName?: string }>) =>
+      ({ resourceName: Object.values(r)[0]?.resourceName })) };
   }
 }

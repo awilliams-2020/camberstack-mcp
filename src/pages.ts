@@ -164,9 +164,12 @@ changes, each one only after you approve it.</p>
 <tr><td>Pause or re-enable a campaign, ad group or keyword</td><td>Restores the previous status</td></tr>
 <tr><td>Change a campaign's daily budget (not shared budgets)</td><td>Restores the previous amount</td></tr>
 <tr><td>Set or remove the last day a campaign runs</td><td>Restores the previous end date</td></tr>
+<tr><td>Build a Search campaign: budget, bidding, locations, languages, ad groups, keywords, responsive search ads, negatives, sitelinks. Created paused</td><td>Removes the campaign it built</td></tr>
+<tr><td>Add an ad group, keywords, a responsive search ad or sitelinks to an existing campaign</td><td>Removes exactly what it added</td></tr>
+<tr><td>Make a campaign count and bid on one conversion category only (e.g. sign-ups)</td><td>Restores the previous goals</td></tr>
 </table>
-<p class="muted">Turning a campaign back on, or more than doubling a budget, is flagged with a warning in the proposal before you approve it.
-It cannot create or delete campaigns, change bid strategies, touch billing, or edit anything outside Google Ads.
+<p class="muted">A new campaign is always created paused, so building it and letting it spend are two separate approvals. Turning a campaign on, or more than doubling a budget, is flagged with a warning in the proposal before you approve it.
+It cannot delete anything you built, change bid strategies on existing campaigns, touch billing, or edit anything outside Google Ads.
 Any question beyond these tools is answered with read-only queries. <a href="/tools">Every tool and what it can do</a>;
 the code is <a href="${SOURCE_URL}">open source</a>.</p>
 
