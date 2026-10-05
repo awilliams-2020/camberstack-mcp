@@ -44,11 +44,17 @@ interface KeyRow { id: string; user_id: string; customer_id: string; login_custo
 
 export function createRelayKey(db: DB, email: string, customerId: string, actionIds: string[], label: string, loginCustomerId: string | null = null): string {
   if (!actionIds.length || actionIds.some((x) => !/^\d+$/.test(x))) throw new Error("action ids must be digits, e.g. 7585493163");
-  const user = db.prepare("SELECT id FROM users WHERE lower(email) = lower(?)").get(email) as { id: string } | undefined;
-  if (!user) throw new Error(`No Camberstack user ${email}; connect Camberstack with that Google login first.`);
+  const cid = customerId.replace(/-/g, "");
+  // "auto": the user who most recently ran a tool successfully on this account, i.e. whose connection reaches it.
+  const user = (email === "auto"
+    ? db.prepare(`SELECT u.id, u.email FROM tool_calls t JOIN users u ON u.id = t.user_id
+        WHERE t.customer_id = ? AND t.ok = 1 AND u.enc_refresh IS NOT NULL ORDER BY t.at DESC LIMIT 1`).get(cid)
+    : db.prepare("SELECT id, email FROM users WHERE lower(email) = lower(?)").get(email)) as { id: string; email: string } | undefined;
+  if (!user) throw new Error(email === "auto" ? `No connected Camberstack user has used account ${cid}.` : `No Camberstack user ${email}; connect Camberstack with that Google login first.`);
+  console.error(`key owner: ${user.email.replace(/^(.).*(@.*)$/, "$1***$2")}`);
   const key = `csk_${randomBytes(32).toString("base64url")}`;
   db.prepare(`INSERT INTO relay_keys (id, key_hash, user_id, customer_id, login_customer_id, label, action_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(randomUUID(), hash(key), user.id, customerId.replace(/-/g, ""), loginCustomerId?.replace(/-/g, "") || null, label, actionIds.join(","), now());
+    .run(randomUUID(), hash(key), user.id, cid, loginCustomerId?.replace(/-/g, "") || null, label, actionIds.join(","), now());
   return key;
 }
 

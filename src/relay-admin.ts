@@ -1,6 +1,7 @@
 /**
  * Manage conversion-relay keys (relay.ts) on the box:
- *   node dist/relay-admin.js create <email> <customer_id> <action_id[,action_id…]> <label> [login_customer_id]
+ *   node dist/relay-admin.js create <email|auto> <customer_id> <action_id[,action_id…]> <label> [login_customer_id]
+ *     auto = the connected user who most recently ran a tool on that account
  *   node dist/relay-admin.js list
  *   node dist/relay-admin.js revoke <label>
  *   node dist/relay-admin.js status            pending / failed / uploaded counts per key, last error
