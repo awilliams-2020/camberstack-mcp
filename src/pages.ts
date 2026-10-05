@@ -141,8 +141,8 @@ export function homePage(baseUrl: string): string {
       offers: [
         { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD",
           description: "Every tool, with unlimited applied changes, on 1 Google Ads account." },
-        { "@type": "Offer", name: "Pro", price: "49", priceCurrency: "USD", description: "Every tool on up to 10 Google Ads accounts.",
-          priceSpecification: { "@type": "UnitPriceSpecification", price: "49", priceCurrency: "USD", billingDuration: "P1M", unitCode: "MON" } },
+        { "@type": "Offer", name: "Pro", price: "15", priceCurrency: "USD", description: "Every tool on up to 10 Google Ads accounts.",
+          priceSpecification: { "@type": "UnitPriceSpecification", price: "15", priceCurrency: "USD", billingDuration: "P1M", unitCode: "MON" } },
       ],
     },
     body: `

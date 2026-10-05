@@ -5,7 +5,7 @@ read-only tools and can propose a small set of changes. **Nothing
 changes in the account until you approve a specific proposal, and every applied change can be
 undone.**
 
-Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, unlimited changes; Pro $49/mo: up to 10 accounts). Setup: https://camberstack.io/#setup
+Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, unlimited changes; Pro $15/mo: up to 10 accounts). Setup: https://camberstack.io/#setup
 
 ## Tools
 

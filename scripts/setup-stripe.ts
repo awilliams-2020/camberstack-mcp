@@ -1,5 +1,5 @@
 /**
- * One-time, idempotent: create the Pro product + $49/month price (lookup_key means a re-run finds
+ * One-time, idempotent: create the Pro product + $15/month price (lookup_key means a re-run finds
  * it instead of duplicating), and report whether Stripe's customer portal is configured, which the
  * "manage billing" link needs. Prints STRIPE_PRO_PRICE_ID for the deploy's .env.
  *   STRIPE_SECRET_KEY=sk_... npx tsx scripts/setup-stripe.ts
@@ -17,16 +17,20 @@ const api = async (path: string, form?: Record<string, string>) => {
   return data;
 };
 
-const LOOKUP = "camberstack_pro_monthly_v1";
-const found = await api(`prices/search?query=${encodeURIComponent(`lookup_key:'${LOOKUP}'`)}`);
-let price = found.data?.[0];
+// v1 was $49/month (2026-10-01 → 10-04); Stripe prices are immutable, so a price change is a new
+// lookup key on the SAME product. Existing v1 subscribers stay on v1 unless moved.
+const LOOKUP = "camberstack_pro_monthly_v2";
+const byLookup = async (k: string) =>
+  (await api(`prices/search?query=${encodeURIComponent(`lookup_key:'${k}'`)}`)).data?.[0];
+let price = await byLookup(LOOKUP);
 if (!price) {
-  const product = await api("products", {
+  const prior = await byLookup("camberstack_pro_monthly_v1");
+  const product = prior ? { id: prior.product } : await api("products", {
     name: "Camberstack Pro",
     description: "Unlimited applied Google Ads changes from your AI assistant, with change history and undo.",
   });
   price = await api("prices", {
-    product: product.id, currency: "usd", unit_amount: "4900",
+    product: product.id, currency: "usd", unit_amount: "1500",
     "recurring[interval]": "month", lookup_key: LOOKUP, nickname: "Pro monthly",
   });
   console.log("created", price.id);
