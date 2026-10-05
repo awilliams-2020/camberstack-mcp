@@ -187,7 +187,9 @@ export class AdsClient {
     const res = await this.f(`${ADS_API}/customers/${customerId}/${service}:mutate`, {
       method: "POST",
       headers: await this.headers(opts.loginCustomerId),
-      body: JSON.stringify({ [cross ? "mutateOperations" : "operations"]: operations, validateOnly: !!opts.validateOnly, partialFailure: false }),
+      // campaignConversionGoals:mutate has no partialFailure field and 400s on it (it's atomic anyway).
+      body: JSON.stringify({ [cross ? "mutateOperations" : "operations"]: operations, validateOnly: !!opts.validateOnly,
+        ...(service === "campaignConversionGoals" ? {} : { partialFailure: false }) }),
     });
     const body = await AdsClient.body(res);
     const json = body ? JSON.parse(body) : {};
