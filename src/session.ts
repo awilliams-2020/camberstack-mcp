@@ -86,7 +86,8 @@ export class UserSession {
     return new UserSession(deps, user);
   }
 
-  private async googleAccessToken(): Promise<string> {
+  /** An access token for this user's Google connection (cached; refreshed from the stored refresh token). */
+  async googleAccessToken(): Promise<string> {
     const hit = tokenCache.get(this.user.id);
     if (hit && hit.exp > Date.now() + 60_000) return hit.token;
     if (!this.user.enc_refresh) throw new NotConnectedError("Google Ads is disconnected. Reconnect Camberstack in your AI app.");

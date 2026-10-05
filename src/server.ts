@@ -9,6 +9,7 @@ import { now, openDb, sweep, type DB } from "./db.js";
 import { deriveKey } from "./crypto.js";
 import { CamberstackProvider, MCP_SCOPE } from "./provider.js";
 import { UserSession, type SessionDeps } from "./session.js";
+import { Relay } from "./relay.js";
 import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
 import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
 import { mountAdmin } from "./admin.js";
@@ -38,6 +39,8 @@ export interface Service {
   billing: Billing;
   /** The background sweeps. Not started by createApp, so tests run without timers. */
   startJobs(): void;
+  /** The conversion relay, so tests can flush it. */
+  relay: Relay;
 }
 
 export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Service {
@@ -63,6 +66,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     freeAccounts: cfg.freeAccounts, proAccounts: cfg.proAccounts, proEmails: cfg.proEmails,
     billingLink: (kind, userId) => billing.link(kind, userId), refreshPlan: (userId) => billing.refreshPlan(userId), ...overrides,
   };
+  const relay = new Relay(deps);
   const mcpUrl = new URL(`${cfg.baseUrl}/mcp`);
   const logCall = db.prepare(`INSERT INTO tool_calls (at, user_id, client_id, tool, customer_id, ok, error, ms, bytes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -245,6 +249,9 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
 
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
   app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(BEACON_JS); });
+  // Conversion relay for the operator's own apps (relay.ts): key-authenticated, no cookies, no CORS.
+  app.post("/v1/conversions", express.json({ limit: "10kb" }), relay.handle);
+
   app.post("/e", express.urlencoded({ extended: false, limit: "2kb" }), (req, res) => {
     const b = parseBeacon(req.body ?? {});
     if (b) analytics.pageview(req, b);
@@ -264,8 +271,9 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     void every(HOUR, "billing sweep", () => billing.sweep())();  // also at boot: a restart mustn't delay a downgrade an hour
     every(HOUR, "lifecycle", () => lifecycle.run());
     every(HOUR, "ad conversions", () => adConversions.flush());
+    every(HOUR, "relay conversions", () => relay.flush());
   };
-  return { app, billing, startJobs };
+  return { app, billing, startJobs, relay };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

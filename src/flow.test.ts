@@ -11,6 +11,7 @@ import { createApp } from "./server.js";
 import { openDb } from "./db.js";
 import type { Config } from "./config.js";
 import { decrypt, encrypt } from "./crypto.js";
+import { createRelayKey } from "./relay.js";
 
 const key = randomBytes(32);
 const idToken = (sub: string, email: string) =>
@@ -47,16 +48,20 @@ class FakeAds {
       return this.negatives.map((n) => ({ campaign: { id: "10" }, campaignCriterion: { keyword: { text: n.text, matchType: n.matchType } } }));
     }
     if (q.includes("FROM ad_group_criterion")) {
-      return [{ adGroupCriterion: { status: this.kwStatus, keyword: { text: "invoice", matchType: "BROAD" } }, adGroup: { name: "AG" }, campaign: { name: "Search" } }];
+      return [{ adGroupCriterion: { status: this.kwStatus, cpcBidMicros: this.kwBid, keyword: { text: "invoice", matchType: "BROAD" } }, adGroup: { name: "AG", cpcBidMicros: this.agBid }, campaign: { name: "Search" } }];
     }
     if (q.includes("FROM campaign_conversion_goal")) {
       return Object.entries(this.goals).map(([cat, biddable]) => ({ campaign: { name: "Search" }, campaignConversionGoal: {
         resourceName: `customers/1112223333/campaignConversionGoals/10~${cat}~WEBSITE`, category: cat, origin: "WEBSITE", biddable } }));
     }
-    if (q.includes("FROM ad_group WHERE")) return [{ adGroup: { name: "AG" }, campaign: { name: "Search", status: this.campaignStatus } }];
+    if (q.includes("FROM ad_group WHERE")) return [{ adGroup: { name: "AG", cpcBidMicros: this.agBid }, campaign: { name: "Search", status: this.campaignStatus } }];
+    if (q.includes("FROM ad_group_ad")) return [{ adGroupAd: { status: "ENABLED", ad: { finalUrls: ["https://example.com/old"] } }, adGroup: { name: "AG" }, campaign: { name: "Search" } }];
+    if (q.includes("FROM conversion_action WHERE conversion_action.name")) return [];
+    if (q.includes("FROM conversion_action WHERE conversion_action.id")) return [{ conversionAction: { name: "Signup", countingType: "MANY_PER_CLICK" } }];
     if (q.includes("campaign.name = ")) return q.includes("campaign.name = 'Search'") ? [{ campaign: { id: "10" } }] : [];
     if (q.includes("FROM campaign")) {
-      return [{ campaign: { id: "10", name: "Search", status: this.campaignStatus, endDateTime: this.campaignEnd, advertisingChannelType: "SEARCH" },
+      return [{ campaign: { id: "10", name: "Search", status: this.campaignStatus, endDateTime: this.campaignEnd, advertisingChannelType: "SEARCH",
+          biddingStrategyType: "MANUAL_CPC", manualCpc: { enhancedCpcEnabled: false }, finalUrlSuffix: "" },
         campaignBudget: { resourceName: "customers/1112223333/campaignBudgets/99", amountMicros: "20000000", explicitlyShared: false },
         metrics: { costMicros: "200000000", clicks: "80", impressions: "900", conversions: 4, conversionsValue: 400 } }];
     }
@@ -89,6 +94,13 @@ class FakeAds {
     } }] };
   }
   goals: Record<string, boolean> = { PURCHASE: true, SIGNUP: true };
+  uploads: { cid: string; conversions: any[] }[] = [];
+  agBid = "1000000";
+  kwBid: string | undefined;
+  async uploadClickConversions(cid: string, conversions: any[]) {
+    this.uploads.push({ cid, conversions });
+    return conversions.map((c) => (c.gclid === "STALE_CLICK_ID_0001" ? "The click is too old" : null));
+  }
   removed: string[] = [];
   async mutate(_cid: string, service: string, operations: any[], opts: { validateOnly?: boolean } = {}) {
     this.mutations.push({ service, operations, validateOnly: !!opts.validateOnly });
@@ -120,6 +132,10 @@ class FakeAds {
           return { resourceName: rn };
         }
         if (op.remove) { this.negatives = this.negatives.filter((n) => n.rn !== op.remove); return { resourceName: op.remove }; }
+        if (op.updateMask === "cpc_bid_micros") {
+          if (service === "adGroups") this.agBid = op.update.cpcBidMicros; else this.kwBid = op.update.cpcBidMicros;
+          return { resourceName: op.update.resourceName };
+        }
         if (op.update?.endDateTime) { this.campaignEnd = op.update.endDateTime; return { resourceName: op.update.resourceName }; }
         if (op.update?.status && service === "campaigns") { this.campaignStatus = op.update.status; return { resourceName: op.update.resourceName }; }
         if (op.update?.status) { this.kwStatus = op.update.status; return { resourceName: op.update.resourceName }; }
@@ -168,6 +184,7 @@ const adsConversionFetch: typeof fetch = async (url, init) => {
 
 let app: ReturnType<typeof createApp>["app"];
 let billing: ReturnType<typeof createApp>["billing"];
+let relay: ReturnType<typeof createApp>["relay"];
 let server: Server;
 let base = "";
 const ads = new FakeAds();
@@ -184,7 +201,7 @@ beforeAll(async () => {
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    ({ app, billing } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"),
+    ({ app, billing, relay } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"),
       conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
@@ -691,6 +708,73 @@ describe("OAuth + MCP end to end", () => {
     const gu = await call(token, "undo_changes", { proposal_id: g.proposal_id });
     await call(token, "apply_changes", { proposal_id: gu.json.proposal_id });
     expect(ads.goals).toEqual({ PURCHASE: true, SIGNUP: true });
+  });
+
+  it("relays an app's conversions with the key owner's connection, only for the key's actions", async () => {
+    const key = createRelayKey(db, "owner@example.com", "111-222-3333", ["7585493163"], "redbudway");
+    const post = (body: object, k = key) => fetch(`${base}/v1/conversions`, { method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${k}` }, body: JSON.stringify(body) });
+
+    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" }, "csk_wrongwrongwrongwrongwrong")).status).toBe(401);
+    expect((await post({ conversion_action_id: "999", gclid: "Cj0KCQjw_test_click" })).status).toBe(403);   // not this key's action
+    expect((await post({ conversion_action_id: "7585493163" })).status).toBe(400);                          // no click id
+    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click", conversion_time: "2020-01-01T00:00:00Z" })).status).toBe(400);
+
+    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click", conversion_time: new Date().toISOString() })).status).toBe(202);
+    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" })).status).toBe(202);   // duplicate: accepted, stored once
+    expect((await post({ conversion_action_id: "7585493163", gclid: "STALE_CLICK_ID_0001", value: 5 })).status).toBe(202);
+    await relay.flush();
+    const sent = ads.uploads.flatMap((u) => u.conversions.map((c) => ({ cid: u.cid, ...c })));
+    expect(sent.filter((c) => c.gclid === "Cj0KCQjw_test_click")).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ cid: "1112223333", conversionAction: "customers/1112223333/conversionActions/7585493163" });
+    expect(sent[0].conversionDateTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\+00:00$/);
+    const rows = db.prepare("SELECT click_id, uploaded_at IS NOT NULL up, error FROM relay_conversions ORDER BY id").all() as any[];
+    expect(rows).toEqual([
+      { click_id: "Cj0KCQjw_test_click", up: 1, error: null },
+      { click_id: "STALE_CLICK_ID_0001", up: 0, error: "rejected: The click is too old" },  // kept for the retrying sweep
+    ]);
+  });
+
+  it("tunes bids, ads, bidding, URL suffix and conversion actions, each with an undo", async () => {
+    const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };
+    const last = () => ads.mutations.filter((m) => !m.validateOnly).at(-1)!;
+    const applyUndo = async (id: string) => {
+      await call(token, "apply_changes", { proposal_id: id });
+      const u = await call(token, "undo_changes", { proposal_id: id });
+      return u.json;
+    };
+
+    const bid = await propose([{ type: "set_ad_group_bid", ad_group_id: "20", max_cpc: 3 }]);
+    expect(bid.summary).toContain('Set default max CPC of ad group "AG" (campaign "Search") from 1.00 to 3.00 ⚠ 3.0× the current bid');
+    const bidUndo = await applyUndo(bid.proposal_id);
+    expect(bidUndo.summary).toContain("from 3.00 to 1.00");
+    await call(token, "apply_changes", { proposal_id: bidUndo.proposal_id });
+    expect(ads.agBid).toBe("1000000");
+
+    const kw = await propose([{ type: "set_keyword_bid", ad_group_id: "20", criterion_id: "30", max_cpc: 2 }]);
+    expect(kw.summary).toContain("from the ad group's 1.00 to 2.00");
+    const kwUndo = await applyUndo(kw.proposal_id);
+    expect(kwUndo.summary).toContain("to the ad group's 1.00");
+    await call(token, "apply_changes", { proposal_id: kwUndo.proposal_id });
+    expect(last().operations[0]).toEqual({ update: { resourceName: "customers/1112223333/adGroupCriteria/20~30" }, updateMask: "cpc_bid_micros" });  // cleared
+
+    const ad = await propose([{ type: "pause_ad", ad_group_id: "20", ad_id: "40" }]);
+    expect(ad.summary).toContain('Pause ad 40 (→ https://example.com/old) in ad group "AG"');
+
+    const strat = await propose([{ type: "set_bidding_strategy", campaign_id: "10", strategy: "MAXIMIZE_CLICKS", max_cpc_ceiling: 4 }]);
+    expect(strat.summary).toContain('from manual CPC to maximize clicks (max 4.00/click) ⚠ Google re-learns');
+    const stratUndo = await applyUndo(strat.proposal_id);
+    expect(stratUndo.summary).toContain("back to manual CPC");
+    await call(token, "apply_changes", { proposal_id: stratUndo.proposal_id });
+    expect(last().operations[0]).toMatchObject({ update: { manualCpc: { enhancedCpcEnabled: false } }, updateMask: "manual_cpc.enhanced_cpc_enabled" });
+
+    const sfx = await propose([{ type: "set_url_suffix", campaign_id: "10", suffix: "?utm_source=google&utm_term={keyword}" }]);
+    expect(sfx.summary).toContain('from none to "utm_source=google&utm_term={keyword}"');
+
+    const ca = await propose([{ type: "create_conversion_action", name: "Provider signup", category: "SIGNUP" }]);
+    expect(ca.summary).toContain('Create conversion action "Provider signup" (SIGNUP, uploaded click ids, one per click, primary) ⚠');
+    const cnt = await propose([{ type: "set_conversion_counting", conversion_action_id: "77", counting: "ONE_PER_CLICK" }]);
+    expect(cnt.summary).toContain('"Signup" to count one conversion per click (was MANY_PER_CLICK)');
   });
 
   it("uploads one conversion for a first connection that came from our ad, and none otherwise", async () => {

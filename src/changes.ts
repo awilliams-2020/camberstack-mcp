@@ -114,6 +114,43 @@ const PUBLIC_CHANGES = [
     .describe("Add sitelinks to a campaign"),
   z.object({ type: z.literal("set_conversion_goal"), campaign_id: campaignId, category: goalCategory })
     .describe("Make a campaign count and bid on ONE conversion category only (e.g. SIGNUP), so another product's or step's conversions don't steer it"),
+  z.object({ type: z.literal("set_keyword_bid"), ad_group_id: adGroupId, criterion_id: criterionId,
+    max_cpc: bid.nullable().describe("New max cost per click for this keyword, or null to clear it so the keyword uses the ad group's bid") })
+    .describe("Change one keyword's max CPC (manual CPC campaigns)"),
+  z.object({ type: z.literal("set_ad_group_bid"), ad_group_id: adGroupId, max_cpc: bid.describe("New default max cost per click for the ad group") })
+    .describe("Change an ad group's default max CPC, which its keywords use unless they have their own"),
+  z.object({ type: z.literal("pause_ad"), ad_group_id: adGroupId, ad_id: id.describe("Ad id, digits only (ad_group_ad.ad.id from run_gaql)") }).describe("Pause one ad"),
+  z.object({ type: z.literal("enable_ad"), ad_group_id: adGroupId, ad_id: id.describe("Ad id, digits only (ad_group_ad.ad.id from run_gaql)") }).describe("Re-enable one paused ad"),
+  z.object({ type: z.literal("add_campaign_targeting"), campaign_id: campaignId,
+    location_ids: z.array(id).max(50).default([]).describe("Geo target ids to add, e.g. 2840 United States"),
+    language_ids: z.array(id).max(20).default([]).describe("Language ids to add, e.g. 1000 English") })
+    .describe("Add locations and/or languages a campaign targets"),
+  z.object({ type: z.literal("remove_campaign_targeting"), campaign_id: campaignId,
+    location_ids: z.array(id).max(50).default([]), language_ids: z.array(id).max(20).default([]) })
+    .describe("Stop targeting some of a campaign's locations and/or languages"),
+  z.object({ type: z.literal("set_location_mode"), campaign_id: campaignId,
+    presence_only: z.boolean().describe("true: only people IN the locations; false: also people interested in them") })
+    .describe("Choose whether a campaign shows to people in its locations only, or also to people interested in them"),
+  z.object({ type: z.literal("set_bidding_strategy"), campaign_id: campaignId,
+    strategy: z.enum(["MANUAL_CPC", "MAXIMIZE_CLICKS", "MAXIMIZE_CONVERSIONS"]),
+    max_cpc_ceiling: bid.optional().describe("MAXIMIZE_CLICKS only: the most Google may bid per click"),
+    target_cpa: bid.optional().describe("MAXIMIZE_CONVERSIONS only: target cost per conversion") })
+    .describe("Switch a campaign's bid strategy. Google re-learns after a switch, so performance can wobble for a week or two"),
+  z.object({ type: z.literal("set_url_suffix"), campaign_id: campaignId,
+    suffix: z.string().max(1000).describe('Query string Google appends to every landing page in the campaign, e.g. "utm_source=google&utm_medium=cpc&utm_term={keyword}", or "none" to clear it') })
+    .describe("Set or clear a campaign's final URL suffix (tracking parameters on every ad click)"),
+  z.object({ type: z.literal("create_conversion_action"),
+    name: z.string().min(1).max(100),
+    category: goalCategory,
+    source: z.enum(["UPLOAD_CLICKS", "WEBPAGE"]).default("UPLOAD_CLICKS")
+      .describe("UPLOAD_CLICKS: your server uploads ad click ids (no Google tag). WEBPAGE: Google gives you a tag to put on the page"),
+    counting: z.enum(["ONE_PER_CLICK", "MANY_PER_CLICK"]).default("ONE_PER_CLICK").describe("ONE_PER_CLICK for sign-ups and leads; MANY_PER_CLICK for purchases"),
+    primary: z.boolean().default(true).describe("Primary actions count in Conversions and can steer bidding"),
+    default_value: z.number().min(0).max(1_000_000).optional().describe("Value per conversion when none is sent"),
+  }).describe("Create a conversion action to measure sign-ups, leads or purchases"),
+  z.object({ type: z.literal("set_conversion_counting"), conversion_action_id: id.describe("conversion_action.id from run_gaql"),
+    counting: z.enum(["ONE_PER_CLICK", "MANY_PER_CLICK"]) })
+    .describe("Set how many conversions one ad click can produce for a conversion action"),
 ] as const;
 
 /** For propose_changes' input: what the AI sees. */
@@ -129,6 +166,9 @@ export const ChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("remove_keywords"), resource_names: z.array(z.string()).min(1), what: z.string() }),
   z.object({ type: z.literal("remove_ad"), resource_name: z.string(), what: z.string() }),
   z.object({ type: z.literal("remove_campaign_assets"), resource_names: z.array(z.string()).min(1), what: z.string() }),
+  z.object({ type: z.literal("restore_bidding"), campaign_id: id, bidding: z.record(z.string(), z.any()), mask: z.string(), label: z.string() }),
+  z.object({ type: z.literal("remove_campaign_criteria"), campaign_id: id, resource_names: z.array(z.string()).min(1), what: z.string() }),
+  z.object({ type: z.literal("remove_conversion_action"), resource_name: z.string(), name: z.string() }),
   z.object({ type: z.literal("restore_conversion_goals"), campaign_id: id, goals: z.array(z.object({ resource_name: z.string(), biddable: z.boolean() })).min(1) }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;
@@ -138,7 +178,7 @@ export interface ResolvedChange {
   change: Change;
   /** "googleAds" = the cross-service atomic mutate, whose operations are MutateOperations. */
   service: "campaignCriteria" | "adGroupCriteria" | "adGroups" | "campaignBudgets" | "campaigns" | "adGroupAds"
-    | "campaignConversionGoals" | "googleAds";
+    | "campaignConversionGoals" | "conversionActions" | "googleAds";
   operations: object[];
   describe: string;
   /** Filled at resolve time when the inverse is knowable up front (pause/enable/budget). */
@@ -430,6 +470,162 @@ export async function resolveChange(
       return { change, service: "adGroupAds", operations: [{ remove: change.resource_name }], describe: `Remove ${change.what}` };
     case "remove_campaign_assets":
       return { change, service: "googleAds", operations: change.resource_names.map((r) => ({ campaignAssetOperation: { remove: r } })), describe: `Remove ${change.what}` };
+    case "set_keyword_bid": {
+      const [k] = await q(`SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.cpc_bid_micros,
+          ad_group.name, ad_group.cpc_bid_micros FROM ad_group_criterion WHERE ad_group.id = ${change.ad_group_id}
+          AND ad_group_criterion.criterion_id = ${change.criterion_id}`);
+      if (!k) throw new Error(`Keyword ${change.criterion_id} not found in ad group ${change.ad_group_id}`);
+      const before = k.adGroupCriterion.cpcBidMicros ? micros(k.adGroupCriterion.cpcBidMicros) : null;
+      const label = (v: number | null) => (v == null ? `the ad group's ${micros(k.adGroup.cpcBidMicros).toFixed(2)}` : v.toFixed(2));
+      const same = before === change.max_cpc;
+      return {
+        change, service: "adGroupCriteria",
+        operations: same ? [] : [{ update: { resourceName: `customers/${customerId}/adGroupCriteria/${change.ad_group_id}~${change.criterion_id}`,
+          ...(change.max_cpc != null ? { cpcBidMicros: toMicros(change.max_cpc) } : {}) }, updateMask: "cpc_bid_micros" }],
+        describe: `Set max CPC of keyword ${fmtKw(k.adGroupCriterion.keyword.text, k.adGroupCriterion.keyword.matchType)} in ad group "${k.adGroup.name}" from ${label(before)} to ${label(change.max_cpc)}` +
+          bidWarn(before ?? micros(k.adGroup.cpcBidMicros), change.max_cpc),
+        inverse: same ? undefined : { type: "set_keyword_bid", ad_group_id: change.ad_group_id, criterion_id: change.criterion_id, max_cpc: before },
+      };
+    }
+    case "set_ad_group_bid": {
+      const [g] = await q(`SELECT ad_group.name, ad_group.cpc_bid_micros, campaign.name FROM ad_group WHERE ad_group.id = ${change.ad_group_id}`);
+      if (!g) throw new Error(`Ad group ${change.ad_group_id} not found`);
+      const before = micros(g.adGroup.cpcBidMicros);
+      return {
+        change, service: "adGroups",
+        operations: before === change.max_cpc ? [] : [{ update: { resourceName: `customers/${customerId}/adGroups/${change.ad_group_id}`, cpcBidMicros: toMicros(change.max_cpc) }, updateMask: "cpc_bid_micros" }],
+        describe: `Set default max CPC of ad group "${g.adGroup.name}" (campaign "${g.campaign.name}") from ${before.toFixed(2)} to ${change.max_cpc.toFixed(2)}` + bidWarn(before, change.max_cpc),
+        inverse: before === change.max_cpc ? undefined : { type: "set_ad_group_bid", ad_group_id: change.ad_group_id, max_cpc: before },
+      };
+    }
+    case "pause_ad":
+    case "enable_ad": {
+      const [a] = await q(`SELECT ad_group_ad.status, ad_group_ad.ad.final_urls, ad_group.name, campaign.name FROM ad_group_ad
+        WHERE ad_group.id = ${change.ad_group_id} AND ad_group_ad.ad.id = ${change.ad_id}`);
+      if (!a) throw new Error(`Ad ${change.ad_id} not found in ad group ${change.ad_group_id}`);
+      const { ad_group_id, ad_id } = change;
+      return toggle(change, "pause_ad", "enable_ad", (type) => ({ type, ad_group_id, ad_id }), {
+        service: "adGroupAds", before: a.adGroupAd.status, resourceName: `customers/${customerId}/adGroupAds/${ad_group_id}~${ad_id}`,
+        what: `ad ${ad_id}${a.adGroupAd.ad?.finalUrls?.[0] ? ` (→ ${a.adGroupAd.ad.finalUrls[0]})` : ""} in ad group "${a.adGroup.name}"`, context: `campaign "${a.campaign.name}"`,
+      });
+    }
+    case "add_campaign_targeting":
+    case "remove_campaign_targeting": {
+      const [c] = await q(`SELECT campaign.name, campaign.status FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
+      if (!change.location_ids.length && !change.language_ids.length) throw new Error("Give location_ids and/or language_ids.");
+      const have = await q(`SELECT campaign_criterion.resource_name, campaign_criterion.type, campaign_criterion.location.geo_target_constant,
+          campaign_criterion.language.language_constant FROM campaign_criterion WHERE campaign.id = ${change.campaign_id}
+          AND campaign_criterion.type IN ('LOCATION', 'LANGUAGE') AND campaign_criterion.negative = false`);
+      const rnOf = (const_: string) => have.find((r) =>
+        r.campaignCriterion.location?.geoTargetConstant === const_ || r.campaignCriterion.language?.languageConstant === const_)?.campaignCriterion.resourceName as string | undefined;
+      const consts = [...change.location_ids.map((g) => `geoTargetConstants/${g}`), ...change.language_ids.map((l) => `languageConstants/${l}`)];
+      const campaign = `customers/${customerId}/campaigns/${change.campaign_id}`;
+      const places = [...await names(q, "geo_target_constant", "canonical_name", consts.filter((x) => x.startsWith("geo"))),
+        ...await names(q, "language_constant", "name", consts.filter((x) => x.startsWith("lang")))];
+      if (change.type === "add_campaign_targeting") {
+        const fresh = consts.filter((x) => !rnOf(x));
+        return {
+          change, service: "campaignCriteria",
+          operations: fresh.map((x) => ({ create: { campaign, ...(x.startsWith("geo") ? { location: { geoTargetConstant: x } } : { language: { languageConstant: x } }) } })),
+          describe: `Add targeting to campaign "${c.campaign.name}": ${places.join(", ")}`,
+        };
+      }
+      const rns = consts.map(rnOf).filter((x): x is string => !!x);
+      const stillLoc = have.filter((r) => r.campaignCriterion.type === "LOCATION" && !rns.includes(r.campaignCriterion.resourceName)).length;
+      return {
+        change, service: "campaignCriteria", operations: rns.map((r) => ({ remove: r })),
+        describe: `Stop targeting ${places.join(", ")} in campaign "${c.campaign.name}"` +
+          (have.some((r) => r.campaignCriterion.type === "LOCATION") && !stillLoc ? " ⚠ no locations left: the campaign would show worldwide" : ""),
+        inverse: rns.length ? { type: "add_campaign_targeting", campaign_id: change.campaign_id, location_ids: change.location_ids, language_ids: change.language_ids } : undefined,
+      };
+    }
+    case "set_location_mode": {
+      const [c] = await q(`SELECT campaign.name, campaign.geo_target_type_setting.positive_geo_target_type FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
+      const before = c.campaign.geoTargetTypeSetting?.positiveGeoTargetType === "PRESENCE";
+      const label = (p: boolean) => (p ? "people in the locations only" : "people in or interested in the locations");
+      return {
+        change, service: "campaigns",
+        operations: before === change.presence_only ? [] : [{ update: { resourceName: `customers/${customerId}/campaigns/${change.campaign_id}`,
+          geoTargetTypeSetting: { positiveGeoTargetType: change.presence_only ? "PRESENCE" : "PRESENCE_OR_INTEREST" } },
+          updateMask: "geo_target_type_setting.positive_geo_target_type" }],
+        describe: `Campaign "${c.campaign.name}" shows to ${label(change.presence_only)} (was: ${label(before)})`,
+        inverse: { type: "set_location_mode", campaign_id: change.campaign_id, presence_only: before },
+      };
+    }
+    case "set_bidding_strategy": {
+      const [c] = await q(`SELECT campaign.name, campaign.bidding_strategy_type, campaign.bidding_strategy, campaign.target_spend.cpc_bid_ceiling_micros,
+          campaign.maximize_conversions.target_cpa_micros, campaign.manual_cpc.enhanced_cpc_enabled, campaign.advertising_channel_type
+        FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
+      if (c.campaign.biddingStrategy) throw new Error(`Campaign "${c.campaign.name}" uses a shared (portfolio) bid strategy; change it in Google Ads.`);
+      if (change.max_cpc_ceiling && change.strategy !== "MAXIMIZE_CLICKS") throw new Error("max_cpc_ceiling only applies to MAXIMIZE_CLICKS.");
+      if (change.target_cpa && change.strategy !== "MAXIMIZE_CONVERSIONS") throw new Error("target_cpa only applies to MAXIMIZE_CONVERSIONS.");
+      const t = c.campaign.biddingStrategyType as string;
+      const prev = biddingOf(t, c.campaign);
+      if (!prev) throw new Error(`Campaign "${c.campaign.name}" uses ${t}, which Camberstack can't restore on undo; change it in Google Ads.`);
+      const next = biddingOf(change.strategy === "MAXIMIZE_CLICKS" ? "TARGET_SPEND" : change.strategy, {
+        targetSpend: { cpcBidCeilingMicros: change.max_cpc_ceiling ? toMicros(change.max_cpc_ceiling) : undefined },
+        maximizeConversions: { targetCpaMicros: change.target_cpa ? toMicros(change.target_cpa) : undefined },
+      })!;
+      return {
+        change, service: "campaigns",
+        operations: next.label === prev.label ? [] : [{ update: { resourceName: `customers/${customerId}/campaigns/${change.campaign_id}`, ...next.bidding }, updateMask: next.mask }],
+        describe: `Switch bid strategy of campaign "${c.campaign.name}" from ${prev.label} to ${next.label} ⚠ Google re-learns after a switch; expect a week or two of uneven results`,
+        inverse: { type: "restore_bidding", campaign_id: change.campaign_id, bidding: prev.bidding, mask: prev.mask, label: prev.label },
+      };
+    }
+    case "restore_bidding": {
+      const [c] = await q(`SELECT campaign.name FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      return {
+        change, service: "campaigns",
+        operations: [{ update: { resourceName: `customers/${customerId}/campaigns/${change.campaign_id}`, ...change.bidding }, updateMask: change.mask }],
+        describe: `Switch bid strategy of campaign ${c ? `"${c.campaign.name}"` : change.campaign_id} back to ${change.label}`,
+      };
+    }
+    case "set_url_suffix": {
+      const [c] = await q(`SELECT campaign.name, campaign.final_url_suffix FROM campaign WHERE campaign.id = ${change.campaign_id}`);
+      if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
+      const before = c.campaign.finalUrlSuffix || "none";
+      const next = change.suffix.replace(/^\?/, "") || "none";
+      return {
+        change, service: "campaigns",
+        operations: before === next ? [] : [{ update: { resourceName: `customers/${customerId}/campaigns/${change.campaign_id}`,
+          ...(next === "none" ? {} : { finalUrlSuffix: next }) }, updateMask: "final_url_suffix" }],
+        describe: `Set the URL suffix of campaign "${c.campaign.name}" from ${before === "none" ? "none" : `"${before}"`} to ${next === "none" ? "none" : `"${next}"`}`,
+        inverse: { type: "set_url_suffix", campaign_id: change.campaign_id, suffix: before },
+      };
+    }
+    case "create_conversion_action": {
+      const dup = await q(`SELECT conversion_action.id FROM conversion_action WHERE conversion_action.name = '${gaqlStr(change.name)}' AND conversion_action.status != 'REMOVED'`);
+      if (dup.length) throw new Error(`A conversion action named "${change.name}" already exists (id ${dup[0].conversionAction.id}).`);
+      return {
+        change, service: "conversionActions",
+        operations: [{ create: {
+          name: change.name, category: change.category, type: change.source, status: "ENABLED", countingType: change.counting, primaryForGoal: change.primary,
+          valueSettings: change.default_value != null ? { defaultValue: change.default_value, alwaysUseDefaultValue: false } : { defaultValue: 0, alwaysUseDefaultValue: false },
+        } }],
+        describe: `Create conversion action "${change.name}" (${change.category}, ${change.source === "UPLOAD_CLICKS" ? "uploaded click ids" : "website tag"}, ` +
+          `${change.counting === "ONE_PER_CLICK" ? "one per click" : "every conversion"}, ${change.primary ? "primary" : "secondary"})` +
+          (change.primary ? " ⚠ a primary action counts toward every campaign that uses account-default goals; scope campaigns with set_conversion_goal" : ""),
+      };
+    }
+    case "set_conversion_counting": {
+      const [a] = await q(`SELECT conversion_action.name, conversion_action.counting_type FROM conversion_action WHERE conversion_action.id = ${change.conversion_action_id}`);
+      if (!a) throw new Error(`Conversion action ${change.conversion_action_id} not found`);
+      const before = a.conversionAction.countingType as "ONE_PER_CLICK" | "MANY_PER_CLICK";
+      return {
+        change, service: "conversionActions",
+        operations: before === change.counting ? [] : [{ update: { resourceName: `customers/${customerId}/conversionActions/${change.conversion_action_id}`, countingType: change.counting }, updateMask: "counting_type" }],
+        describe: `Set conversion action "${a.conversionAction.name}" to count ${change.counting === "ONE_PER_CLICK" ? "one conversion per click" : "every conversion"} (was ${before})`,
+        inverse: { type: "set_conversion_counting", conversion_action_id: change.conversion_action_id, counting: before },
+      };
+    }
+    case "remove_campaign_criteria":
+      return { change, service: "campaignCriteria", operations: change.resource_names.map((r) => ({ remove: r })), describe: `Remove ${change.what}` };
+    case "remove_conversion_action":
+      return { change, service: "conversionActions", operations: [{ remove: change.resource_name }], describe: `Remove conversion action "${change.name}" that Camberstack created` };
     case "remove_negative_keywords": {
       const [c] = await q(`SELECT campaign.name FROM campaign WHERE campaign.id = ${change.campaign_id}`);
       const name = c ? `"${c.campaign.name}"` : change.campaign_id;
@@ -440,6 +636,35 @@ export async function resolveChange(
         describe: `Remove ${change.resource_names.length} negative keyword(s) previously added to campaign ${name}`,
       };
     }
+  }
+}
+
+/** ⚠ when a bid more than doubles. */
+function bidWarn(before: number, after: number | null): string {
+  return before > 0 && after != null && after > before * 2 ? ` ⚠ ${(after / before).toFixed(1)}× the current bid` : "";
+}
+
+/**
+ * A campaign's own (non-portfolio) bid strategy as the update that sets it, so undo can put it back.
+ * null for strategies Camberstack doesn't restore (target ROAS, target impression share, …).
+ */
+function biddingOf(type: string, c: any): { bidding: Record<string, unknown>; mask: string; label: string } | null {
+  const money = (m: unknown) => (m ? micros(m).toFixed(2) : null);
+  switch (type) {
+    case "MANUAL_CPC":
+      return { bidding: { manualCpc: { enhancedCpcEnabled: false } }, mask: "manual_cpc.enhanced_cpc_enabled", label: "manual CPC" };
+    case "TARGET_SPEND": {
+      const ceil = c.targetSpend?.cpcBidCeilingMicros;
+      return { bidding: { targetSpend: ceil ? { cpcBidCeilingMicros: String(ceil) } : {} }, mask: "target_spend.cpc_bid_ceiling_micros",
+        label: `maximize clicks${ceil ? ` (max ${money(ceil)}/click)` : ""}` };
+    }
+    case "MAXIMIZE_CONVERSIONS": {
+      const cpa = c.maximizeConversions?.targetCpaMicros;
+      return { bidding: { maximizeConversions: cpa && Number(cpa) ? { targetCpaMicros: String(cpa) } : {} }, mask: "maximize_conversions.target_cpa_micros",
+        label: `maximize conversions${cpa && Number(cpa) ? ` (target ${money(cpa)}/conversion)` : ""}` };
+    }
+    default:
+      return null;
   }
 }
 
@@ -542,6 +767,10 @@ export function inverseAfterApply(r: ResolvedChange, resourceNames: string[]): C
   if (c.type === "add_responsive_search_ad" && resourceNames[0]) {
     return { type: "remove_ad", resource_name: resourceNames[0], what: `the responsive search ad Camberstack added (→ ${c.ad.final_url})` };
   }
+  if (c.type === "add_campaign_targeting" && resourceNames.length) {
+    return { type: "remove_campaign_criteria", campaign_id: c.campaign_id, resource_names: resourceNames, what: `${resourceNames.length} targeting criteria Camberstack added` };
+  }
+  if (c.type === "create_conversion_action" && resourceNames[0]) return { type: "remove_conversion_action", resource_name: resourceNames[0], name: c.name };
   if (c.type === "add_sitelinks" && of("campaignAssets").length) {
     return { type: "remove_campaign_assets", resource_names: of("campaignAssets"), what: `${c.sitelinks.length} sitelink(s) Camberstack added: ${c.sitelinks.map((x) => `"${x.text}"`).join(", ")}` };
   }

@@ -197,4 +197,29 @@ export class AdsClient {
     return { results: (json.mutateOperationResponses ?? []).map((r: Record<string, { resourceName?: string }>) =>
       ({ resourceName: Object.values(r)[0]?.resourceName })) };
   }
+
+  /**
+   * Upload click conversions (partialFailure, so one stale click id doesn't sink the rest). Returns one
+   * error string per conversion, null where it was accepted.
+   */
+  async uploadClickConversions(
+    customerId: string, conversions: object[], loginCustomerId?: string | null,
+  ): Promise<(string | null)[]> {
+    const res = await this.f(`${ADS_API}/customers/${customerId}:uploadClickConversions`, {
+      method: "POST",
+      headers: await this.headers(loginCustomerId),
+      body: JSON.stringify({ conversions, partialFailure: true }),
+    });
+    const body = await AdsClient.body(res);
+    const json = body ? JSON.parse(body) : {};
+    const errors = conversions.map((): string | null => null);
+    for (const d of json.partialFailureError?.details ?? []) {
+      for (const e of d.errors ?? []) {
+        const i = e.location?.fieldPathElements?.find((x: { fieldName?: string }) => x.fieldName === "conversions")?.index ?? 0;
+        errors[i] = String(e.message ?? "rejected").slice(0, 300);
+      }
+    }
+    if (json.partialFailureError && !errors.some(Boolean)) errors.fill(String(json.partialFailureError.message ?? "rejected").slice(0, 300));
+    return errors;
+  }
 }

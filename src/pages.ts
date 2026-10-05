@@ -167,9 +167,15 @@ changes, each one only after you approve it.</p>
 <tr><td>Build a Search campaign: budget, bidding, locations, languages, ad groups, keywords, responsive search ads, negatives, sitelinks. Created paused</td><td>Removes the campaign it built</td></tr>
 <tr><td>Add an ad group, keywords, a responsive search ad or sitelinks to an existing campaign</td><td>Removes exactly what it added</td></tr>
 <tr><td>Make a campaign count and bid on one conversion category only (e.g. sign-ups)</td><td>Restores the previous goals</td></tr>
+<tr><td>Change a keyword's or ad group's max CPC</td><td>Restores the previous bid</td></tr>
+<tr><td>Pause or re-enable an ad (add the new ad and pause the old one to replace it)</td><td>Restores the previous status</td></tr>
+<tr><td>Add or remove a campaign's locations and languages; in-location-only or also interested</td><td>Restores the previous targeting</td></tr>
+<tr><td>Switch bid strategy: manual CPC, maximize clicks, maximize conversions</td><td>Restores the previous strategy</td></tr>
+<tr><td>Set a campaign's tracking URL suffix</td><td>Restores the previous suffix</td></tr>
+<tr><td>Create a conversion action, or set how many conversions a click can count</td><td>Removes it / restores the previous setting</td></tr>
 </table>
-<p class="muted">A new campaign is always created paused, so building it and letting it spend are two separate approvals. Turning a campaign on, or more than doubling a budget, is flagged with a warning in the proposal before you approve it.
-It cannot delete anything you built, change bid strategies on existing campaigns, touch billing, or edit anything outside Google Ads.
+<p class="muted">A new campaign is always created paused, so building it and letting it spend are two separate approvals. Turning a campaign on, more than doubling a budget or bid, switching bid strategy, or removing a campaign's last location is flagged with a warning in the proposal before you approve it.
+It cannot delete anything you built, touch billing, or edit anything outside Google Ads.
 Any question beyond these tools is answered with read-only queries. <a href="/tools">Every tool and what it can do</a>;
 the code is <a href="${SOURCE_URL}">open source</a>.</p>
 

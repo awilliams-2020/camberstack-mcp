@@ -105,6 +105,35 @@ CREATE TABLE IF NOT EXISTS ad_conversions (
   attempts     INTEGER NOT NULL DEFAULT 0
 );
 
+-- Conversion relay (relay.ts): an app posts ad-click conversions with a key; Camberstack uploads them to
+-- Google Ads with the key owner's own Google connection, so the app needs no Google token of its own.
+CREATE TABLE IF NOT EXISTS relay_keys (
+  id                 TEXT PRIMARY KEY,
+  key_hash           TEXT NOT NULL UNIQUE,
+  user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  customer_id        TEXT NOT NULL,
+  login_customer_id  TEXT,
+  label              TEXT NOT NULL,
+  action_ids         TEXT NOT NULL,          -- comma-separated conversion action ids this key may report
+  created_at         INTEGER NOT NULL,
+  last_used_at       INTEGER,
+  revoked_at         INTEGER
+);
+CREATE TABLE IF NOT EXISTS relay_conversions (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  key_id         TEXT NOT NULL REFERENCES relay_keys(id) ON DELETE CASCADE,
+  action_id      TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('gclid','gbraid','wbraid')),
+  click_id       TEXT NOT NULL,
+  at             INTEGER NOT NULL,
+  value          REAL,
+  currency       TEXT,
+  uploaded_at    INTEGER,
+  error          TEXT,
+  attempts       INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (key_id, action_id, click_id)
+);
+
 -- Lifecycle emails (lifecycle.ts): one row per user per kind, so each is sent at most once.
 CREATE TABLE IF NOT EXISTS email_log (
   user_id  TEXT NOT NULL,
