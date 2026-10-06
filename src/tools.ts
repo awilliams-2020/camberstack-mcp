@@ -98,7 +98,12 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   tool("run_gaql", {
     title: "Run a read-only GAQL query",
-    description: "Runs any read-only Google Ads Query Language SELECT for questions the other tools don't cover. Returns up to 500 rows.",
+    description: "Runs any read-only Google Ads Query Language SELECT for questions the other tools don't cover. Returns up to 500 rows. "
+      + "Google rejects queries that break these rules: selecting or segmenting by segments.date needs a finite range in WHERE "
+      + "(segments.date DURING LAST_30_DAYS, or BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'); click_view needs a single day (segments.date = 'YYYY-MM-DD'); "
+      + "every field used in WHERE or ORDER BY must also be in SELECT; fields can only come from the FROM resource or resources it is "
+      + "compatible with (if Google says a resource is incompatible, query that resource directly instead); "
+      + "a campaign's end date is campaign.end_date_time, not campaign.end_date.",
     inputSchema: { customer_id: customerId, query: z.string().describe("A GAQL SELECT statement") },
     annotations: read,
   }, ({ customer_id, query }: { customer_id: string; query: string }) => session().runQuery(customer_id, query));
