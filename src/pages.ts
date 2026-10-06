@@ -133,11 +133,11 @@ export function homePage(baseUrl: string): string {
   return layout({
     baseUrl, path: "/",
     title: "Camberstack: hosted Google Ads MCP for Claude and ChatGPT",
-    description: "A hosted Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or Cursor with a Google sign-in: no developer token or Google Cloud project. Read your account, and make a small set of changes you approve, with undo.",
+    description: "A hosted Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or Cursor with a Google sign-in: no developer token or Google Cloud project. Read your account and Search Console, and make only the changes you approve, with undo.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Camberstack",
       applicationCategory: "BusinessApplication", operatingSystem: "Web", url: baseUrl,
-      description: "Hosted Google Ads MCP server for Claude, ChatGPT and other MCP apps: read-only queries and a small set of approved changes with undo.",
+      description: "Hosted Google Ads MCP server for Claude, ChatGPT and other MCP apps: read-only queries, optional Search Console data, and approved changes with undo.",
       offers: [
         { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD",
           description: "Every tool, with unlimited applied changes, on 1 Google Ads account." },
@@ -148,12 +148,13 @@ export function homePage(baseUrl: string): string {
     body: `
 <h1>A hosted Google Ads MCP server</h1>
 <p class="lede">Connect your Google Ads account to Claude, ChatGPT, Cursor or any MCP app with one URL and a Google sign-in.
-No developer token, no Google Cloud project, nothing to install. Your AI can read the account, and can make a short list of
-changes, each one only after you approve it.</p>
+No developer token, no Google Cloud project, nothing to install. Your AI can read the account, build and tune campaigns, and make
+changes only after you approve each one.</p>
 <ul>
 <li>Works with manager (MCC) accounts.</li>
 <li>Any question about your account is answered with read-only queries.</li>
-<li>Changes are limited to negative keywords, pausing or re-enabling, daily budgets and end dates. Each applied change can be undone.</li>
+<li>Changes range from negative keywords and budgets to bids, targeting and whole new campaigns. Each applied change can be undone.</li>
+<li>Optional, read-only Search Console: see where you already rank, and which searches you may be paying for twice.</li>
 </ul>
 <p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;Free plan, no card</span></p>
 
@@ -179,6 +180,16 @@ It cannot delete anything you built, touch billing, or edit anything outside Goo
 Any question beyond these tools is answered with read-only queries. <a href="/tools">Every tool and what it can do</a>;
 the code is <a href="${SOURCE_URL}">open source</a>.</p>
 
+<h2 id="search-console">Search Console (optional, read-only)</h2>
+<p>If you leave the Search Console box ticked when you connect, your AI can also read your website's Google Search clicks, impressions,
+queries and positions, and line them up against your ads:</p>
+<ul>
+<li><strong>Paid and already ranking:</strong> searches you pay for where your site is already in the top few organic results, with the ad spend on each.</li>
+<li><strong>Organic gaps:</strong> searches your site shows up for on page 2 or lower, with no ad covering them.</li>
+<li><strong>Site totals:</strong> clicks, impressions, CTR and position against the previous period.</li>
+</ul>
+<p class="muted">Camberstack can't change anything in Search Console. Untick it and every Google Ads tool still works; reconnect later to add it.</p>
+
 <h2 id="setup">Connect</h2>
 <p>Add this server URL to your AI app, then sign in with Google.</p>
 <div class="url"><code>${mcpUrl}</code><button class="copy" type="button" data-copy="${mcpUrl}">Copy</button></div>
@@ -193,7 +204,7 @@ ${COPY_JS}
 ${cmd(`claude mcp add --transport http camberstack ${mcpUrl}`)}
 <h3>Cursor, VS Code, others</h3>
 ${cmd(`{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }`)}
-<p class="muted">Your AI app handles sign-in. Google will show "Camberstack wants to access your Google Ads" before anything is shared.</p>
+<p class="muted">Your AI app handles sign-in. Google shows exactly what Camberstack asks for before anything is shared: your Google Ads, and (optional, read-only) Search Console.</p>
 <h3>Want to look first?</h3>
 <p>Connect, then ask <em>"Show me Camberstack's demo account"</em>. It's a sample plumbing business with six months of
 campaigns and search terms, so you can try questions, proposals, applying and undo without touching a real account.
@@ -238,18 +249,19 @@ const ASK_FIRST = `<h2>What to ask first</h2>
 <li><em>"Which search terms cost the most in the last 30 days?"</em></li>
 <li><em>"Add 'jobs' as a negative keyword to my Search campaign. Show me the change first."</em></li>
 <li><em>"What did you change this week? Undo the last change."</em></li>
+<li><em>"Which searches am I paying for that my site already ranks for organically?"</em></li>
 <li>Not ready to use your real account? <em>"Show me Camberstack's demo account."</em></li>
 </ul>`;
 
 const CAN_CHANGE = `<h2>What it can change</h2>
-<p>Negative keywords, paused or enabled campaigns, ad groups and keywords, daily budgets and end dates. You approve each change, and each
-one can be undone. <a href="/#changes">The full list</a>, and <a href="/tools">every tool</a>.</p>`;
+<p>Negative keywords, budgets and end dates, pausing and re-enabling, bids, targeting and bid strategy, conversion goals, and whole new
+campaigns (always created paused). You approve each change, and each one can be undone. <a href="/#changes">The full list</a>, and <a href="/tools">every tool</a>.</p>`;
 
 /** The questions every guide answers; `app` is the AI app's name. */
 const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer token?</h3>
 <p>No. Camberstack has its own Google Ads API access. You sign in with Google and choose what to share.</p>
 <h3>Does ${app} see my whole Google account?</h3>
-<p>No. It gets Google Ads access and your email address, nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
+<p>No. It gets Google Ads access, your email address and, if you leave it ticked, read-only Search Console. Nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
 <h3>What does it cost?</h3>
 <p>Free on one Google Ads account, with every tool and unlimited changes. <a href="/#pricing">Pro</a> covers up to 10 accounts for ${PRO_PRICE_LABEL}.</p>`;
 
@@ -377,7 +389,7 @@ ChatGPT's plugin directory yet. It isn't specific to Camberstack. What protects 
 <li>Changes are stored as a proposal and checked with Google first; applying is a separate tool call. ChatGPT asks you to
 confirm tool calls that change things unless you've turned that off.</li>
 <li>Every applied change can be undone with one more message.</li>
-<li>Changes are limited to negative keywords, pausing or re-enabling, daily budgets and end dates. Nothing can be deleted.</li>
+<li>New campaigns are created paused, and risky changes (turning a campaign on, a big budget or bid jump) carry a warning before you approve. Nothing you built can be deleted.</li>
 </ul>
 
 ${ASK_FIRST}
@@ -665,7 +677,8 @@ export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
 
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
 - Tools: ${tools.map((t) => t.name).join(", ")}
-- Writes are limited to: negative keywords, pause/enable campaign, ad group or keyword, daily budget, campaign end date. Every applied change can be undone.
+- Writes (each one proposed, approved, then applied; every applied change can be undone): negative keywords; pause/enable campaign, ad group, keyword or ad; daily budget; end date; build a Search campaign (created paused); add ad groups, keywords, ads, sitelinks; bids; bid strategy; location/language targeting; URL suffix; conversion actions and goals.
+- Search Console (optional, read-only scope): site totals, query/page performance, and paid vs organic overlap with the Ads account.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
 - Pricing: Free plan covers 1 Google Ads account (every tool, unlimited applied changes); Pro ${PRO_PRICE_LABEL} covers up to 10. Accounts are counted as those used in the last ${ACCOUNT_WINDOW_DAYS} days; manager (MCC) and demo accounts don't count. Undo is always free.
 - [Setup](${baseUrl}/#setup)
