@@ -6,9 +6,12 @@ import { randomUUID } from "node:crypto";
 import type { DB, ProposalRow, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { decrypt } from "./crypto.js";
-import { AdsClient, micros, refreshGoogleToken, revokeGoogleToken, type GoogleCreds } from "./google.js";
+import {
+  AdsClient, SearchConsoleClient, SearchConsoleNotGrantedError, micros, refreshGoogleToken, revokeGoogleToken,
+  type GoogleCreds, type SearchAnalyticsRow,
+} from "./google.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, accountsLabel } from "./plans.js";
-import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DemoAds } from "./demo.js";
+import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
 import {
   ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, pendingOf, resolveChange, summarize,
   type Change, type ResolvedChange,
@@ -40,6 +43,7 @@ export interface SessionDeps {
   billingLink?: (kind: "upgrade" | "billing", userId: string) => string | null;
   /** Tests inject a fake. */
   adsFactory?: (user: UserRow) => AdsClient;
+  scFactory?: (user: UserRow) => SearchConsole;
 }
 
 export class NotConnectedError extends Error {}
@@ -57,6 +61,20 @@ function routed(google: Ads, demo: DemoAds): Ads {
   };
 }
 
+/** The Search Console calls the tools make; the demo site answers the same ones. */
+type SearchConsole = Pick<SearchConsoleClient, "sites" | "searchAnalytics">;
+
+function routedSc(google: SearchConsole, demo: DemoSearchConsole): SearchConsole {
+  return {
+    sites: () => google.sites(),
+    searchAnalytics: (site, req) => (site === DEMO_SITE ? demo.searchAnalytics(site, req) : google.searchAnalytics(site, req)),
+  };
+}
+const DEMO_SITE_NOTE = "Sample data from Camberstack's demo website (a fictional plumbing business), not a real Search Console property.";
+const siteNote = (site: string) => (site === DEMO_SITE ? { note: DEMO_SITE_NOTE } : {});
+/** Search terms and queries compared case- and spacing-insensitively. */
+const norm = (q: string) => q.toLowerCase().trim().replace(/\s+/g, " ");
+
 const DEMO_ACCOUNT: Account = { customerId: DEMO_CID, name: DEMO_NAME, currency: "USD", manager: false, loginCustomerId: null };
 /** Customer ids arrive with or without dashes; stored and compared without. */
 const bareCid = (customerId: string) => customerId.replace(/-/g, "");
@@ -70,6 +88,7 @@ const publicResults = (outcomes: Outcome[]) => outcomes.map(({ describe, ok, err
 
 export class UserSession {
   readonly ads: Ads;
+  readonly sc: SearchConsole;
   private accountsCache?: { at: number; list: Account[] };
   /** Accounts the login can see but Google refused to read, from the last accounts() call. */
   lastUnreadable: { customerId: string; error: string }[] = [];
@@ -77,6 +96,7 @@ export class UserSession {
   constructor(private deps: SessionDeps, readonly user: UserRow) {
     const google = deps.adsFactory?.(user) ?? new AdsClient(() => this.googleAccessToken(), deps.google.developerToken);
     this.ads = routed(google, new DemoAds(deps.db, user.id));
+    this.sc = routedSc(deps.scFactory?.(user) ?? new SearchConsoleClient(() => this.googleAccessToken()), new DemoSearchConsole());
   }
 
   static load(deps: SessionDeps, userId: string): UserSession {
@@ -333,6 +353,111 @@ export class UserSession {
     return m;
   }
 
+  // ---------------------------------------------------------------- Search Console (read-only)
+
+  /** Search Console properties this login can read; the demo site only when there are none. */
+  async searchConsoleSites() {
+    let sites: { siteUrl: string; permissionLevel: string }[];
+    try {
+      sites = (await this.sc.sites()).filter((x) => x.permissionLevel !== "siteUnverifiedUser");
+    } catch (e) {
+      if (!(e instanceof SearchConsoleNotGrantedError)) throw e;
+      return { sites: [{ site_url: DEMO_SITE, permission: "demo" }], not_granted: e.message,
+        note: "Only the demo site is available until the user grants Search Console access. Say so plainly." };
+    }
+    if (sites.length) return { sites: sites.map((x) => ({ site_url: x.siteUrl, permission: x.permissionLevel })) };
+    return { sites: [{ site_url: DEMO_SITE, permission: "demo" }],
+      note: "This Google login has no verified Search Console property, so the demo site (sample data) is offered. Tell the user it is a demo." };
+  }
+
+  /**
+   * Site-wide totals for the window and for the same number of days before it. With no dimension Google returns the
+   * site's true totals, including the rare queries it leaves out of per-query rows.
+   */
+  async searchConsoleSummary(site: string, days: number) {
+    const cur = searchConsoleWindow(days);
+    const prev = searchConsoleWindow(days, days);
+    const totals = async (w: { start: string; end: string }) => {
+      const [r] = await this.sc.searchAnalytics(site, { startDate: w.start, endDate: w.end, dimensions: [], rowLimit: 1 });
+      return r ? organicMetrics(r) : { clicks: 0, impressions: 0, ctr_pct: 0, position: null };
+    };
+    const [now_, before] = await Promise.all([totals(cur), totals(prev)]);
+    const pct = (a: number, b: number) => (b > 0 ? round(((a - b) / b) * 100) : null);
+    return {
+      site, ...siteNote(site),
+      current: { window: cur, ...now_ }, previous: { window: prev, ...before },
+      change: {
+        clicks_pct: pct(now_.clicks, before.clicks), impressions_pct: pct(now_.impressions, before.impressions),
+        ctr_points: round(now_.ctr_pct - before.ctr_pct),
+        position: now_.position != null && before.position != null ? Math.round((now_.position - before.position) * 10) / 10 : null,
+      },
+      note: "A lower position is better: a negative position change means the site moved up.",
+    };
+  }
+
+  /** Search performance (clicks, impressions, CTR, position) grouped by the given dimensions, most clicks first. */
+  async searchConsolePerformance(site: string, o: { days: number; dimensions: string[]; query_contains?: string; page_contains?: string; limit: number }) {
+    const w = searchConsoleWindow(o.days);
+    const filters = [
+      ...(o.query_contains ? [{ dimension: "query", operator: "contains", expression: o.query_contains }] : []),
+      ...(o.page_contains ? [{ dimension: "page", operator: "contains", expression: o.page_contains }] : []),
+    ];
+    const rows = await this.sc.searchAnalytics(site, { startDate: w.start, endDate: w.end, dimensions: o.dimensions, rowLimit: o.limit,
+      ...(filters.length ? { dimensionFilterGroups: [{ filters }] } : {}) });
+    return {
+      site, ...siteNote(site), window: w,
+      rows: rows.map((r) => ({ ...Object.fromEntries(o.dimensions.map((d, i) => [d, r.keys[i]])), ...organicMetrics(r) })),
+      note: "Search Console leaves out rare queries for privacy, so query rows don't add up to the site's total clicks.",
+    };
+  }
+
+  /**
+   * Ads search terms joined with the same site's organic queries over the same days: searches the account pays for
+   * where the site already ranks near the top, and searches the site ranks on page 2+ for with no ads at all.
+   */
+  async paidOrganicOverlap(customerId: string, site: string, o: { days: number; max_position: number; min_impressions: number; limit: number }) {
+    const a = await this.account(customerId);
+    const w = searchConsoleWindow(o.days);
+    const [terms, organic, have] = await Promise.all([
+      this.ads.search(a.customerId, `SELECT search_term_view.search_term, campaign.id, campaign.name,
+          metrics.cost_micros, metrics.clicks, metrics.conversions
+        FROM search_term_view WHERE segments.date BETWEEN '${w.start}' AND '${w.end}'`, a.loginCustomerId),
+      this.sc.searchAnalytics(site, { startDate: w.start, endDate: w.end, dimensions: ["query"], rowLimit: 25000 }),
+      this.keywordsInAccount(a),
+    ]);
+    const paid = new Map(aggregate(terms, (r) => norm(String(r.searchTermView?.searchTerm ?? "")),
+      (r) => ({ term: norm(String(r.searchTermView?.searchTerm ?? "")), cost: 0, clicks: 0, conversions: 0, campaigns: new Set<string>() }),
+      (e, r) => { if (r.campaign?.name) e.campaigns.add(String(r.campaign.name)); })
+      .filter((e) => e.term && e.cost > 0).map((e) => [e.term, e]));
+
+    const paidAndRanking = organic.flatMap((r) => {
+      const p = paid.get(norm(r.keys[0] ?? ""));
+      return p && r.position <= o.max_position ? [{
+        query: r.keys[0], organic_position: Math.round(r.position * 10) / 10, organic_clicks: r.clicks, organic_impressions: r.impressions,
+        ad_cost: round(p.cost), ad_clicks: p.clicks, ad_conversions: round(p.conversions), campaigns: [...p.campaigns],
+      }] : [];
+    }).sort((x, y) => y.ad_cost - x.ad_cost);
+
+    const organicGaps = organic.flatMap((r) => {
+      const q = norm(r.keys[0] ?? "");
+      return r.position > 10 && r.impressions >= o.min_impressions && !paid.has(q) && !have.has(q)
+        ? [{ query: r.keys[0], ...organicMetrics(r) }] : [];
+    }).sort((x, y) => y.impressions - x.impressions);
+
+    return {
+      account: { customer_id: a.customerId, name: a.name, currency: a.currency },
+      site, ...demoNote(a.customerId), ...siteNote(site), window: w,
+      paid_and_ranking: paidAndRanking.slice(0, o.limit),
+      paid_and_ranking_total: { queries: paidAndRanking.length, ad_cost: round(paidAndRanking.reduce((s, x) => s + x.ad_cost, 0)) },
+      organic_gaps: organicGaps.slice(0, o.limit), organic_gaps_total: organicGaps.length,
+      how_to_use: `paid_and_ranking: searches the account pays for where the site already averages position ${o.max_position} or better organically. `
+        + "Ads sit above organic results and brand terms defend against competitors, so don't cut them all: suggest testing one at a time "
+        + "(set_keyword_bid lower, or add_negative_keywords) and comparing total clicks before and after. "
+        + "organic_gaps: searches the site shows up for on page 2 or lower with no ad and no keyword in the account; check them with "
+        + "keyword_metrics, then add_keywords or add_ad_group through propose_changes. Search Console leaves out rare queries, so both lists are partial.",
+    };
+  }
+
   // ---------------------------------------------------------------- write
 
   async propose(customerId: string, rawChanges: unknown[], undoOf?: string): Promise<{ proposal_id: string; summary: string; changes: number; skipped: string[] }> {
@@ -467,6 +592,21 @@ function monthly(volumes: { year?: number | string; month?: string; monthlySearc
   return Object.fromEntries((volumes ?? []).slice(-12).map((v) =>
     [`${v.year}-${String(MONTHS.indexOf(v.month ?? "") + 1).padStart(2, "0")}`, Number(v.monthlySearches ?? 0)]));
 }
+
+/**
+ * Search Console's window: its last ~2 days are still incomplete, so it ends 3 days ago. The overlap tool reads the
+ * Ads side over the same dates, so the two sides compare like for like.
+ */
+export function searchConsoleWindow(days: number, before = 0): { start: string; end: string } {
+  const d = Math.max(1, Math.min(480, Math.floor(days)));
+  const end = new Date(Date.now() - (3 + before) * 86_400_000);
+  const start = new Date(end.getTime() - (d - 1) * 86_400_000);
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+
+const organicMetrics = (r: SearchAnalyticsRow) => ({
+  clicks: r.clicks, impressions: r.impressions, ctr_pct: round(r.ctr * 100), position: Math.round(r.position * 10) / 10,
+});
 
 export function dateRange(days: number): string {
   const d = Math.max(1, Math.min(365, Math.floor(days)));

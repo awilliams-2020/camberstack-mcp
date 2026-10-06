@@ -5,17 +5,18 @@ import { PublicChangeSchema } from "./changes.js";
 import { isDemo, type UserSession } from "./session.js";
 
 export const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.6.0";
+export const SERVER_VERSION = "0.7.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
 The Free plan covers 1 Google Ads account (Pro covers 10), counted as accounts used in the last 30 days; undo and change history always work. If a tool reports the plan limit, explain it and show the upgrade link it returns, word for word.
 To grow an account, keyword_ideas finds what people search for around a seed or a landing page; keyword_metrics checks volume and bids for a given list. Pass the account's own market: location_ids default to the United States.
+Search Console (read-only): search_console_sites lists the user's websites; search_console_summary gives site totals against the previous period; search_console_performance shows their organic queries and pages; paid_organic_overlap joins one site with one Ads account to find searches paid for that already rank organically, and organic searches with no ads.
 Account 000-000-0001 is a demo with sample data: anyone can try every tool on it, and changes there never touch Google. Always say when you are using it.`;
 
 /** Tools that read or propose on one Google Ads account, so count toward the plan's accounts (session.ts checkAccount). */
-const GATED = new Set(["account_overview", "run_gaql", "keyword_ideas", "keyword_metrics", "propose_changes"]);
+const GATED = new Set(["account_overview", "run_gaql", "keyword_ideas", "keyword_metrics", "propose_changes", "paid_organic_overlap"]);
 
 const customerId = z.string().describe("Google Ads customer ID, with or without dashes (from list_accounts)");
 const locationIds = z.array(z.string().regex(/^\d+$/)).min(1).max(10).default(["2840"])
@@ -24,6 +25,7 @@ const locationIds = z.array(z.string().regex(/^\d+$/)).min(1).max(10).default(["
     + "FROM geo_target_constant WHERE geo_target_constant.name = 'Denver'");
 const languageId = z.string().regex(/^\d+$/).default("1000")
   .describe("Google language ID. 1000 English, 1003 Spanish, 1002 French, 1001 German, 1014 Portuguese");
+const siteUrl = z.string().min(1).describe("Search Console property exactly as search_console_sites lists it, e.g. sc-domain:example.com or https://www.example.com/");
 const days = z.number().int().min(1).max(365).default(30).describe("Look-back window in days, ending yesterday");
 
 function ok(data: unknown) {
@@ -134,6 +136,52 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     annotations: read,
   }, ({ customer_id, ...o }: { customer_id: string; keywords: string[]; location_ids: string[]; language_id: string }) =>
     session().keywordMetrics(customer_id, o));
+
+  tool("search_console_sites", {
+    title: "List Search Console sites",
+    description: "Lists the websites (Search Console properties) this Google login can read. Use a site_url from here in the other Search Console tools.",
+    annotations: read,
+  }, () => session().searchConsoleSites());
+
+  tool("search_console_summary", {
+    title: "Search Console summary",
+    description: "A website's total organic Google Search clicks, impressions, CTR and average position over a window, next to the same "
+      + "number of days before it, with the change. Site-wide totals, more complete than adding up per-query rows. Changes nothing.",
+    inputSchema: { site_url: siteUrl, days: z.number().int().min(1).max(240).default(28).describe("Window in days, ending 3 days ago; compared with the window before it") },
+    annotations: read,
+  }, ({ site_url, days }: { site_url: string; days: number }) => session().searchConsoleSummary(site_url, days));
+
+  tool("search_console_performance", {
+    title: "Search Console performance",
+    description: "Organic Google Search clicks, impressions, CTR and average position for a website, grouped by query, page, country, device or date, most clicks first. "
+      + "Search Console's last 2-3 days are incomplete, so the window ends 3 days ago. Changes nothing.",
+    inputSchema: {
+      site_url: siteUrl,
+      days: z.number().int().min(1).max(480).default(28).describe("Look-back window in days, ending 3 days ago"),
+      dimensions: z.array(z.enum(["query", "page", "country", "device", "date"])).min(1).max(3).default(["query"]).describe("What to group by"),
+      query_contains: z.string().min(1).max(200).optional().describe("Only queries containing this text"),
+      page_contains: z.string().min(1).max(500).optional().describe("Only pages whose URL contains this text"),
+      limit: z.number().int().min(1).max(1000).default(50).describe("Most rows to return"),
+    },
+    annotations: read,
+  }, ({ site_url, ...o }: { site_url: string; days: number; dimensions: string[]; query_contains?: string; page_contains?: string; limit: number }) =>
+    session().searchConsolePerformance(site_url, o));
+
+  tool("paid_organic_overlap", {
+    title: "Paid vs organic overlap",
+    description: "Joins a Google Ads account's search terms with a website's Search Console queries over the same days. Returns paid_and_ranking "
+      + "(searches you pay for where the site already ranks near the top organically, with ad spend) and organic_gaps (searches the site "
+      + "shows up for on page 2 or lower with no ad or keyword). Changes nothing; follow up with propose_changes.",
+    inputSchema: {
+      customer_id: customerId, site_url: siteUrl,
+      days: z.number().int().min(7).max(480).default(90).describe("Look-back window in days, ending 3 days ago"),
+      max_position: z.number().min(1).max(10).default(3).describe("paid_and_ranking: average organic position at or better than this"),
+      min_impressions: z.number().int().min(0).default(100).describe("organic_gaps: only queries with at least this many impressions"),
+      limit: z.number().int().min(1).max(200).default(25).describe("Most rows in each list"),
+    },
+    annotations: read,
+  }, ({ customer_id, site_url, ...o }: { customer_id: string; site_url: string; days: number; max_position: number; min_impressions: number; limit: number }) =>
+    session().paidOrganicOverlap(customer_id, site_url, o));
 
   tool("propose_changes", {
     title: "Propose changes (writes nothing)",

@@ -1,13 +1,14 @@
 /**
  * Google OAuth (the user's consent to Google Ads access) and a thin Google Ads REST client.
  *
- * Only two scopes are requested: `adwords` (the Ads API) and `openid email` (to know who the user
- * is, so a reconnect finds the same account and change log). Nothing else from the Google account
- * is touched.
+ * Scopes requested: `adwords` (the Ads API, required), `webmasters.readonly` (Search Console, read-only and
+ * optional: the user can untick it and the Ads tools still work) and `openid email` (to know who the user
+ * is, so a reconnect finds the same account and change log). Nothing else from the Google account is touched.
  */
 
 export const ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
-export const GOOGLE_SCOPES = ["openid", "email", ADS_SCOPE];
+export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+export const GOOGLE_SCOPES = ["openid", "email", ADS_SCOPE, SEARCH_CONSOLE_SCOPE];
 export const ADS_API = "https://googleads.googleapis.com/v23";
 
 /** The Ads API counts money in millionths of the account currency. */
@@ -221,5 +222,54 @@ export class AdsClient {
     }
     if (json.partialFailureError && !errors.some(Boolean)) errors.fill(String(json.partialFailureError.message ?? "rejected").slice(0, 300));
     return errors;
+  }
+}
+
+const SEARCH_CONSOLE_API = "https://www.googleapis.com/webmasters/v3";
+
+/** Raised when the user's Google connection doesn't include Search Console (unticked, or connected before it existed). */
+export class SearchConsoleNotGrantedError extends Error {
+  constructor() {
+    super("Search Console access isn't part of this Google connection: it was unticked on Google's consent screen, or Camberstack "
+      + "was connected before Search Console tools existed. To add it, the user reconnects Camberstack in their AI app and leaves "
+      + "the Search Console box ticked. The Google Ads tools keep working either way.");
+  }
+}
+
+export interface SearchAnalyticsRow { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }
+export interface SearchAnalyticsRequest {
+  startDate: string;
+  endDate: string;
+  dimensions: string[];
+  rowLimit: number;
+  dimensionFilterGroups?: { filters: { dimension: string; operator: string; expression: string }[] }[];
+}
+
+/** One user's view of the Search Console API (read-only). */
+export class SearchConsoleClient {
+  constructor(private accessToken: () => Promise<string>, private f: FetchLike = fetch) {}
+
+  private async get(path: string, init: RequestInit = {}): Promise<any> {
+    const res = await this.f(`${SEARCH_CONSOLE_API}${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${await this.accessToken()}`, "Content-Type": "application/json" },
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      if (res.status === 403 && /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(body)) throw new SearchConsoleNotGrantedError();
+      let msg = body.slice(0, 300);
+      try { msg = JSON.parse(body).error?.message ?? msg; } catch { /* not JSON */ }
+      throw new Error(`Search Console API ${res.status}: ${msg}`);
+    }
+    return body ? JSON.parse(body) : {};
+  }
+
+  async sites(): Promise<{ siteUrl: string; permissionLevel: string }[]> {
+    return (await this.get("/sites")).siteEntry ?? [];
+  }
+
+  async searchAnalytics(siteUrl: string, req: SearchAnalyticsRequest): Promise<SearchAnalyticsRow[]> {
+    return (await this.get(`/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+      { method: "POST", body: JSON.stringify({ type: "web", ...req }) })).rows ?? [];
   }
 }

@@ -493,6 +493,7 @@ change your Google Ads account. This policy explains what we access, why, and wh
 <ul>
 <li><strong>Your Google account email and a stable Google account ID</strong> (the <code>openid</code> and <code>email</code> scopes), so the same person gets the same account and change history each time.</li>
 <li><strong>Your Google Ads data</strong> (the <code>https://www.googleapis.com/auth/adwords</code> scope): account and campaign structure, performance metrics, search terms, keywords and conversion settings, read when your AI assistant calls a Camberstack tool.</li>
+<li><strong>Your Search Console data, read-only and optional</strong> (the <code>https://www.googleapis.com/auth/webmasters.readonly</code> scope): the websites you have verified and their Google Search clicks, impressions, queries and positions, read when your AI assistant calls a Search Console tool, for example to compare what you pay for with where you already rank. You can untick it on Google's consent screen; the Google Ads tools work without it. Camberstack cannot change anything in Search Console.</li>
 </ul>
 <p>We request nothing else from your Google account: no Gmail, Drive, contacts or calendar.</p>
 

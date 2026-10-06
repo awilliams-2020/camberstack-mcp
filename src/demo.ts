@@ -343,3 +343,49 @@ function parse(query: string) {
   }
   return { from, where: conds, orderBy: orderBy ? { path: orderBy[1]!.split(".").map(camel), desc: orderBy[2]?.toUpperCase() === "DESC" } : undefined, limit, days };
 }
+
+// ---------------------------------------------------------------- Search Console: the demo's website
+
+export const DEMO_SITE = "sc-domain:northwind-plumbing.example";
+const SITE_HOME = "https://northwind-plumbing.example";
+// [query, page path, clicks, impressions, average position] over 180 days. Some overlap the demo's paid
+// search terms (ranking well and paid for anyway), some are pages ranking on page 2 with no ads at all.
+const ORGANIC: [string, string, number, number, number][] = [
+  ["northwind plumbing", "/", 1840, 2310, 1.1], ["northwind plumbing reviews", "/reviews", 212, 640, 1.6],
+  ["emergency plumber near me", "/emergency", 410, 9800, 2.4], ["emergency plumber", "/emergency", 236, 7200, 3.1],
+  ["water heater repair", "/water-heaters/repair", 198, 5400, 2.8], ["burst pipe repair", "/emergency/burst-pipes", 74, 1500, 4.2],
+  ["drain cleaning", "/drains", 61, 6900, 7.4], ["plumber near me", "/", 120, 21400, 9.6],
+  ["tankless water heater", "/water-heaters/tankless", 22, 8800, 14.2],
+  ["water heater replacement", "/water-heaters/replacement", 31, 5200, 11.8], ["slab leak repair", "/leaks/slab", 12, 4200, 18.3],
+  ["hydro jetting", "/drains/hydro-jetting", 18, 3100, 12.5], ["sewer camera inspection", "/sewer/camera", 6, 1900, 22.0],
+  ["leak detection near me", "/leaks", 27, 2600, 10.9], ["how to shut off water main", "/blog/shut-off-water-main", 520, 6100, 2.9],
+  ["why is my water heater making noise", "/blog/noisy-water-heater", 340, 7900, 4.4],
+];
+
+/** The demo website's Search Console, answering the calls the tools make. */
+export class DemoSearchConsole {
+  async sites() { return [{ siteUrl: DEMO_SITE, permissionLevel: "siteOwner" }]; }
+
+  async searchAnalytics(_site: string, req: { startDate: string; endDate: string; dimensions: string[]; rowLimit: number;
+    dimensionFilterGroups?: { filters: { dimension: string; operator: string; expression: string }[] }[] }) {
+    const days = Math.round((Date.parse(req.endDate) - Date.parse(req.startDate)) / 86_400_000) + 1;
+    const f = Math.min(days, HISTORY_DAYS) / HISTORY_DAYS;
+    const filters = req.dimensionFilterGroups?.flatMap((g) => g.filters) ?? [];
+    const value = (r: (typeof ORGANIC)[number], dim: string) =>
+      dim === "query" ? r[0] : dim === "page" ? SITE_HOME + r[1] : dim === "country" ? "usa" : dim === "device" ? "MOBILE" : req.endDate;
+    const groups = new Map<string, { keys: string[]; clicks: number; impressions: number; posSum: number }>();
+    for (const r of ORGANIC) {
+      if (!filters.every((x) => {
+        const v = value(r, x.dimension).toLowerCase(), e = x.expression.toLowerCase();
+        return x.operator === "contains" ? v.includes(e) : x.operator === "notContains" ? !v.includes(e) : v === e;
+      })) continue;
+      const keys = req.dimensions.map((d) => value(r, d));
+      const g = groups.get(keys.join("\u0000")) ?? { keys, clicks: 0, impressions: 0, posSum: 0 };
+      g.clicks += Math.round(r[2] * f); g.impressions += Math.round(r[3] * f); g.posSum += r[4] * Math.round(r[3] * f);
+      groups.set(keys.join("\u0000"), g);
+    }
+    return [...groups.values()].filter((g) => g.impressions > 0)
+      .map((g) => ({ keys: g.keys, clicks: g.clicks, impressions: g.impressions, ctr: g.clicks / g.impressions, position: g.posSum / g.impressions }))
+      .sort((a, b) => b.clicks - a.clicks).slice(0, req.rowLimit);
+  }
+}

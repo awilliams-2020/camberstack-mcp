@@ -1,7 +1,7 @@
 # Camberstack: a Google Ads MCP server
 
-Connect Google Ads to Claude, ChatGPT, Cursor or any MCP client. Your AI reads the account with
-read-only tools and can propose a small set of changes. **Nothing
+Connect Google Ads (and, optionally, Search Console) to Claude, ChatGPT, Cursor or any MCP client. Your AI
+reads the account with read-only tools and can propose changes, from negative keywords to whole campaigns. **Nothing
 changes in the account until you approve a specific proposal, and every applied change can be
 undone.**
 
@@ -16,21 +16,35 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, 
 | `keyword_ideas` | no | Keyword Planner ideas from seed keywords and/or a URL: monthly searches, competition, top-of-page bid range; marks ideas the account already targets or blocks |
 | `keyword_metrics` | no | Keyword Planner numbers for an exact list, with the last 12 months of searches |
 | `run_gaql` | no | any read-only GAQL `SELECT` |
+| `search_console_sites` | no | the websites (Search Console properties) the login can read |
+| `search_console_summary` | no | site-wide clicks, impressions, CTR and position for a window vs. the window before it |
+| `search_console_performance` | no | organic clicks, impressions, CTR and position by query, page, country, device or date |
+| `paid_organic_overlap` | no | joins an Ads account's search terms with a site's organic queries: searches paid for that already rank near the top, and page-2+ searches with no ad |
 | `propose_changes` | no | resolves changes against the live account, dry-runs them with Google (`validateOnly`), stores a proposal with a plain-English summary |
 | `apply_changes` | **yes** | applies a stored proposal (the user's own, un-applied, under 24h old); records each change's inverse |
 | `undo_changes` | no | builds the reversing proposal for an applied one |
 | `billing` | no | plan, Google Ads accounts in use (last 30 days) vs. the plan's limit, and a personal upgrade or manage-billing link |
 | `discard_proposal`, `change_history`, `disconnect` | | |
 
-Writes are limited to: add negative keywords, pause/enable a campaign, ad group or keyword, set a
-campaign's daily budget (never a shared budget) or its end date. Enabling a campaign and more-than-doubling a budget
-carry a ⚠ line in the proposal summary. No campaign creation, bid strategy changes or deletions of
-anything the user built.
+What a proposal can do:
+
+- **Control:** add negative keywords; pause or enable a campaign, ad group, keyword or ad; set a campaign's
+  daily budget (never a shared budget) or its end date.
+- **Build:** create a whole Search campaign (ad groups, keywords, responsive search ads, targeting, negatives,
+  sitelinks), always created **paused**; add an ad group, keywords, an ad or sitelinks to an existing campaign.
+- **Tune:** keyword and ad group bids, bid strategy, location and language targeting, presence-only location
+  mode, final URL suffix.
+- **Measure:** create a conversion action, set its counting, scope a campaign to one conversion goal.
+
+Risky changes carry a ⚠ line in the proposal summary: enabling a campaign, more than doubling a budget or a
+bid, switching bid strategy, removing the last location, a new primary conversion action. Undo removes only
+what Camberstack itself created; nothing the user built is ever deleted. Search Console is read-only.
 
 ## How auth works
 
 Camberstack is an OAuth 2.1 authorization server for MCP clients (dynamic client registration,
-PKCE). Its `/authorize` sends the user to Google for `adwords` + `openid email`. The Google refresh
+PKCE). Its `/authorize` sends the user to Google for `adwords` + `openid email`, plus `webmasters.readonly`
+(Search Console), which the user may untick: only `adwords` is required. The Google refresh
 token is stored AES-256-GCM encrypted and never leaves the server. The MCP client gets
 Camberstack's own tokens, which are stored only as SHA-256 hashes.
 

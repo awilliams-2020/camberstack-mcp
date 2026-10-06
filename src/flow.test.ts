@@ -12,6 +12,7 @@ import { openDb } from "./db.js";
 import type { Config } from "./config.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { createRelayKey } from "./relay.js";
+import { SearchConsoleNotGrantedError } from "./google.js";
 
 const key = randomBytes(32);
 const idToken = (sub: string, email: string) =>
@@ -145,6 +146,30 @@ class FakeAds {
   }
 }
 
+/** A tiny Search Console: one site whose queries overlap FakeAds' search terms. */
+class FakeSearchConsole {
+  notGranted = false;
+  /** Site totals (no dimension) returned in call order. */
+  totals: any[] = [];
+  requests: { site: string; req: any }[] = [];
+  async sites() {
+    if (this.notGranted) throw new SearchConsoleNotGrantedError();
+    return [{ siteUrl: "sc-domain:acme.test", permissionLevel: "siteOwner" }, { siteUrl: "https://other.test/", permissionLevel: "siteUnverifiedUser" }];
+  }
+  async searchAnalytics(site: string, req: any) {
+    if (this.notGranted) throw new SearchConsoleNotGrantedError();
+    this.requests.push({ site, req });
+    if (!req.dimensions.length) return [this.totals.shift()!];
+    return [
+      { keys: ["Invoice App"], clicks: 40, impressions: 800, ctr: 0.05, position: 2.14 },        // paid, ranks top 3
+      { keys: ["free invoice maker"], clicks: 3, impressions: 400, ctr: 0.0075, position: 8.2 }, // paid, ranks lower
+      { keys: ["invoice template"], clicks: 5, impressions: 900, ctr: 0.0056, position: 14 },    // gap
+      { keys: ["invoice"], clicks: 9, impressions: 2000, ctr: 0.0045, position: 15 },            // already a keyword
+      { keys: ["invoice pdf"], clicks: 0, impressions: 50, ctr: 0, position: 12 },               // too few impressions
+    ];
+  }
+}
+
 /** Stripe, just enough of it: Checkout, session lookup, the sweep's list, subscriptions, the portal. */
 const stripe = { subStatus: "active", checkouts: [] as URLSearchParams[], portalReturn: "" };
 const stripeFetch: typeof fetch = async (url, init) => {
@@ -188,6 +213,7 @@ let relay: ReturnType<typeof createApp>["relay"];
 let server: Server;
 let base = "";
 const ads = new FakeAds();
+const sc = new FakeSearchConsole();
 const db = openDb(":memory:");
 
 beforeAll(async () => {
@@ -202,7 +228,7 @@ beforeAll(async () => {
   server.close();
   server = await new Promise<Server>((resolve) => {
     ({ app, billing, relay } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"),
-      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any }));
+      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
@@ -228,6 +254,7 @@ async function connect(cookie?: string, state = "xyz"): Promise<string> {
   const g = new URL(toGoogle.headers.get("location")!);
   expect(g.host).toBe("accounts.google.com");
   expect(g.searchParams.get("scope")).toContain("adwords");
+  expect(g.searchParams.get("scope")).toContain("webmasters.readonly");
 
   const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`,
     { redirect: "manual", ...(cookie ? { headers: { cookie } } : {}) });
@@ -457,12 +484,67 @@ describe("OAuth + MCP end to end", () => {
     expect(ads.mutations.length).toBe(before);
   });
 
+  it("reads Search Console and joins it with the account's search terms, changing nothing", async () => {
+    const before = ads.mutations.length;
+    const sites = (await call(token, "search_console_sites")).json;
+    expect(sites.sites).toEqual([{ site_url: "sc-domain:acme.test", permission: "siteOwner" }]);  // unverified dropped, no demo
+
+    const perf = (await call(token, "search_console_performance", { site_url: "sc-domain:acme.test", dimensions: ["query"], query_contains: "invoice", limit: 10 })).json;
+    expect(sc.requests.at(-1)!.req).toMatchObject({ dimensions: ["query"], rowLimit: 10,
+      dimensionFilterGroups: [{ filters: [{ dimension: "query", operator: "contains", expression: "invoice" }] }] });
+    expect(perf.rows[0]).toEqual({ query: "Invoice App", clicks: 40, impressions: 800, ctr_pct: 5, position: 2.1 });
+    // The window ends 3 days ago (Search Console's recent days are incomplete) and spans the default 28 days.
+    expect(Date.parse(perf.window.end) - Date.parse(perf.window.start)).toBe(27 * 86_400_000);
+
+    sc.totals = [{ keys: [], clicks: 120, impressions: 4000, ctr: 0.03, position: 9.4 }, { keys: [], clicks: 100, impressions: 5000, ctr: 0.02, position: 10.1 }];
+    const sum = (await call(token, "search_console_summary", { site_url: "sc-domain:acme.test", days: 28 })).json;
+    sc.totals = [];
+    expect(sum.current).toMatchObject({ clicks: 120, impressions: 4000, ctr_pct: 3, position: 9.4 });
+    expect(sum.change).toEqual({ clicks_pct: 20, impressions_pct: -20, ctr_points: 1, position: -0.7 });
+    // No dimension (true site totals); the previous window is the 28 days right before the current one.
+    const [a, b] = sc.requests.slice(-2).map((r) => r.req);
+    expect(a.dimensions).toEqual([]);
+    expect(Date.parse(sum.current.window.start) - Date.parse(sum.previous.window.end)).toBe(86_400_000);
+    expect([a.startDate, b.startDate].sort()).toEqual([sum.previous.window.start, sum.current.window.start]);
+
+    const o = (await call(token, "paid_organic_overlap", { customer_id: "111-222-3333", site_url: "sc-domain:acme.test", days: 30 })).json;
+    // Paid and in the top 3 organically, matched case-insensitively; "free invoice maker" ranks too low to count.
+    expect(o.paid_and_ranking).toEqual([{ query: "Invoice App", organic_position: 2.1, organic_clicks: 40, organic_impressions: 800,
+      ad_cost: 120, ad_clicks: 30, ad_conversions: 4, campaigns: ["Search"] }]);
+    expect(o.paid_and_ranking_total).toEqual({ queries: 1, ad_cost: 120 });
+    // Page 2+, enough impressions, not paid and not already a keyword.
+    expect(o.organic_gaps.map((g: any) => g.query)).toEqual(["invoice template"]);
+    // Both sides read over the same dates.
+    expect(o.window).toEqual({ start: sc.requests.at(-1)!.req.startDate, end: sc.requests.at(-1)!.req.endDate });
+    expect(ads.mutations.length).toBe(before);
+  });
+
+  it("says how to grant Search Console when the connection doesn't include it, and offers the demo site", async () => {
+    sc.notGranted = true;
+    try {
+      const s = (await call(token, "search_console_sites")).json;
+      expect(s.sites).toEqual([{ site_url: "sc-domain:northwind-plumbing.example", permission: "demo" }]);
+      expect(s.not_granted).toContain("reconnects Camberstack");
+      const r = await call(token, "search_console_performance", { site_url: "sc-domain:acme.test" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("Search Console box ticked");
+    } finally { sc.notGranted = false; }
+  });
+
   it("runs the whole flow on the demo account without touching Google or the free allowance", async () => {
     const before = ads.mutations.length;
     const left = (await call(token, "billing", {})).json;
     const w = (await call(token, "account_overview", { customer_id: "000-000-0001", days: 180 })).json;
     expect(w.note).toContain("Sample data");
     expect(w.campaigns.map((c: any) => c.name)).toContain("Drain Cleaning – Search");
+
+    const ov = (await call(token, "paid_organic_overlap", { customer_id: "0000000001", site_url: "sc-domain:northwind-plumbing.example" })).json;
+    expect(ov.note).toContain("Sample data");
+    expect(ov.paid_and_ranking.map((x: any) => x.query)).toContain("emergency plumber near me");
+    expect(ov.paid_and_ranking.map((x: any) => x.query)).not.toContain("tankless water heater");  // paid, but position 14
+    expect(ov.organic_gaps.map((x: any) => x.query)).toContain("slab leak repair");
+    expect(ov.organic_gaps.map((x: any) => x.query)).not.toContain("tankless water heater");      // already paid for
+    expect(sc.requests.some((r) => r.site.includes("northwind"))).toBe(false);                     // never reached "Google"
 
     const q = (await call(token, "run_gaql", { customer_id: "0000000001",
       query: "SELECT ad_group_criterion.keyword.text, metrics.cost_micros FROM keyword_view WHERE campaign.id = 2003 AND segments.date DURING LAST_30_DAYS ORDER BY metrics.cost_micros DESC LIMIT 2" })).json;
