@@ -8,7 +8,7 @@ import { now } from "./db.js";
 import { decrypt } from "./crypto.js";
 import {
   AdsClient, SearchConsoleClient, SearchConsoleNotGrantedError, micros, refreshGoogleToken, revokeGoogleToken,
-  type GoogleCreds, type SearchAnalyticsRow,
+  type GoogleCreds, type SearchAnalyticsRequest, type SearchAnalyticsRow, type UrlInspection,
 } from "./google.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, accountsLabel } from "./plans.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
@@ -62,12 +62,14 @@ function routed(google: Ads, demo: DemoAds): Ads {
 }
 
 /** The Search Console calls the tools make; the demo site answers the same ones. */
-type SearchConsole = Pick<SearchConsoleClient, "sites" | "searchAnalytics">;
+type SearchConsole = Pick<SearchConsoleClient, "sites" | "searchAnalytics" | "sitemaps" | "inspect">;
 
 function routedSc(google: SearchConsole, demo: DemoSearchConsole): SearchConsole {
   return {
     sites: () => google.sites(),
     searchAnalytics: (site, req) => (site === DEMO_SITE ? demo.searchAnalytics(site, req) : google.searchAnalytics(site, req)),
+    sitemaps: (site) => (site === DEMO_SITE ? demo.sitemaps() : google.sitemaps(site)),
+    inspect: (site, url) => (site === DEMO_SITE ? demo.inspect(site, url) : google.inspect(site, url)),
   };
 }
 const DEMO_SITE_NOTE = "Sample data from Camberstack's demo website (a fictional plumbing business), not a real Search Console property.";
@@ -374,14 +376,10 @@ export class UserSession {
    * Site-wide totals for the window and for the same number of days before it. With no dimension Google returns the
    * site's true totals, including the rare queries it leaves out of per-query rows.
    */
-  async searchConsoleSummary(site: string, days: number) {
-    const cur = searchConsoleWindow(days);
-    const prev = searchConsoleWindow(days, days);
-    const totals = async (w: { start: string; end: string }) => {
-      const [r] = await this.sc.searchAnalytics(site, { startDate: w.start, endDate: w.end, dimensions: [], rowLimit: 1 });
-      return r ? organicMetrics(r) : { clicks: 0, impressions: 0, ctr_pct: 0, position: null };
-    };
-    const [now_, before] = await Promise.all([totals(cur), totals(prev)]);
+  async searchConsoleSummary(site: string, o: ScWindowOpts) {
+    const cur = scWindow(o);
+    const prev = priorWindow(cur);
+    const [now_, before] = await Promise.all([this.scTotals(site, cur, o.fresh), this.scTotals(site, prev, o.fresh)]);
     const pct = (a: number, b: number) => (b > 0 ? round(((a - b) / b) * 100) : null);
     return {
       site, ...siteNote(site),
@@ -391,23 +389,157 @@ export class UserSession {
         ctr_points: round(now_.ctr_pct - before.ctr_pct),
         position: now_.position != null && before.position != null ? Math.round((now_.position - before.position) * 10) / 10 : null,
       },
-      note: "A lower position is better: a negative position change means the site moved up.",
+      note: "A lower position is better: a negative position change means the site moved up."
+        + (o.fresh ? " " + FRESH_NOTE : ""),
     };
   }
 
+  /** Undimensioned site totals: the only figure that includes the rare queries Google withholds from per-query rows. */
+  private async scTotals(site: string, w: { start: string; end: string }, fresh?: boolean) {
+    const [r] = await this.sc.searchAnalytics(site, { startDate: w.start, endDate: w.end, dimensions: [], rowLimit: 1, ...dataState(fresh) });
+    return r ? organicMetrics(r) : { clicks: 0, impressions: 0, ctr_pct: 0, position: null };
+  }
+
+  /** Every row for one dimension, paging past Google's 25,000-row cap (up to SC_MAX_ROWS) so "lost" means lost, not truncated. */
+  private async scAllRows(site: string, req: Omit<SearchAnalyticsRequest, "rowLimit" | "startRow">) {
+    const out: SearchAnalyticsRow[] = [];
+    for (let startRow = 0; startRow < SC_MAX_ROWS; startRow += 25_000) {
+      const rows = await this.sc.searchAnalytics(site, { ...req, rowLimit: 25_000, startRow });
+      out.push(...rows);
+      if (rows.length < 25_000) return { rows: out, truncated: false };
+    }
+    return { rows: out, truncated: true };
+  }
+
   /** Search performance (clicks, impressions, CTR, position) grouped by the given dimensions, most clicks first. */
-  async searchConsolePerformance(site: string, o: { days: number; dimensions: string[]; query_contains?: string; page_contains?: string; limit: number }) {
-    const w = searchConsoleWindow(o.days);
-    const filters = [
-      ...(o.query_contains ? [{ dimension: "query", operator: "contains", expression: o.query_contains }] : []),
-      ...(o.page_contains ? [{ dimension: "page", operator: "contains", expression: o.page_contains }] : []),
-    ];
+  async searchConsolePerformance(site: string, o: ScWindowOpts & ScFilterOpts & { dimensions: string[]; limit: number }) {
+    const w = scWindow(o);
+    const filters = scFilters(o);
     const rows = await this.sc.searchAnalytics(site, { startDate: w.start, endDate: w.end, dimensions: o.dimensions, rowLimit: o.limit,
-      ...(filters.length ? { dimensionFilterGroups: [{ filters }] } : {}) });
+      ...dataState(o.fresh), ...(filters.length ? { dimensionFilterGroups: [{ filters }] } : {}) });
     return {
       site, ...siteNote(site), window: w,
       rows: rows.map((r) => ({ ...Object.fromEntries(o.dimensions.map((d, i) => [d, r.keys[i]])), ...organicMetrics(r) })),
-      note: "Search Console leaves out rare queries for privacy, so query rows don't add up to the site's total clicks.",
+      note: "Search Console leaves out rare queries for privacy, so query rows don't add up to the site's total clicks."
+        + (o.fresh ? " " + FRESH_NOTE : ""),
+    };
+  }
+
+  /**
+   * Two adjacent equal windows, compared query by query and page by page: what is rising, falling, new and gone,
+   * and rising searches the site is sliding down on. Totals come from undimensioned requests, not row sums.
+   */
+  async searchConsoleTrend(site: string, o: ScWindowOpts & { exclude_query_regex?: string; min_impressions: number; limit: number }) {
+    const cur = scWindow(o);
+    const prev = priorWindow(cur);
+    const exclude = o.exclude_query_regex ? { dimensionFilterGroups: [{ filters: [{ dimension: "query", operator: "excludingRegex", expression: o.exclude_query_regex }] }] } : {};
+    const pull = (w: { start: string; end: string }, dim: string) =>
+      this.scAllRows(site, { startDate: w.start, endDate: w.end, dimensions: [dim], ...dataState(o.fresh), ...(dim === "query" ? exclude : {}) });
+    const [qCur, qPrev, pCur, pPrev, tCur, tPrev] = await Promise.all([
+      pull(cur, "query"), pull(prev, "query"), pull(cur, "page"), pull(prev, "page"),
+      this.scTotals(site, cur, o.fresh), this.scTotals(site, prev, o.fresh),
+    ]);
+    const queries = diffWindows(qCur.rows, qPrev.rows, o.min_impressions);
+    const pages = diffWindows(pCur.rows, pPrev.rows, o.min_impressions);
+    const moving = queries.filter((r) => !r.state);
+    const up = (a: TrendRow, b: TrendRow) => b.impressions_change - a.impressions_change;
+    const down = (a: TrendRow, b: TrendRow) => a.impressions_change - b.impressions_change;
+    const pct = (a: number, b: number) => (b > 0 ? round(((a - b) / b) * 100) : null);
+    return {
+      site, ...siteNote(site), current_window: cur, prior_window: prev,
+      totals: { current: tCur, prior: tPrev, impressions_pct: pct(tCur.impressions, tPrev.impressions), clicks_pct: pct(tCur.clicks, tPrev.clicks) },
+      counts: { queries_current: qCur.rows.length, queries_prior: qPrev.rows.length, compared: queries.length,
+        new: queries.filter((r) => r.state === "new").length, lost: queries.filter((r) => r.state === "lost").length },
+      ...(qCur.truncated || qPrev.truncated ? { truncated: `More than ${SC_MAX_ROWS} queries in a window; the rest weren't compared.` } : {}),
+      rising_queries: moving.filter((r) => r.impressions_change > 0).sort(up).slice(0, o.limit),
+      falling_queries: moving.filter((r) => r.impressions_change < 0).sort(down).slice(0, o.limit),
+      new_queries: queries.filter((r) => r.state === "new").sort(up).slice(0, o.limit),
+      lost_queries: queries.filter((r) => r.state === "lost").sort(down).slice(0, o.limit),
+      losing_ground: moving.filter((r) => r.impressions_change > 0 && (r.position_change ?? 0) > 0.5).sort(up).slice(0, o.limit),
+      rising_pages: pages.filter((r) => r.impressions_change > 0).sort(up).slice(0, o.limit),
+      falling_pages: pages.filter((r) => r.impressions_change < 0).sort(down).slice(0, o.limit),
+      how_to_read: `Rows need at least ${o.min_impressions} impressions in one of the windows. A negative position_change means the site moved up. `
+        + "losing_ground: searches growing while the site's position gets worse. Adjacent windows mix trend with seasonality, so check "
+        + "anything seasonal against the same dates a year earlier. A page that falls while a near-identical URL (trailing slash, www, "
+        + "http) rises is Google consolidating duplicates, not lost demand: check it with search_console_inspect_urls before acting."
+        + (o.fresh ? " " + FRESH_NOTE : ""),
+    };
+  }
+
+  /**
+   * Where more clicks are within reach: queries on positions 4-20 with real impressions (projected to a realistic climb),
+   * top-5 queries whose CTR is under half of what that position usually gets (a title/description problem), and
+   * question-shaped queries. Projections use a typical CTR-by-position curve, not the site's own.
+   */
+  async searchConsoleOpportunities(site: string, o: ScWindowOpts & { exclude_query_regex?: string; limit: number }) {
+    const w = scWindow(o);
+    const { rows } = await this.scAllRows(site, { startDate: w.start, endDate: w.end, dimensions: ["query"], ...dataState(o.fresh),
+      ...(o.exclude_query_regex ? { dimensionFilterGroups: [{ filters: [{ dimension: "query", operator: "excludingRegex", expression: o.exclude_query_regex }] }] } : {}) });
+    const q = (r: SearchAnalyticsRow) => ({ query: r.keys[0], ...organicMetrics(r) });
+    const striking = rows.filter((r) => r.position >= 4 && r.position <= 20 && r.impressions >= 15).map((r) => {
+      const target = Math.max(3, Math.floor(r.position) - 3);
+      const projected = r.impressions * ctrAt(target);
+      return { ...q(r), target_position: target, projected_clicks: round(projected), click_gain: round(projected - r.clicks) };
+    }).sort((a, b) => b.click_gain - a.click_gain);
+    const snippet = rows.filter((r) => r.position <= 5 && r.impressions >= 30 && r.ctr < ctrAt(r.position) * 0.5)
+      .map((r) => ({ ...q(r), typical_ctr_pct: round(ctrAt(r.position) * 100), click_gain: round(r.impressions * ctrAt(r.position) - r.clicks) }))
+      .sort((a, b) => b.click_gain - a.click_gain);
+    const questions = rows.filter((r) => QUESTION.test(r.keys[0] ?? "") && r.impressions >= 10)
+      .sort((a, b) => b.impressions - a.impressions).map(q);
+    return {
+      site, ...siteNote(site), window: w,
+      striking_distance: striking.slice(0, o.limit), striking_distance_total: striking.length,
+      snippet_gaps: snippet.slice(0, o.limit), snippet_gaps_total: snippet.length,
+      question_queries: questions.slice(0, o.limit), question_queries_total: questions.length,
+      how_to_read: "striking_distance: positions 4-20 with 15+ impressions; click_gain assumes a climb of about 3 places (not to #1). "
+        + "snippet_gaps: top-5 positions with 30+ impressions but under half the usual CTR there: rewrite the title and meta description, "
+        + "or check for a missing rich result. question_queries: question- and comparison-shaped searches, the kind answer boxes and AI "
+        + "answers draw on. Expected CTRs are industry averages, so treat click_gain as a ranking of opportunities, not a forecast. "
+        + "Empty lists are a finding: nothing is close enough for a quick win. Exclude the brand name with exclude_query_regex."
+        + (o.fresh ? " " + FRESH_NOTE : ""),
+    };
+  }
+
+  /**
+   * Google's index record for each URL: indexed or not and why, last crawl, canonical chosen vs declared, and
+   * structured-data items. One call per URL, a few at a time (Google allows 600 a minute, 2,000 a day per property).
+   */
+  async searchConsoleInspectUrls(site: string, urls: string[]) {
+    const results: Record<string, unknown>[] = new Array(urls.length);
+    let next = 0;
+    const worker = async () => {
+      for (let i = next++; i < urls.length; i = next++) {
+        try { results[i] = inspectionRow(urls[i]!, await this.sc.inspect(site, urls[i]!)); }
+        catch (e) {
+          if (e instanceof SearchConsoleNotGrantedError) throw e;
+          results[i] = { url: urls[i], error: (e as Error).message };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(5, urls.length) }, worker));
+    const tally: Record<string, number> = {};
+    for (const r of results) { const k = String(r.coverage_state ?? (r.error ? "error" : "unknown")); tally[k] = (tally[k] ?? 0) + 1; }
+    return {
+      site, ...siteNote(site), tally, results,
+      note: "Each verdict describes Google's last crawl (last_crawl), not the live page: a fix made after that date still shows the old state. "
+        + "\"Discovered - currently not indexed\" means Google knows the URL but hasn't spent a crawl on it; \"Crawled - currently not indexed\" "
+        + "means it crawled and declined. Google's index-coverage report in the Search Console UI lags this by days. Requesting indexing "
+        + "and submitting sitemaps can only be done in Search Console itself.",
+    };
+  }
+
+  /** Sitemaps submitted for the property: when Google last fetched each, URL counts and error/warning counts. Read-only. */
+  async searchConsoleSitemaps(site: string) {
+    const list = await this.sc.sitemaps(site);
+    return {
+      site, ...siteNote(site),
+      sitemaps: list.map((m) => ({
+        path: m.path, last_submitted: m.lastSubmitted ?? null, last_downloaded: m.lastDownloaded ?? null, pending: m.isPending ?? false,
+        index: m.isSitemapsIndex ?? false, errors: Number(m.errors ?? 0), warnings: Number(m.warnings ?? 0),
+        urls_submitted: (m.contents ?? []).reduce((n, c) => n + Number(c.submitted ?? 0), 0),
+      })),
+      note: list.length ? "Submitting or resubmitting a sitemap can only be done in Search Console itself."
+        : "No sitemap is submitted for this property. The user can submit one in Search Console (Indexing > Sitemaps).",
     };
   }
 
@@ -602,6 +734,101 @@ export function searchConsoleWindow(days: number, before = 0): { start: string; 
   const end = new Date(Date.now() - (3 + before) * 86_400_000);
   const start = new Date(end.getTime() - (d - 1) * 86_400_000);
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+
+export interface ScWindowOpts { days: number; start_date?: string; end_date?: string; fresh?: boolean }
+export interface ScFilterOpts { query_contains?: string; page_contains?: string; query_regex?: string; exclude_query_regex?: string; page_regex?: string }
+const SC_MAX_ROWS = 100_000;
+const FRESH_NOTE = "The window includes the last 2-3 days, which Google is still filling in, so recent days read low.";
+const dataState = (fresh?: boolean): { dataState?: "all" } => (fresh ? { dataState: "all" } : {});
+const DAY = 86_400_000;
+const isoDay = (t: number) => new Date(t).toISOString().slice(0, 10);
+
+/**
+ * The window a Search Console tool reads: exact dates when both are given, otherwise the last `days` days ending 3 days ago
+ * (or yesterday with fresh data). Google keeps about 16 months.
+ */
+export function scWindow(o: ScWindowOpts): { start: string; end: string } {
+  if (o.start_date || o.end_date) {
+    if (!o.start_date || !o.end_date) throw new Error("Pass both start_date and end_date, or neither (then days is used).");
+    const a = Date.parse(o.start_date), b = Date.parse(o.end_date);
+    if (Number.isNaN(a) || Number.isNaN(b)) throw new Error("start_date and end_date must be real dates, YYYY-MM-DD.");
+    if (a > b) throw new Error("start_date is after end_date.");
+    if (b - a > 479 * DAY) throw new Error("A window can span at most 480 days; Search Console keeps about 16 months.");
+    return { start: o.start_date, end: o.end_date };
+  }
+  if (!o.fresh) return searchConsoleWindow(o.days);
+  const d = Math.max(1, Math.min(480, Math.floor(o.days)));
+  const end = Date.now() - DAY;
+  return { start: isoDay(end - (d - 1) * DAY), end: isoDay(end) };
+}
+
+/** The same number of days immediately before a window. */
+export function priorWindow(w: { start: string; end: string }): { start: string; end: string } {
+  const len = Date.parse(w.end) - Date.parse(w.start);
+  const end = Date.parse(w.start) - DAY;
+  return { start: isoDay(end - len), end: isoDay(end) };
+}
+
+/** Text and regex filters; regexes use Google's RE2 syntax, case-sensitive unless prefixed with (?i). */
+function scFilters(o: ScFilterOpts) {
+  return [
+    ...(o.query_contains ? [{ dimension: "query", operator: "contains", expression: o.query_contains }] : []),
+    ...(o.page_contains ? [{ dimension: "page", operator: "contains", expression: o.page_contains }] : []),
+    ...(o.query_regex ? [{ dimension: "query", operator: "includingRegex", expression: o.query_regex }] : []),
+    ...(o.exclude_query_regex ? [{ dimension: "query", operator: "excludingRegex", expression: o.exclude_query_regex }] : []),
+    ...(o.page_regex ? [{ dimension: "page", operator: "includingRegex", expression: o.page_regex }] : []),
+  ];
+}
+
+interface TrendRow {
+  key: string; impressions: number; prior_impressions: number; impressions_change: number; impressions_pct: number | null;
+  clicks: number; prior_clicks: number; position: number | null; prior_position: number | null; position_change: number | null;
+  state?: "new" | "lost";
+}
+/** Per-key comparison of two windows; keys under minImpressions in both are noise (1 -> 3 is +200% and means nothing). */
+function diffWindows(cur: SearchAnalyticsRow[], prev: SearchAnalyticsRow[], minImpressions: number): TrendRow[] {
+  const c = new Map(cur.map((r) => [r.keys[0] ?? "", r])), p = new Map(prev.map((r) => [r.keys[0] ?? "", r]));
+  const out: TrendRow[] = [];
+  for (const key of new Set([...c.keys(), ...p.keys()])) {
+    const a = c.get(key), b = p.get(key);
+    const ai = a?.impressions ?? 0, bi = b?.impressions ?? 0;
+    if (Math.max(ai, bi) < minImpressions) continue;
+    const pos = (r?: SearchAnalyticsRow) => (r && r.impressions ? Math.round(r.position * 10) / 10 : null);
+    out.push({
+      key, impressions: ai, prior_impressions: bi, impressions_change: ai - bi, impressions_pct: bi > 0 ? round(((ai - bi) / bi) * 100) : null,
+      clicks: a?.clicks ?? 0, prior_clicks: b?.clicks ?? 0, position: pos(a), prior_position: pos(b),
+      position_change: ai && bi ? Math.round((a!.position - b!.position) * 10) / 10 : null,
+      ...(bi === 0 ? { state: "new" as const } : ai === 0 ? { state: "lost" as const } : {}),
+    });
+  }
+  return out;
+}
+
+/** Typical organic CTR by position (blended desktop and mobile); used only to rank opportunities. */
+const CTR_BY_POSITION = [0.28, 0.15, 0.10, 0.07, 0.05, 0.04, 0.032, 0.026, 0.022, 0.019];
+const ctrAt = (pos: number) => (pos <= 10 ? CTR_BY_POSITION[Math.max(1, Math.round(pos)) - 1]! : pos <= 20 ? 0.010 : 0.005);
+const QUESTION = /^(how|what|why|when|where|which|who|can|do|does|is|are|should|will)\b|\bvs\b|alternative|best|free|cost|price/i;
+
+/** Google fills fields it has no answer for with *_UNSPECIFIED (e.g. a never-crawled URL's fetch state); report those as null. */
+const known = (v?: string) => (v && !v.endsWith("_UNSPECIFIED") ? v : null);
+
+function inspectionRow(url: string, r: UrlInspection) {
+  const s = r.indexStatusResult ?? {};
+  const items = (r.richResultsResult?.detectedItems ?? []).flatMap((d) => (d.items ?? [{}]).map((it) => {
+    const issues = it.issues ?? [];
+    return { type: d.richResultType, severity: issues.some((x) => x.severity === "ERROR") ? "ERROR" : issues.length ? "WARNING" : "VALID",
+      issues: issues.map((x) => x.issueMessage) };
+  }));
+  return {
+    url, indexed: s.verdict === "PASS", coverage_state: s.coverageState ?? null, last_crawl: s.lastCrawlTime ?? null,
+    robots_txt: known(s.robotsTxtState), indexing_allowed: known(s.indexingState), fetch: known(s.pageFetchState),
+    google_canonical: s.googleCanonical ?? null, declared_canonical: s.userCanonical ?? null,
+    ...(s.googleCanonical && s.userCanonical && s.googleCanonical !== s.userCanonical ? { canonical_mismatch: true } : {}),
+    crawled_as: known(s.crawledAs), ...(s.sitemap?.length ? { in_sitemaps: s.sitemap } : {}),
+    ...(s.referringUrls?.length ? { referring_urls: s.referringUrls.slice(0, 5) } : {}),
+    structured_data: r.richResultsResult ? { verdict: r.richResultsResult.verdict ?? null, items } : null,
+  };
 }
 
 const organicMetrics = (r: SearchAnalyticsRow) => ({

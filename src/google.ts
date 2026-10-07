@@ -226,6 +226,8 @@ export class AdsClient {
 }
 
 const SEARCH_CONSOLE_API = "https://www.googleapis.com/webmasters/v3";
+/** URL Inspection lives on the newer host; webmasters.readonly is enough for it. */
+const URL_INSPECTION_API = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
 
 /** Raised when the user's Google connection doesn't include Search Console (unticked, or connected before it existed). */
 export class SearchConsoleNotGrantedError extends Error {
@@ -242,7 +244,22 @@ export interface SearchAnalyticsRequest {
   endDate: string;
   dimensions: string[];
   rowLimit: number;
+  startRow?: number;
+  /** "all" includes the last 2-3 days Google is still filling in; omitted means final data only. */
+  dataState?: "all" | "final";
   dimensionFilterGroups?: { filters: { dimension: string; operator: string; expression: string }[] }[];
+}
+export interface Sitemap {
+  path: string; lastSubmitted?: string; lastDownloaded?: string; isPending?: boolean; isSitemapsIndex?: boolean;
+  warnings?: string; errors?: string; contents?: { type: string; submitted?: string }[];
+}
+/** The parts of urlInspection.index.inspect's `inspectionResult` the tools read. */
+export interface UrlInspection {
+  indexStatusResult?: {
+    verdict?: string; coverageState?: string; lastCrawlTime?: string; robotsTxtState?: string; indexingState?: string;
+    pageFetchState?: string; googleCanonical?: string; userCanonical?: string; crawledAs?: string; sitemap?: string[]; referringUrls?: string[];
+  };
+  richResultsResult?: { verdict?: string; detectedItems?: { richResultType: string; items?: { name?: string; issues?: { issueMessage: string; severity: string }[] }[] }[] };
 }
 
 /** One user's view of the Search Console API (read-only). */
@@ -250,7 +267,7 @@ export class SearchConsoleClient {
   constructor(private accessToken: () => Promise<string>, private f: FetchLike = fetch) {}
 
   private async get(path: string, init: RequestInit = {}): Promise<any> {
-    const res = await this.f(`${SEARCH_CONSOLE_API}${path}`, {
+    const res = await this.f(path.startsWith("https://") ? path : `${SEARCH_CONSOLE_API}${path}`, {
       ...init,
       headers: { Authorization: `Bearer ${await this.accessToken()}`, "Content-Type": "application/json" },
     });
@@ -271,5 +288,15 @@ export class SearchConsoleClient {
   async searchAnalytics(siteUrl: string, req: SearchAnalyticsRequest): Promise<SearchAnalyticsRow[]> {
     return (await this.get(`/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
       { method: "POST", body: JSON.stringify({ type: "web", ...req }) })).rows ?? [];
+  }
+
+  /** Sitemaps submitted for the property, with Google's last fetch and its error/warning counts. Read-only. */
+  async sitemaps(siteUrl: string): Promise<Sitemap[]> {
+    return (await this.get(`/sites/${encodeURIComponent(siteUrl)}/sitemaps`)).sitemap ?? [];
+  }
+
+  /** Google's index record for one URL in the property, as of its last crawl. */
+  async inspect(siteUrl: string, url: string): Promise<UrlInspection> {
+    return (await this.get(URL_INSPECTION_API, { method: "POST", body: JSON.stringify({ inspectionUrl: url, siteUrl }) })).inspectionResult ?? {};
   }
 }

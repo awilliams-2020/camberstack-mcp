@@ -187,6 +187,9 @@ queries and positions, and line them up against your ads:</p>
 <li><strong>Paid and already ranking:</strong> searches you pay for where your site is already in the top few organic results, with the ad spend on each.</li>
 <li><strong>Organic gaps:</strong> searches your site shows up for on page 2 or lower, with no ad covering them.</li>
 <li><strong>Site totals:</strong> clicks, impressions, CTR and position against the previous period.</li>
+<li><strong>Trends:</strong> which searches and pages are rising, falling, new or gone since the period before.</li>
+<li><strong>Opportunities:</strong> searches just off page 1, and top results with a click-through rate low enough to point at the title.</li>
+<li><strong>Indexing:</strong> whether Google has indexed a page and why not, when it last crawled it, and when it last read your sitemap.</li>
 </ul>
 <p class="muted">Camberstack can't change anything in Search Console. Untick it and every Google Ads tool still works; reconnect later to add it.</p>
 
@@ -505,7 +508,7 @@ change your Google Ads account. This policy explains what we access, why, and wh
 <ul>
 <li><strong>Your Google account email and a stable Google account ID</strong> (the <code>openid</code> and <code>email</code> scopes), so the same person gets the same account and change history each time.</li>
 <li><strong>Your Google Ads data</strong> (the <code>https://www.googleapis.com/auth/adwords</code> scope): account and campaign structure, performance metrics, search terms, keywords and conversion settings, read when your AI assistant calls a Camberstack tool.</li>
-<li><strong>Your Search Console data, read-only and optional</strong> (the <code>https://www.googleapis.com/auth/webmasters.readonly</code> scope): the websites you have verified and their Google Search clicks, impressions, queries and positions, read when your AI assistant calls a Search Console tool, for example to compare what you pay for with where you already rank. You can untick it on Google's consent screen; the Google Ads tools work without it. Camberstack cannot change anything in Search Console.</li>
+<li><strong>Your Search Console data, read-only and optional</strong> (the <code>https://www.googleapis.com/auth/webmasters.readonly</code> scope): the websites you have verified, their Google Search clicks, impressions, queries and positions, Google's index status for pages you ask about, and the sitemaps you have submitted, read when your AI assistant calls a Search Console tool, for example to compare what you pay for with where you already rank. You can untick it on Google's consent screen; the Google Ads tools work without it. Camberstack cannot change anything in Search Console.</li>
 </ul>
 <p>We request nothing else from your Google account: no Gmail, Drive, contacts or calendar.</p>
 
@@ -678,7 +681,7 @@ export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
 - Tools: ${tools.map((t) => t.name).join(", ")}
 - Writes (each one proposed, approved, then applied; every applied change can be undone): negative keywords; pause/enable campaign, ad group, keyword or ad; daily budget; end date; build a Search campaign (created paused); add ad groups, keywords, ads, sitelinks; bids; bid strategy; location/language targeting; URL suffix; conversion actions and goals.
-- Search Console (optional, read-only scope): site totals, query/page performance, and paid vs organic overlap with the Ads account.
+- Search Console (optional, read-only scope): site totals, query/page performance, period-over-period trends, ranking opportunities, URL Inspection (index status), sitemap status, and paid vs organic overlap with the Ads account.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
 - Pricing: Free plan covers 1 Google Ads account (every tool, unlimited applied changes); Pro ${PRO_PRICE_LABEL} covers up to 10. Accounts are counted as those used in the last ${ACCOUNT_WINDOW_DAYS} days; manager (MCC) and demo accounts don't count. Undo is always free.
 - [Setup](${baseUrl}/#setup)

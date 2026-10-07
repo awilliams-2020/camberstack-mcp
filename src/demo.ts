@@ -13,6 +13,7 @@
  */
 import type { DB } from "./db.js";
 import { now } from "./db.js";
+import type { SearchAnalyticsRequest, Sitemap, UrlInspection } from "./google.js";
 
 export const DEMO_CID = "0000000001";
 export const DEMO_NAME = "DEMO: Northwind Plumbing (sample data)";
@@ -366,19 +367,27 @@ const ORGANIC: [string, string, number, number, number][] = [
 export class DemoSearchConsole {
   async sites() { return [{ siteUrl: DEMO_SITE, permissionLevel: "siteOwner" }]; }
 
-  async searchAnalytics(_site: string, req: { startDate: string; endDate: string; dimensions: string[]; rowLimit: number;
-    dimensionFilterGroups?: { filters: { dimension: string; operator: string; expression: string }[] }[] }) {
+  async searchAnalytics(_site: string, req: SearchAnalyticsRequest) {
+    if (req.startRow) return [];
     const days = Math.round((Date.parse(req.endDate) - Date.parse(req.startDate)) / 86_400_000) + 1;
-    const f = Math.min(days, HISTORY_DAYS) / HISTORY_DAYS;
+    // Guides and blog posts are growing and the service pages slowly fading, so the trend tool has something to show.
+    const age = Math.max(0, (Date.now() - Date.parse(req.endDate)) / 86_400_000 + days / 2) / HISTORY_DAYS;
     const filters = req.dimensionFilterGroups?.flatMap((g) => g.filters) ?? [];
     const value = (r: (typeof ORGANIC)[number], dim: string) =>
       dim === "query" ? r[0] : dim === "page" ? SITE_HOME + r[1] : dim === "country" ? "usa" : dim === "device" ? "MOBILE" : req.endDate;
     const groups = new Map<string, { keys: string[]; clicks: number; impressions: number; posSum: number }>();
     for (const r of ORGANIC) {
       if (!filters.every((x) => {
-        const v = value(r, x.dimension).toLowerCase(), e = x.expression.toLowerCase();
-        return x.operator === "contains" ? v.includes(e) : x.operator === "notContains" ? !v.includes(e) : v === e;
+        const v = value(r, x.dimension), e = x.expression;
+        if (x.operator === "includingRegex" || x.operator === "excludingRegex") {
+          const hit = new RegExp(e.replace(/^\(\?i\)/, ""), e.startsWith("(?i)") ? "i" : "").test(v);
+          return x.operator === "includingRegex" ? hit : !hit;
+        }
+        const lv = v.toLowerCase(), le = e.toLowerCase();
+        return x.operator === "contains" ? lv.includes(le) : x.operator === "notContains" ? !lv.includes(le) : lv === le;
       })) continue;
+      const growth = r[1].startsWith("/blog") ? 1.4 - 0.8 * age : 1.1 - 0.2 * age;
+      const f = (Math.min(days, HISTORY_DAYS) / HISTORY_DAYS) * Math.max(0.2, growth);
       const keys = req.dimensions.map((d) => value(r, d));
       const g = groups.get(keys.join("\u0000")) ?? { keys, clicks: 0, impressions: 0, posSum: 0 };
       g.clicks += Math.round(r[2] * f); g.impressions += Math.round(r[3] * f); g.posSum += r[4] * Math.round(r[3] * f);
@@ -387,5 +396,28 @@ export class DemoSearchConsole {
     return [...groups.values()].filter((g) => g.impressions > 0)
       .map((g) => ({ keys: g.keys, clicks: g.clicks, impressions: g.impressions, ctr: g.clicks / g.impressions, position: g.posSum / g.impressions }))
       .sort((a, b) => b.clicks - a.clicks).slice(0, req.rowLimit);
+  }
+
+  async sitemaps(): Promise<Sitemap[]> {
+    const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    return [{ path: SITE_HOME + "/sitemap.xml", lastSubmitted: day(40), lastDownloaded: day(2), isPending: false, isSitemapsIndex: false,
+      errors: "0", warnings: "0", contents: [{ type: "web", submitted: String(new Set(ORGANIC.map((r) => r[1])).size + 1) }] }];
+  }
+
+  /** Every page with organic traffic is indexed; /blog/winterize-pipes is waiting in the queue; anything else is unknown. */
+  async inspect(_site: string, url: string): Promise<UrlInspection> {
+    const path = url.startsWith(SITE_HOME) ? url.slice(SITE_HOME.length) || "/" : null;
+    const crawled = new Date(Date.now() - 6 * 86_400_000).toISOString();
+    if (path && ORGANIC.some((r) => r[1] === path)) {
+      return { indexStatusResult: { verdict: "PASS", coverageState: "Submitted and indexed", lastCrawlTime: crawled, robotsTxtState: "ALLOWED",
+        indexingState: "INDEXING_ALLOWED", pageFetchState: "SUCCESSFUL", googleCanonical: url, userCanonical: url, crawledAs: "MOBILE",
+        sitemap: [SITE_HOME + "/sitemap.xml"] },
+        richResultsResult: { verdict: "PASS", detectedItems: [{ richResultType: "Breadcrumbs", items: [{ name: "Unnamed item", issues: [] }] }] } };
+    }
+    if (path === "/blog/winterize-pipes") {
+      return { indexStatusResult: { verdict: "NEUTRAL", coverageState: "Discovered - currently not indexed", robotsTxtState: "ALLOWED",
+        indexingState: "INDEXING_ALLOWED", sitemap: [SITE_HOME + "/sitemap.xml"] } };
+    }
+    return { indexStatusResult: { verdict: "NEUTRAL", coverageState: "URL is unknown to Google" } };
   }
 }

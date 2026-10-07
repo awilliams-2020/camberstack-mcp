@@ -5,14 +5,14 @@ import { PublicChangeSchema } from "./changes.js";
 import { isDemo, type UserSession } from "./session.js";
 
 export const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.7.0";
+export const SERVER_VERSION = "0.8.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
 The Free plan covers 1 Google Ads account (Pro covers 10), counted as accounts used in the last 30 days; undo and change history always work. If a tool reports the plan limit, explain it and show the upgrade link it returns, word for word.
 To grow an account, keyword_ideas finds what people search for around a seed or a landing page; keyword_metrics checks volume and bids for a given list. Pass the account's own market: location_ids default to the United States.
-Search Console (read-only): search_console_sites lists the user's websites; search_console_summary gives site totals against the previous period; search_console_performance shows their organic queries and pages; paid_organic_overlap joins one site with one Ads account to find searches paid for that already rank organically, and organic searches with no ads.
+Search Console (read-only): search_console_sites lists the user's websites; search_console_summary gives site totals against the previous period (lead with these: per-query rows leave out rare queries); search_console_performance shows their organic queries and pages; search_console_trend shows what is rising, falling, new and lost between two periods; search_console_opportunities finds near-page-1 queries and weak snippets; search_console_inspect_urls says whether Google has indexed given pages and why not; search_console_sitemaps shows when Google last read each sitemap; paid_organic_overlap joins one site with one Ads account to find searches paid for that already rank organically, and organic searches with no ads. Camberstack can't request indexing or submit sitemaps: the user does that in Search Console.
 Account 000-000-0001 is a demo with sample data: anyone can try every tool on it, and changes there never touch Google. Always say when you are using it.`;
 
 /** Tools that read or propose on one Google Ads account, so count toward the plan's accounts (session.ts checkAccount). */
@@ -27,6 +27,16 @@ const languageId = z.string().regex(/^\d+$/).default("1000")
   .describe("Google language ID. 1000 English, 1003 Spanish, 1002 French, 1001 German, 1014 Portuguese");
 const siteUrl = z.string().min(1).describe("Search Console property exactly as search_console_sites lists it, e.g. sc-domain:example.com or https://www.example.com/");
 const days = z.number().int().min(1).max(365).default(30).describe("Look-back window in days, ending yesterday");
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/** Window options shared by the Search Console tools: a day count, or exact dates; optionally Google's not-yet-final recent days. */
+const scWindowShape = (defaultDays: number, maxDays: number) => ({
+  days: z.number().int().min(1).max(maxDays).default(defaultDays).describe("Look-back window in days, ending 3 days ago (yesterday with fresh)"),
+  start_date: ymd.optional().describe("Exact first day, YYYY-MM-DD. Pass with end_date to use exact dates instead of days"),
+  end_date: ymd.optional().describe("Exact last day, YYYY-MM-DD"),
+  fresh: z.boolean().default(false).describe("Include the last 2-3 days, which Google is still filling in (they read low). Use to check something from the last few days"),
+});
+const excludeQueryRegex = z.string().min(1).max(500).optional()
+  .describe("Leave out queries matching this RE2 regex, typically the brand name, e.g. (?i)acme|ac me");
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -147,25 +157,75 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     title: "Search Console summary",
     description: "A website's total organic Google Search clicks, impressions, CTR and average position over a window, next to the same "
       + "number of days before it, with the change. Site-wide totals, more complete than adding up per-query rows. Changes nothing.",
-    inputSchema: { site_url: siteUrl, days: z.number().int().min(1).max(240).default(28).describe("Window in days, ending 3 days ago; compared with the window before it") },
+    inputSchema: { site_url: siteUrl, ...scWindowShape(28, 240) },
     annotations: read,
-  }, ({ site_url, days }: { site_url: string; days: number }) => session().searchConsoleSummary(site_url, days));
+  }, ({ site_url, ...o }: { site_url: string; days: number; start_date?: string; end_date?: string; fresh: boolean }) => session().searchConsoleSummary(site_url, o));
 
   tool("search_console_performance", {
     title: "Search Console performance",
     description: "Organic Google Search clicks, impressions, CTR and average position for a website, grouped by query, page, country, device or date, most clicks first. "
-      + "Search Console's last 2-3 days are incomplete, so the window ends 3 days ago. Changes nothing.",
+      + "Search Console's last 2-3 days are incomplete, so the window ends 3 days ago unless fresh is set. Group by query and page together "
+      + "to see whether several pages compete for the same search; by page and date to see when a page's impressions or position changed. Changes nothing.",
     inputSchema: {
       site_url: siteUrl,
-      days: z.number().int().min(1).max(480).default(28).describe("Look-back window in days, ending 3 days ago"),
+      ...scWindowShape(28, 480),
       dimensions: z.array(z.enum(["query", "page", "country", "device", "date"])).min(1).max(3).default(["query"]).describe("What to group by"),
       query_contains: z.string().min(1).max(200).optional().describe("Only queries containing this text"),
       page_contains: z.string().min(1).max(500).optional().describe("Only pages whose URL contains this text"),
+      query_regex: z.string().min(1).max(500).optional().describe("Only queries matching this RE2 regex"),
+      exclude_query_regex: excludeQueryRegex,
+      page_regex: z.string().min(1).max(500).optional().describe("Only pages whose URL matches this RE2 regex"),
       limit: z.number().int().min(1).max(1000).default(50).describe("Most rows to return"),
     },
     annotations: read,
-  }, ({ site_url, ...o }: { site_url: string; days: number; dimensions: string[]; query_contains?: string; page_contains?: string; limit: number }) =>
+  }, ({ site_url, ...o }: { site_url: string; days: number; start_date?: string; end_date?: string; fresh: boolean; dimensions: string[];
+    query_contains?: string; page_contains?: string; query_regex?: string; exclude_query_regex?: string; page_regex?: string; limit: number }) =>
     session().searchConsolePerformance(site_url, o));
+
+  tool("search_console_trend", {
+    title: "Search Console trend",
+    description: "Compares a window with the same number of days right before it, query by query and page by page: rising, falling, new and "
+      + "lost queries, rising searches the site is losing position on, and rising and falling pages. Totals are the site's true totals. Changes nothing.",
+    inputSchema: {
+      site_url: siteUrl, ...scWindowShape(28, 240), exclude_query_regex: excludeQueryRegex,
+      min_impressions: z.number().int().min(0).default(10).describe("Skip queries and pages under this many impressions in both windows"),
+      limit: z.number().int().min(1).max(200).default(25).describe("Most rows in each list"),
+    },
+    annotations: read,
+  }, ({ site_url, ...o }: { site_url: string; days: number; start_date?: string; end_date?: string; fresh: boolean; exclude_query_regex?: string; min_impressions: number; limit: number }) =>
+    session().searchConsoleTrend(site_url, o));
+
+  tool("search_console_opportunities", {
+    title: "Search Console opportunities",
+    description: "Finds where more organic clicks are within reach: queries on positions 4-20 with the clicks a realistic climb would add, top-5 "
+      + "queries with an unusually low click-through rate (a title or description to fix), and question-shaped queries. Changes nothing.",
+    inputSchema: {
+      site_url: siteUrl, ...scWindowShape(90, 480), exclude_query_regex: excludeQueryRegex,
+      limit: z.number().int().min(1).max(200).default(25).describe("Most rows in each list"),
+    },
+    annotations: read,
+  }, ({ site_url, ...o }: { site_url: string; days: number; start_date?: string; end_date?: string; fresh: boolean; exclude_query_regex?: string; limit: number }) =>
+    session().searchConsoleOpportunities(site_url, o));
+
+  tool("search_console_inspect_urls", {
+    title: "Inspect URLs in Google's index",
+    description: "Google's index record for each page: indexed or not and the reason (for example \"Discovered - currently not indexed\"), "
+      + "last crawl, robots.txt and fetch result, the canonical Google chose against the one the page declares, and structured-data items "
+      + "with their errors. Use it when a page gets no impressions, or seems to have dropped, before assuming a ranking problem. Changes nothing.",
+    inputSchema: {
+      site_url: siteUrl,
+      urls: z.array(z.string().url().max(2000)).min(1).max(20).describe("Full page URLs inside the property, up to 20 per call (Google allows 2,000 a day per site)"),
+    },
+    annotations: read,
+  }, ({ site_url, urls }: { site_url: string; urls: string[] }) => session().searchConsoleInspectUrls(site_url, urls));
+
+  tool("search_console_sitemaps", {
+    title: "Search Console sitemaps",
+    description: "The sitemaps submitted for a website: when Google last downloaded each one, how many URLs it lists, and its error and "
+      + "warning counts. Read-only: submitting a sitemap is done in Search Console. Changes nothing.",
+    inputSchema: { site_url: siteUrl },
+    annotations: read,
+  }, ({ site_url }: { site_url: string }) => session().searchConsoleSitemaps(site_url));
 
   tool("paid_organic_overlap", {
     title: "Paid vs organic overlap",

@@ -18,7 +18,15 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, 
 | `run_gaql` | no | any read-only GAQL `SELECT` |
 | `search_console_sites` | no | the websites (Search Console properties) the login can read |
 | `search_console_summary` | no | site-wide clicks, impressions, CTR and position for a window vs. the window before it |
-| `search_console_performance` | no | organic clicks, impressions, CTR and position by query, page, country, device or date |
+| `search_console_performance` | no | organic clicks, impressions, CTR and position by query, page, country, device or date; text or RE2 regex filters |
+| `search_console_trend` | no | a window vs. the one before it, per query and per page: rising, falling, new, lost, and rising searches losing position |
+| `search_console_opportunities` | no | queries on positions 4-20 with projected click gain, top-5 queries with weak CTR, question-shaped queries |
+| `search_console_inspect_urls` | no | URL Inspection for up to 20 pages: indexed or why not, last crawl, canonical chosen vs declared, structured-data errors |
+| `search_console_sitemaps` | no | submitted sitemaps: last downloaded, URL count, errors and warnings |
+
+The Search Console tools take either `days` or exact `start_date`/`end_date`, and `fresh: true` to include the last 2-3
+days Google is still filling in. Requesting indexing and submitting sitemaps aren't available: Camberstack only holds
+the read-only scope.
 | `paid_organic_overlap` | no | joins an Ads account's search terms with a site's organic queries: searches paid for that already rank near the top, and page-2+ searches with no ad |
 | `propose_changes` | no | resolves changes against the live account, dry-runs them with Google (`validateOnly`), stores a proposal with a plain-English summary |
 | `apply_changes` | **yes** | applies a stored proposal (the user's own, un-applied, under 24h old); records each change's inverse |

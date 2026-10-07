@@ -152,6 +152,9 @@ class FakeSearchConsole {
   /** Site totals (no dimension) returned in call order. */
   totals: any[] = [];
   requests: { site: string; req: any }[] = [];
+  /** Overrides the rows for a request (per window, per page of results); undefined falls through to the defaults. */
+  rowsFor?: (req: any) => any[] | undefined;
+  inspected: string[] = [];
   async sites() {
     if (this.notGranted) throw new SearchConsoleNotGrantedError();
     return [{ siteUrl: "sc-domain:acme.test", permissionLevel: "siteOwner" }, { siteUrl: "https://other.test/", permissionLevel: "siteUnverifiedUser" }];
@@ -160,6 +163,8 @@ class FakeSearchConsole {
     if (this.notGranted) throw new SearchConsoleNotGrantedError();
     this.requests.push({ site, req });
     if (!req.dimensions.length) return [this.totals.shift()!];
+    const custom = this.rowsFor?.(req);
+    if (custom) return custom;
     return [
       { keys: ["Invoice App"], clicks: 40, impressions: 800, ctr: 0.05, position: 2.14 },        // paid, ranks top 3
       { keys: ["free invoice maker"], clicks: 3, impressions: 400, ctr: 0.0075, position: 8.2 }, // paid, ranks lower
@@ -167,6 +172,19 @@ class FakeSearchConsole {
       { keys: ["invoice"], clicks: 9, impressions: 2000, ctr: 0.0045, position: 15 },            // already a keyword
       { keys: ["invoice pdf"], clicks: 0, impressions: 50, ctr: 0, position: 12 },               // too few impressions
     ];
+  }
+  async sitemaps(_site: string) {
+    return [{ path: "https://acme.test/sitemap.xml", lastSubmitted: "2026-09-01T00:00:00Z", lastDownloaded: "2026-10-01T00:00:00Z",
+      isPending: false, isSitemapsIndex: false, errors: "0", warnings: "2", contents: [{ type: "web", submitted: "36" }] }];
+  }
+  async inspect(_site: string, url: string) {
+    this.inspected.push(url);
+    if (url.includes("broken")) throw new Error("Search Console API 403: You do not own this site, or the inspected URL is not part of this property.");
+    if (url.endsWith("/queued")) return { indexStatusResult: { verdict: "NEUTRAL", coverageState: "Discovered - currently not indexed",
+      robotsTxtState: "ROBOTS_TXT_STATE_UNSPECIFIED", pageFetchState: "PAGE_FETCH_STATE_UNSPECIFIED", crawledAs: "CRAWLING_USER_AGENT_UNSPECIFIED" } };
+    return { indexStatusResult: { verdict: "PASS", coverageState: "Submitted and indexed", lastCrawlTime: "2026-10-05T10:00:00Z",
+      robotsTxtState: "ALLOWED", pageFetchState: "SUCCESSFUL", googleCanonical: "https://acme.test/a", userCanonical: url },
+      richResultsResult: { verdict: "FAIL", detectedItems: [{ richResultType: "FAQ", items: [{ name: "x", issues: [{ issueMessage: "Missing field \"name\"", severity: "ERROR" }] }] }] } };
   }
 }
 
@@ -519,6 +537,108 @@ describe("OAuth + MCP end to end", () => {
     expect(ads.mutations.length).toBe(before);
   });
 
+  it("reads exact date windows, fresh data and regex filters", async () => {
+    const perf = (await call(token, "search_console_performance", { site_url: "sc-domain:acme.test", start_date: "2026-09-01", end_date: "2026-09-14",
+      fresh: true, dimensions: ["page", "date"], query_regex: "(?i)invoice", exclude_query_regex: "(?i)acme", page_regex: "/tools/" })).json;
+    expect(perf.window).toEqual({ start: "2026-09-01", end: "2026-09-14" });
+    expect(sc.requests.at(-1)!.req).toMatchObject({ startDate: "2026-09-01", endDate: "2026-09-14", dataState: "all", dimensionFilterGroups: [{ filters: [
+      { dimension: "query", operator: "includingRegex", expression: "(?i)invoice" },
+      { dimension: "query", operator: "excludingRegex", expression: "(?i)acme" },
+      { dimension: "page", operator: "includingRegex", expression: "/tools/" }] }] });
+    expect(perf.note).toContain("still filling in");
+
+    // fresh with a day count ends yesterday; without it, 3 days ago and no dataState sent.
+    const f = (await call(token, "search_console_performance", { site_url: "sc-domain:acme.test", days: 7, fresh: true })).json;
+    expect(f.window.end).toBe(new Date(Date.now() - 86_400_000).toISOString().slice(0, 10));
+    await call(token, "search_console_performance", { site_url: "sc-domain:acme.test", days: 7 });
+    expect(sc.requests.at(-1)!.req.dataState).toBeUndefined();
+
+    // Exact-date summary compares with the same number of days right before.
+    const sum = (await call(token, "search_console_summary", { site_url: "sc-domain:acme.test", start_date: "2026-09-15", end_date: "2026-09-28" })).json;
+    expect(sum.previous.window).toEqual({ start: "2026-09-01", end: "2026-09-14" });
+
+    for (const bad of [{ start_date: "2026-09-01" }, { start_date: "2026-09-10", end_date: "2026-09-01" }, { start_date: "2024-01-01", end_date: "2026-01-01" }]) {
+      const r = await call(token, "search_console_performance", { site_url: "sc-domain:acme.test", ...bad });
+      expect(r.isError).toBe(true);
+    }
+  });
+
+  it("compares two windows query by query and page by page, paging past 25,000 rows", async () => {
+    const big = Array.from({ length: 25_000 }, (_, i) => ({ keys: [`tail ${i}`], clicks: 0, impressions: 1, ctr: 0, position: 50 }));
+    sc.rowsFor = (req) => {
+      const cur = req.startDate === "2026-09-15";
+      if (req.dimensions[0] === "page") return cur
+        ? [{ keys: ["https://acme.test/a"], clicks: 5, impressions: 300, ctr: 0.017, position: 12 }, { keys: ["https://acme.test/b/"], clicks: 0, impressions: 5, ctr: 0, position: 30 }]
+        : [{ keys: ["https://acme.test/a"], clicks: 4, impressions: 100, ctr: 0.04, position: 15 }, { keys: ["https://acme.test/b/"], clicks: 1, impressions: 90, ctr: 0.01, position: 28 }];
+      if (cur && !req.startRow) return big;
+      if (cur) return [
+        { keys: ["invoice template"], clicks: 3, impressions: 400, ctr: 0.0075, position: 18 },  // rising, losing ground
+        { keys: ["markup calculator"], clicks: 1, impressions: 40, ctr: 0.025, position: 20 },   // falling
+        { keys: ["plumbing invoice"], clicks: 0, impressions: 60, ctr: 0, position: 34 },        // new
+      ];
+      return [
+        { keys: ["invoice template"], clicks: 4, impressions: 200, ctr: 0.02, position: 12 },
+        { keys: ["markup calculator"], clicks: 2, impressions: 110, ctr: 0.018, position: 24 },
+        { keys: ["deposit calculator"], clicks: 0, impressions: 30, ctr: 0, position: 40 },     // lost
+        { keys: ["rare"], clicks: 0, impressions: 3, ctr: 0, position: 60 },                    // under min_impressions
+      ];
+    };
+    sc.totals = [{ keys: [], clicks: 10, impressions: 1200, ctr: 0.008, position: 26 }, { keys: [], clicks: 8, impressions: 800, ctr: 0.01, position: 22 }];
+    const n = sc.requests.length;
+    try {
+      const t = (await call(token, "search_console_trend", { site_url: "sc-domain:acme.test", start_date: "2026-09-15", end_date: "2026-09-28",
+        exclude_query_regex: "(?i)acme" })).json;
+      expect(t.prior_window).toEqual({ start: "2026-09-01", end: "2026-09-14" });
+      expect(t.totals).toMatchObject({ current: { impressions: 1200 }, prior: { impressions: 800 }, impressions_pct: 50 });
+      expect(t.rising_queries.map((r: any) => r.key)).toEqual(["invoice template"]);
+      expect(t.falling_queries[0]).toMatchObject({ key: "markup calculator", impressions_change: -70, position_change: -4 });
+      expect(t.new_queries.map((r: any) => r.key)).toEqual(["plumbing invoice"]);
+      expect(t.lost_queries.map((r: any) => r.key)).toEqual(["deposit calculator"]);
+      expect(t.losing_ground[0]).toMatchObject({ key: "invoice template", position_change: 6 });
+      expect(t.rising_pages[0].key).toBe("https://acme.test/a");
+      expect(t.falling_pages[0]).toMatchObject({ key: "https://acme.test/b/", impressions_change: -85 });
+      expect(t.counts.queries_current).toBe(25_003);
+      const reqs = sc.requests.slice(n).map((r) => r.req);
+      // The second page was fetched; the brand filter went to Google on query pulls only.
+      expect(reqs.some((r) => r.startRow === 25_000)).toBe(true);
+      for (const r of reqs.filter((r) => r.dimensions[0] === "query")) expect(r.dimensionFilterGroups[0].filters[0].operator).toBe("excludingRegex");
+      for (const r of reqs.filter((r) => r.dimensions[0] === "page")) expect(r.dimensionFilterGroups).toBeUndefined();
+    } finally { sc.rowsFor = undefined; sc.totals = []; }
+  });
+
+  it("finds striking-distance queries and weak snippets", async () => {
+    const o = (await call(token, "search_console_opportunities", { site_url: "sc-domain:acme.test" })).json;
+    // Ranked by projected click gain from a ~3-place climb; "invoice pdf" has only 50 impressions but clears the 15 floor.
+    expect(o.striking_distance.map((r: any) => r.query)).toEqual(["free invoice maker", "invoice", "invoice template", "invoice pdf"]);
+    expect(o.striking_distance[0]).toMatchObject({ target_position: 5, projected_clicks: 20, click_gain: 17 });
+    // Position 2 with 5% CTR, under half the usual 15%.
+    expect(o.snippet_gaps).toEqual([{ query: "Invoice App", clicks: 40, impressions: 800, ctr_pct: 5, position: 2.1, typical_ctr_pct: 15, click_gain: 80 }]);
+    expect(o.question_queries.map((r: any) => r.query)).toEqual(["free invoice maker"]);
+    expect(Date.parse(o.window.end) - Date.parse(o.window.start)).toBe(89 * 86_400_000);
+  });
+
+  it("inspects URLs one by one, keeping a failed URL from sinking the rest, and lists sitemaps", async () => {
+    sc.inspected = [];
+    const urls = ["https://acme.test/a", "https://acme.test/queued", "https://broken.test/x", "https://acme.test/d", "https://acme.test/e", "https://acme.test/f"];
+    const r = (await call(token, "search_console_inspect_urls", { site_url: "sc-domain:acme.test", urls })).json;
+    expect([...sc.inspected].sort()).toEqual([...urls].sort());
+    expect(r.results.map((x: any) => x.url)).toEqual(urls);  // in the order asked, despite running in parallel
+    expect(r.tally).toEqual({ "Submitted and indexed": 4, "Discovered - currently not indexed": 1, error: 1 });
+    expect(r.results[2].error).toContain("not part of this property");
+    expect(r.results[0]).toMatchObject({ indexed: true, last_crawl: "2026-10-05T10:00:00Z", google_canonical: "https://acme.test/a", declared_canonical: "https://acme.test/a" });
+    expect(r.results[0].canonical_mismatch).toBeUndefined();
+    expect(r.results[3]).toMatchObject({ canonical_mismatch: true });
+    expect(r.results[0].structured_data).toEqual({ verdict: "FAIL", items: [{ type: "FAQ", severity: "ERROR", issues: ["Missing field \"name\""] }] });
+    // Never crawled: Google's *_UNSPECIFIED placeholders come back as null.
+    expect(r.results[1]).toMatchObject({ indexed: false, coverage_state: "Discovered - currently not indexed", last_crawl: null, robots_txt: null, fetch: null, crawled_as: null });
+    expect(r.note).toContain("last crawl");
+    expect((await call(token, "search_console_inspect_urls", { site_url: "sc-domain:acme.test", urls: Array(21).fill("https://acme.test/a") })).isError).toBe(true);
+
+    const m = (await call(token, "search_console_sitemaps", { site_url: "sc-domain:acme.test" })).json;
+    expect(m.sitemaps).toEqual([{ path: "https://acme.test/sitemap.xml", last_submitted: "2026-09-01T00:00:00Z", last_downloaded: "2026-10-01T00:00:00Z",
+      pending: false, index: false, errors: 0, warnings: 2, urls_submitted: 36 }]);
+  });
+
   it("says how to grant Search Console when the connection doesn't include it, and offers the demo site", async () => {
     sc.notGranted = true;
     try {
@@ -543,6 +663,17 @@ describe("OAuth + MCP end to end", () => {
     expect(ov.paid_and_ranking.map((x: any) => x.query)).toContain("emergency plumber near me");
     expect(ov.paid_and_ranking.map((x: any) => x.query)).not.toContain("tankless water heater");  // paid, but position 14
     expect(ov.organic_gaps.map((x: any) => x.query)).toContain("slab leak repair");
+
+    const DS = "sc-domain:northwind-plumbing.example";
+    const tr = (await call(token, "search_console_trend", { site_url: DS })).json;
+    expect(tr.note).toContain("Sample data");
+    expect(tr.rising_pages.map((x: any) => x.key)).toContain("https://northwind-plumbing.example/blog/noisy-water-heater");
+    const ins = (await call(token, "search_console_inspect_urls", { site_url: DS,
+      urls: ["https://northwind-plumbing.example/drains", "https://northwind-plumbing.example/blog/winterize-pipes", "https://northwind-plumbing.example/nope"] })).json;
+    expect(ins.results.map((x: any) => x.coverage_state)).toEqual(["Submitted and indexed", "Discovered - currently not indexed", "URL is unknown to Google"]);
+    expect((await call(token, "search_console_sitemaps", { site_url: DS })).json.sitemaps[0].errors).toBe(0);
+    const op = (await call(token, "search_console_opportunities", { site_url: DS, exclude_query_regex: "(?i)northwind" })).json;
+    expect(op.question_queries.map((x: any) => x.query)).toContain("how to shut off water main");
     expect(ov.organic_gaps.map((x: any) => x.query)).not.toContain("tankless water heater");      // already paid for
     expect(sc.requests.some((r) => r.site.includes("northwind"))).toBe(false);                     // never reached "Google"
 
