@@ -16,10 +16,11 @@ import type {
   OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { InvalidGrantError, InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { DB, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { encrypt, randomToken, sha256 } from "./crypto.js";
+import { consentPage } from "./pages.js";
 import {
   ADS_SCOPE, exchangeGoogleCode, googleAuthUrl, idTokenClaims, type GoogleCreds,
 } from "./google.js";
@@ -35,7 +36,16 @@ interface PendingParams {
   state?: string;
   scopes: string[];
   resource?: string;
+  /** Also in an HttpOnly cookie on the browser that saw the consent page; the Google callback needs both. */
+  nonce: string;
+  approved?: boolean;
 }
+
+/** Hosts of the AI apps we know; anything else gets a warning on the consent page. */
+const KNOWN_REDIRECT = /^(https:\/\/(claude\.ai|claude\.com|chatgpt\.com|oauth-redirect(-sandbox|-test)?\.googleusercontent\.com)|http:\/\/(localhost|127\.0\.0\.1|\[::1\]))(:\d+)?\//;
+
+/** One cookie per parked request, so two connections in two tabs don't overwrite each other. */
+export const consentCookie = (id: string) => `cs_auth_${id.slice(0, 12)}`;
 
 export class ClientsStore implements OAuthRegisteredClientsStore {
   constructor(private db: DB) {}
@@ -91,10 +101,54 @@ export class CamberstackProvider implements OAuthServerProvider {
       state: params.state,
       scopes: params.scopes?.length ? params.scopes : [MCP_SCOPE],
       resource: params.resource?.href,
+      nonce: randomToken(24),
     };
     this.db.prepare("INSERT INTO pending_auth (id, client_id, params, created_at) VALUES (?, ?, ?, ?)")
       .run(id, client.client_id, JSON.stringify(p), now());
-    res.redirect(302, googleAuthUrl(this.opts.google, this.googleRedirectUri, id));
+    // Registration is open (RFC 7591), so anyone can register a client with their own redirect and mail
+    // the /authorize link to a victim; Google's screen would show only "Camberstack". Show who's asking
+    // first, and bind the request to this browser so a pre-built Google URL can't skip the page.
+    const secure = this.opts.baseUrl.startsWith("https://");
+    res.append("Set-Cookie", `${consentCookie(id)}=${p.nonce}; Path=/oauth/; HttpOnly; SameSite=Lax; Max-Age=3600${secure ? "; Secure" : ""}`);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    res.status(200).type("html").send(consentPage(this.opts.baseUrl, {
+      id, clientName: client.client_name ?? "", redirectHost: new URL(params.redirectUri).host || params.redirectUri,
+      known: KNOWN_REDIRECT.test(params.redirectUri),
+    }));
+  }
+
+  /** The parked request, only if it's live and this browser is the one that was shown the consent page. */
+  private pendingFor(id: string | undefined, browserNonce: string | undefined) {
+    const row = id
+      ? (this.db.prepare("SELECT * FROM pending_auth WHERE id = ?").get(id) as
+          { id: string; client_id: string; params: string; created_at: number } | undefined)
+      : undefined;
+    if (!row || row.created_at < now() - 3600) {
+      throw new Error("This sign-in link has expired. Start the connection again from your AI app.");
+    }
+    const p = JSON.parse(row.params) as PendingParams;
+    const a = Buffer.from(p.nonce ?? ""), b = Buffer.from(browserNonce ?? "");
+    if (!p.nonce || a.length !== b.length || !timingSafeEqual(a, b)) {
+      throw new Error("This sign-in wasn't started in this browser. Start the connection again from your AI app.");
+    }
+    return { row, p };
+  }
+
+  /** Step 1b: the user answered the consent page. Returns where to send the browser. */
+  consent(id: string | undefined, approve: boolean, browserNonce: string | undefined): string {
+    const { row, p } = this.pendingFor(id, browserNonce);
+    if (!approve) {
+      this.db.prepare("DELETE FROM pending_auth WHERE id = ?").run(row.id);
+      const back = new URL(p.redirectUri);
+      if (p.state) back.searchParams.set("state", p.state);
+      back.searchParams.set("error", "access_denied");
+      back.searchParams.set("error_description", "The user cancelled the connection.");
+      return back.toString();
+    }
+    this.db.prepare("UPDATE pending_auth SET params = ? WHERE id = ?").run(JSON.stringify({ ...p, approved: true }), row.id);
+    return googleAuthUrl(this.opts.google, this.googleRedirectUri, row.id);
   }
 
   /**
@@ -102,16 +156,12 @@ export class CamberstackProvider implements OAuthServerProvider {
    * client's redirect_uri carrying either our code or an OAuth error — and, when Google Ads was
    * connected, who connected and whether it was their first time (for our own ad measurement).
    */
-  async completeGoogleCallback(q: { code?: string; state?: string; error?: string }): Promise<{ to: string; userId?: string; created?: boolean }> {
-    const pending = q.state
-      ? (this.db.prepare("SELECT * FROM pending_auth WHERE id = ?").get(q.state) as
-          { id: string; client_id: string; params: string; created_at: number } | undefined)
-      : undefined;
-    if (!pending || pending.created_at < now() - 3600) {
-      throw new Error("This sign-in link has expired. Start the connection again from your AI app.");
-    }
+  async completeGoogleCallback(
+    q: { code?: string; state?: string; error?: string }, browserNonce: string | undefined,
+  ): Promise<{ to: string; userId?: string; created?: boolean }> {
+    const { row: pending, p } = this.pendingFor(q.state, browserNonce);
+    if (!p.approved) throw new Error("This sign-in wasn't approved on Camberstack. Start the connection again from your AI app.");
     this.db.prepare("DELETE FROM pending_auth WHERE id = ?").run(pending.id);
-    const p = JSON.parse(pending.params) as PendingParams;
     const back = new URL(p.redirectUri);
     if (p.state) back.searchParams.set("state", p.state);
 

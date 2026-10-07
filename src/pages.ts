@@ -530,6 +530,7 @@ Humans at Camberstack do not read your Google Ads data unless you ask us to for 
 <tr><td>Google email and account ID</td><td>Identify you across connections</td><td>You ask us to delete it</td></tr>
 <tr><td>Google refresh token, encrypted (AES-256-GCM)</td><td>Call the Google Ads API when you use a tool</td><td>You disconnect or revoke access</td></tr>
 <tr><td>A sign-in session for the account page (a cookie; we store only its hash)</td><td>Keep you signed in to camberstack.io/account</td><td>7 days, or until you sign out</td></tr>
+<tr><td>A random value in a cookie while you connect an AI app</td><td>Check that the browser finishing the Google sign-in is the one that approved the connection</td><td>The sign-in finishes, or 1 hour</td></tr>
 <tr><td>Tokens we issue to your AI app (stored as hashes)</td><td>Authenticate your AI app</td><td>Expiry (1 hour access, 90 days refresh) or disconnect</td></tr>
 <tr><td>Proposals: the changes requested, their summary and results</td><td>Show what changed and let you undo it</td><td>You ask us to delete them</td></tr>
 <tr><td>A usage log: which tool ran, for which Google Ads account ID, when, how long it took and any error message. Never the tool's inputs or results</td><td>Find and fix failures, see which features are used, and count how many Google Ads accounts you use for your plan</td><td>You ask us to delete it</td></tr>
@@ -614,6 +615,24 @@ export function appPage(baseUrl: string, title: string, path: string, body: stri
 /** Plain page for billing outcomes; body is trusted HTML built by the caller. */
 export function infoPage(baseUrl: string, title: string, body: string): string {
   return layout({ baseUrl, path: "/", title: `${esc(title)} | Camberstack`, description: title, body: `<h1>${esc(title)}</h1>${body}` });
+}
+
+/**
+ * /authorize: which app is asking, and where the sign-in goes back to, before we send anyone to Google.
+ * Google's own screen names only Camberstack, so without this a link built by a stranger looks identical.
+ */
+export function consentPage(baseUrl: string, o: { id: string; clientName: string; redirectHost: string; known: boolean }): string {
+  const warn = o.known ? "" : `<p class="lede"><strong>We don't recognize this address.</strong> If someone sent you this link, or you didn't just add Camberstack to your AI app yourself, choose Cancel: whoever controls ${esc(o.redirectHost)} would be able to use your Google Ads account.</p>`;
+  return layout({ baseUrl, path: "/authorize", noindex: true, title: "Connect to Camberstack | Camberstack",
+    description: "Approve an app's access to Camberstack.",
+    body: `<h1>Connect ${esc(o.clientName || "an app")} to Camberstack?</h1>
+<p class="lede">This app asked for access to your Google Ads account through Camberstack. When you approve, you'll be sent back to <strong>${esc(o.redirectHost)}</strong>.</p>
+${warn}<p>Only continue if you just clicked Connect in your AI app.</p>
+<form method="post" action="/oauth/consent">
+<input type="hidden" name="id" value="${esc(o.id)}">
+<button class="btn" name="decision" value="approve" style="border:0;cursor:pointer">Continue to Google</button>
+<button class="linkish" name="decision" value="deny" style="margin-left:1em">Cancel</button>
+</form>` });
 }
 
 export function errorPage(baseUrl: string, message: string): string {

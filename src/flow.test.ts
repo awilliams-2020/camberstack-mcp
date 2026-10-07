@@ -267,15 +267,13 @@ async function connect(cookie?: string, state = "xyz"): Promise<string> {
   const auth = new URL(`${base}/authorize`);
   auth.search = new URLSearchParams({ client_id: client.client_id, redirect_uri: redirect, response_type: "code",
     code_challenge: challenge, code_challenge_method: "S256", state, scope: "ads" }).toString();
-  const toGoogle = await fetch(auth, { redirect: "manual" });
-  expect(toGoogle.status).toBe(302);
-  const g = new URL(toGoogle.headers.get("location")!);
+  const { g, consent } = await approve(auth);
   expect(g.host).toBe("accounts.google.com");
   expect(g.searchParams.get("scope")).toContain("adwords");
   expect(g.searchParams.get("scope")).toContain("webmasters.readonly");
 
   const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`,
-    { redirect: "manual", ...(cookie ? { headers: { cookie } } : {}) });
+    { redirect: "manual", headers: { cookie: [cookie, consent].filter(Boolean).join("; ") } });
   expect(back.status).toBe(302);
   lastCallbackCookies = back.headers.get("set-cookie") ?? "";
   const cb = new URL(back.headers.get("location")!);
@@ -288,6 +286,23 @@ async function connect(cookie?: string, state = "xyz"): Promise<string> {
   });
   expect(tok.status).toBe(200);
   return (await tok.json()).access_token;
+}
+
+/** /authorize → our consent page → "Continue to Google". Returns Google's URL and the browser's consent cookie. */
+async function approve(auth: URL, decision = "approve"): Promise<{ g: URL; consent: string; html: string; id: string }> {
+  const page = await fetch(auth, { redirect: "manual" });
+  expect(page.status).toBe(200);
+  expect(page.headers.get("cache-control")).toBe("no-store");
+  const html = await page.text();
+  const consent = page.headers.get("set-cookie")!.split(";")[0]!;
+  expect(consent).toMatch(/^cs_auth_/);
+  const id = html.match(/name="id" value="([^"]+)"/)![1]!;
+  const post = await fetch(`${base}/oauth/consent`, {
+    method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", cookie: consent },
+    body: new URLSearchParams({ id, decision }),
+  });
+  expect(post.status).toBe(303);
+  return { g: new URL(post.headers.get("location")!), consent, html, id };
 }
 
 /** Google → our shared callback → the page's own callback, which sets its session cookie. */
@@ -330,6 +345,60 @@ describe("OAuth + MCP end to end", () => {
     expect(decrypt(key, u.enc_refresh)).toBe("g-refresh");
     const raw = db.prepare("SELECT token_hash FROM tokens").all() as any[];
     expect(raw.some((r) => r.token_hash === token)).toBe(false); // hashed, never stored raw
+  });
+
+  it("shows who's asking before Google, and won't finish a sign-in this browser didn't approve", async () => {
+    // A stranger registers their own client (open DCR) and builds the links a phishing mail would carry.
+    const evil = "https://attacker.example/cb";
+    const reg = await (await fetch(`${base}/register`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ redirect_uris: [evil], client_name: "<b>Claude</b>", token_endpoint_auth_method: "none" }),
+    })).json();
+    const auth = new URL(`${base}/authorize`);
+    auth.search = new URLSearchParams({ client_id: reg.client_id, redirect_uri: evil, response_type: "code",
+      code_challenge: "x".repeat(43), code_challenge_method: "S256", state: "s1", scope: "ads" }).toString();
+
+    // The page names the app (escaped) and where it returns to, and warns about an unknown host.
+    const { g, html, id } = await approve(auth);
+    expect(html).toContain("&lt;b&gt;Claude&lt;/b&gt;");
+    expect(html).not.toContain("<b>Claude</b>");
+    expect(html).toContain("attacker.example");
+    expect(html).toContain("We don't recognize this address");
+
+    // The attacker approved in THEIR browser; the Google link they forward fails in the victim's (no cookie).
+    const victim = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
+    expect(victim.status).toBe(400);
+    expect(await victim.text()).toContain("wasn't started in this browser");
+
+    // A cross-site auto-submit of the consent form carries no cookie either.
+    const forged = await fetch(`${base}/oauth/consent`, {
+      method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ id, decision: "approve" }),
+    });
+    expect(forged.status).toBe(400);
+
+    // Skipping the page: Google's URL for a request nobody approved is refused even with the right cookie.
+    const page = await fetch(auth, { redirect: "manual" });
+    const consent = page.headers.get("set-cookie")!.split(";")[0]!;
+    const pid = (await page.text()).match(/name="id" value="([^"]+)"/)![1]!;
+    const skipped = await fetch(`${base}/oauth/google/callback?code=gcode&state=${pid}`, { redirect: "manual", headers: { cookie: consent } });
+    expect(skipped.status).toBe(400);
+    expect(await skipped.text()).toContain("wasn't approved");
+
+    // Cancel goes back to the app with access_denied, and the request is gone.
+    const { g: denied } = await approve(auth, "deny");
+    expect(denied.origin + denied.pathname).toBe(evil);
+    expect(denied.searchParams.get("error")).toBe("access_denied");
+    expect(denied.searchParams.get("state")).toBe("s1");
+
+    // A known AI app gets no warning.
+    const ok = await (await fetch(`${base}/register`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ redirect_uris: ["https://claude.ai/api/mcp/auth_callback"], client_name: "Claude", token_endpoint_auth_method: "none" }),
+    })).json();
+    auth.search = new URLSearchParams({ client_id: ok.client_id, redirect_uri: "https://claude.ai/api/mcp/auth_callback", response_type: "code",
+      code_challenge: "x".repeat(43), code_challenge_method: "S256", scope: "ads" }).toString();
+    expect(await (await fetch(auth)).text()).not.toContain("We don't recognize");
   });
 
   it("lists tools", async () => {

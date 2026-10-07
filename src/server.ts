@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { loadConfig, type Config } from "./config.js";
 import { now, openDb, sweep, type DB } from "./db.js";
 import { deriveKey } from "./crypto.js";
-import { CamberstackProvider, MCP_SCOPE } from "./provider.js";
+import { CamberstackProvider, MCP_SCOPE, consentCookie } from "./provider.js";
 import { UserSession, type SessionDeps } from "./session.js";
 import { Relay } from "./relay.js";
 import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
@@ -18,6 +18,7 @@ import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
 import { errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage, toolsPage } from "./pages.js";
+import { readCookie } from "./http.js";
 
 /** brand/ sits beside src/ and dist/ at the package root. */
 const BRAND_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "..", "brand");
@@ -148,6 +149,18 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     session: (userId) => UserSession.load(deps, userId), billingLink: (kind, userId) => billing.link(kind, userId),
   });
 
+  // The consent page's answer (provider.authorize renders it). Same-origin form POST; the cookie the page set
+  // is what proves this browser saw it, so a cross-site auto-submit or a forwarded link gets nowhere.
+  app.post("/oauth/consent", express.urlencoded({ extended: false, limit: "4kb" }), (req, res) => {
+    const id = typeof req.body?.id === "string" ? req.body.id : undefined;
+    try {
+      const to = provider.consent(id, req.body?.decision === "approve", id ? readCookie(req, consentCookie(id)) : undefined);
+      res.redirect(303, to);
+    } catch (e) {
+      res.status(400).type("html").send(errorPage(cfg.baseUrl, (e as Error).message));
+    }
+  });
+
   app.get("/oauth/google/callback", async (req, res) => {
     // One registered redirect URI serves every Google flow. Web sign-ins (/admin, /account) are told
     // apart by their state prefix and finish on their own path, where their session cookie is scoped.
@@ -156,12 +169,14 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
       res.redirect(302, `${site.callbackUrl}?${new URLSearchParams(req.query as Record<string, string>)}`);
       return;
     }
+    const state = typeof req.query.state === "string" ? req.query.state : undefined;
     try {
       const done = await provider.completeGoogleCallback({
         code: typeof req.query.code === "string" ? req.query.code : undefined,
-        state: typeof req.query.state === "string" ? req.query.state : undefined,
+        state,
         error: typeof req.query.error === "string" ? req.query.error : undefined,
-      });
+      }, state ? readCookie(req, consentCookie(state)) : undefined);
+      res.append("Set-Cookie", `${consentCookie(state!)}=; Path=/oauth/; Max-Age=0; SameSite=Lax${cfg.baseUrl.startsWith("https://") ? "; Secure" : ""}`);
       if (done.userId) {
         analytics.event(req, "connect");
         adConversions.record(req, res, done.userId, !!done.created);
