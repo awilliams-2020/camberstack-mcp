@@ -363,7 +363,7 @@ describe("OAuth + MCP end to end", () => {
     expect(html).toContain("&lt;b&gt;Claude&lt;/b&gt;");
     expect(html).not.toContain("<b>Claude</b>");
     expect(html).toContain("attacker.example");
-    expect(html).toContain("We don't recognize this address");
+    expect(html).toContain("Unrecognized address");
 
     // The attacker approved in THEIR browser; the Google link they forward fails in the victim's (no cookie).
     const victim = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`, { redirect: "manual" });
@@ -398,7 +398,7 @@ describe("OAuth + MCP end to end", () => {
     })).json();
     auth.search = new URLSearchParams({ client_id: ok.client_id, redirect_uri: "https://claude.ai/api/mcp/auth_callback", response_type: "code",
       code_challenge: "x".repeat(43), code_challenge_method: "S256", scope: "ads" }).toString();
-    expect(await (await fetch(auth)).text()).not.toContain("We don't recognize");
+    expect(await (await fetch(auth)).text()).not.toContain("Unrecognized address");
   });
 
   it("lists tools", async () => {

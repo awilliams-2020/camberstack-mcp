@@ -620,19 +620,33 @@ export function infoPage(baseUrl: string, title: string, body: string): string {
 /**
  * /authorize: which app is asking, and where the sign-in goes back to, before we send anyone to Google.
  * Google's own screen names only Camberstack, so without this a link built by a stranger looks identical.
+ * A bare card, not the site shell: the buttons are the page. The warning is the one line that matters.
  */
-export function consentPage(baseUrl: string, o: { id: string; clientName: string; redirectHost: string; known: boolean }): string {
-  const warn = o.known ? "" : `<p class="lede"><strong>We don't recognize this address.</strong> If someone sent you this link, or you didn't just add Camberstack to your AI app yourself, choose Cancel: whoever controls ${esc(o.redirectHost)} would be able to use your Google Ads account.</p>`;
-  return layout({ baseUrl, path: "/authorize", noindex: true, title: "Connect to Camberstack | Camberstack",
-    description: "Approve an app's access to Camberstack.",
-    body: `<h1>Connect ${esc(o.clientName || "an app")} to Camberstack?</h1>
-<p class="lede">This app asked for access to your Google Ads account through Camberstack. When you approve, you'll be sent back to <strong>${esc(o.redirectHost)}</strong>.</p>
-${warn}<p>Only continue if you just clicked Connect in your AI app.</p>
-<form method="post" action="/oauth/consent">
+export function consentPage(_baseUrl: string, o: { id: string; clientName: string; redirectHost: string; known: boolean }): string {
+  const host = esc(o.redirectHost);
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect to Camberstack</title><meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.png" type="image/png" sizes="32x32">
+<style>${CSS}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+.consent{width:100%;max-width:420px;text-align:center}
+.consent h1{font-size:24px;margin:16px 0 8px}.consent p{margin:0 0 20px}
+.consent .warn{border:1px solid #c0392b;border-radius:8px;padding:10px 12px;font-size:15px;text-align:left}
+.consent .btn{width:100%;border:0;cursor:pointer;font-size:16px}.consent .linkish{margin-top:14px;color:var(--muted)}
+</style></head><body>
+<main class="card consent">
+<img src="/favicon.svg" alt="Camberstack" width="40" height="40">
+<h1>Connect ${esc(o.clientName || "this app")} to Camberstack?</h1>
+<p class="muted">You'll return to <strong>${host}</strong> after signing in with Google.</p>
+${o.known ? "" : `<p class="warn"><strong>Unrecognized address.</strong> If someone sent you this link, cancel: ${host} would get access to your Google Ads.</p>\n`}<form method="post" action="/oauth/consent">
 <input type="hidden" name="id" value="${esc(o.id)}">
-<button class="btn" name="decision" value="approve" style="border:0;cursor:pointer">Continue to Google</button>
-<button class="linkish" name="decision" value="deny" style="margin-left:1em">Cancel</button>
-</form>` });
+<button class="btn" name="decision" value="approve">Continue to Google</button><br>
+<button class="linkish" name="decision" value="deny">Cancel</button>
+</form>
+</main>
+</body></html>`;
 }
 
 export function errorPage(baseUrl: string, message: string): string {
