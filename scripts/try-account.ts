@@ -19,5 +19,4 @@ const cid = process.argv[2] ?? accounts.find((a) => !a.manager)?.customerId;
 if (cid) {
   const days = Number(process.argv[3] ?? 30);
   console.log(JSON.stringify(await s.overview(cid, days), null, 2));
-  console.log(JSON.stringify(await s.wastedSpend(cid, days), null, 2));
 }

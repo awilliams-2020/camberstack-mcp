@@ -1,7 +1,7 @@
 {
   "name": "camberstack-mcp",
   "version": "0.8.0",
-  "description": "Google Ads MCP server: your AI finds wasted spend, then makes only the changes you approve.",
+  "description": "Google Ads + Search Console MCP server: build Search campaigns, research keywords, and make only the changes you approve, with undo.",
   "private": true,
   "type": "module",
   "engines": {
@@ -39,7 +39,7 @@
     "claude",
     "chatgpt",
     "negative-keywords",
-    "wasted-spend"
+    "search-console"
   ],
   "repository": {
     "type": "git",
