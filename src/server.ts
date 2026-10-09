@@ -1,7 +1,9 @@
 import express, { type Express } from "express";
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { createMcpHandler, isLegacyRequest } from "@modelcontextprotocol/server";
+import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from "@modelcontextprotocol/node";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { loadConfig, type Config } from "./config.js";
@@ -193,16 +195,24 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(mcpUrl),
   });
 
-  // Stateless Streamable HTTP: a fresh server + transport per request, bound to the caller.
-  app.post("/mcp", bearer, express.json({ limit: "1mb" }), async (req, res) => {
-    const userId = String(req.auth?.extra?.userId ?? "");
+  // A fresh server per request, bound to the caller the bearer middleware verified.
+  const serverFor = (auth: AuthInfo | undefined) => {
+    const userId = String(auth?.extra?.userId ?? "");
+    const clientId = auth?.clientId ?? null;
     let session: UserSession | undefined;
-    const clientId = req.auth?.clientId ?? null;
-    const server = buildServer(() => (session ??= UserSession.load(deps, userId)), (c) => {
+    return buildServer(() => (session ??= UserSession.load(deps, userId)), (c) => {
       logCall.run(now(), userId, clientId, c.tool, c.customerId, c.ok ? 1 : 0, c.error, c.ms, c.bytes);
     });
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    res.on("close", () => { void transport.close(); void server.close(); });
+  };
+  // 2026-07-28 traffic (server/discover, per-request _meta envelope). The SDK's own legacy leg would
+  // answer 2025-era requests over SSE, so it is off and those keep the JSON-response wiring below.
+  // The OAuth server (mcpAuthRouter, requireBearerAuth) stays on SDK 1.x: v2 ships no authorization server.
+  const modern = toNodeHandler(createMcpHandler((ctx) => serverFor(ctx.authInfo as AuthInfo | undefined), {
+    legacy: "reject",
+    onerror: (e) => console.warn(`mcp error: ${e.message}`),
+  }));
+
+  app.post("/mcp", bearer, express.json({ limit: "1mb" }), async (req, res) => {
     res.on("finish", () => {
       // Diagnostics for rejected requests only: method + protocol header, never arguments or data.
       if (res.statusCode >= 400) {
@@ -212,6 +222,11 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
       }
     });
     try {
+      if (!(await isLegacyRequest(await toWebRequest(req, req.body), req.body))) return await modern(req, res, req.body);
+      // 2025-era: stateless, one JSON body per request, as before v2.
+      const server = serverFor(req.auth);
+      const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+      res.on("close", () => { void transport.close(); void server.close(); });
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
     } catch (e) {

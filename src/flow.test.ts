@@ -428,6 +428,37 @@ describe("OAuth + MCP end to end", () => {
     expect(r.json.campaigns.length).toBeGreaterThan(0);
   });
 
+  it("serves 2026-07-28 clients: server/discover, then a tool call bound to the caller", async () => {
+    const before = (db.prepare("SELECT COUNT(*) n FROM tool_calls").get() as any).n;
+    const meta = {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { name: "test-client", version: "1.0.0" },
+      "io.modelcontextprotocol/clientCapabilities": {},
+    };
+    const modern = (method: string, params: { name?: string; arguments?: object } = {}, auth = token) => fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${auth}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream",
+        "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": method,
+        ...("name" in params ? { "Mcp-Name": String(params.name) } : {}) },
+      body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, params: { ...params, _meta: meta } }),
+    });
+    expect((await modern("server/discover", {}, "bogus")).status).toBe(401);
+    const disc = await modern("server/discover");
+    const discovered = await disc.json();
+    expect(disc.status, JSON.stringify(discovered)).toBe(200);
+    expect(discovered.result.supportedVersions).toContain("2026-07-28");
+    const res = await modern("tools/call", { name: "account_overview", arguments: { customer_id: "111-222-3333", days: 30 } });
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.result.isError).toBeFalsy();
+    expect(JSON.parse(body.result.content[0].text).campaigns.length).toBeGreaterThan(0);
+    const row = db.prepare("SELECT * FROM tool_calls ORDER BY id DESC LIMIT 1").get() as any;
+    expect((db.prepare("SELECT COUNT(*) n FROM tool_calls").get() as any).n).toBe(before + 1);
+    expect(row).toMatchObject({ tool: "account_overview", ok: 1 });
+    expect(row.user_id).toBeTruthy();
+    expect(row.client_id).toBeTruthy();
+  });
+
   it("proposes without writing, applies, and undoes", async () => {
     const p = await call(token, "propose_changes", { customer_id: "1112223333", changes: [
       { type: "add_negative_keywords", campaign_id: "10", keywords: [{ text: "free", match_type: "PHRASE" }] },

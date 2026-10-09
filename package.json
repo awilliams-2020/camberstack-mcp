@@ -1,6 +1,6 @@
 {
   "name": "camberstack-mcp",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Google Ads + Search Console MCP server: build Search campaigns, research keywords, and make only the changes you approve, with undo.",
   "private": true,
   "type": "module",
@@ -15,7 +15,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.1",
     "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/server": "^2.3.1",
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
     "zod": "^4.6.5"

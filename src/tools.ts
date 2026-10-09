@@ -1,11 +1,11 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import { PublicChangeSchema } from "./changes.js";
 import { isDemo, type UserSession } from "./session.js";
 
 export const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.8.0";
+export const SERVER_VERSION = "0.9.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
@@ -82,7 +82,11 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   // `as never`: registerTool infers its handler type from a literal inputSchema, which a helper cannot pass through.
   const tool = <A>(name: string, config: { title: string; description: string; inputSchema?: z.ZodRawShape; annotations: ToolAnnotations },
     fn: (a: A) => Promise<unknown> | unknown) => (catalog.push({ name, ...config }),
-    server.registerTool(name, { ...config, annotations: { ...config.annotations, title: config.title } }, wrap(name, fn) as never));
+    server.registerTool(name, {
+      ...config,
+      inputSchema: config.inputSchema && z.object(config.inputSchema),
+      annotations: { ...config.annotations, title: config.title },
+    }, wrap(name, fn) as never));
   const read = { readOnlyHint: true, openWorldHint: true } as const;
 
   tool("list_accounts", {
