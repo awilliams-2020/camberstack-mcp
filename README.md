@@ -56,6 +56,12 @@ PKCE). Its `/authorize` sends the user to Google for `adwords` + `openid email`,
 token is stored AES-256-GCM encrypted and never leaves the server. The MCP client gets
 Camberstack's own tokens, which are stored only as SHA-256 hashes.
 
+Two MCP SDKs, on purpose: `/mcp` is served by SDK v2 (`@modelcontextprotocol/server` + `/node`), which
+answers both 2026-07-28 clients (`server/discover`) and 2025-era ones (`initialize`, kept on a
+JSON-response transport). The authorization server (`mcpAuthRouter`, `requireBearerAuth`) stays on
+`@modelcontextprotocol/sdk` 1.x, because v2 ships only the resource-server half. Don't drop 1.x
+until v2 (or a companion package) has `/authorize`, `/token` and `/register`.
+
 ## Run it
 
 ```bash
