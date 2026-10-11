@@ -1,4 +1,5 @@
 import express, { type Express } from "express";
+import { existsSync } from "node:fs";
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
@@ -22,6 +23,7 @@ import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
 import { aboutPage, errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
 import { indexNowKey, pageDates, pingIndexNow } from "./lastmod.js";
 import { readCookie } from "./http.js";
+const DRAIN_FILE = "/tmp/drain";
 
 /** brand/ sits beside src/ and dist/ at the package root. */
 const BRAND_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "..", "brand");
@@ -299,7 +301,12 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     if (b) analytics.pageview(req, b);
     res.status(204).end();
   });
-  app.get("/healthz", (_q, r) => { r.json({ ok: true, version: SERVER_VERSION, sha: cfg.gitSha }); });
+  // Blue/green drain hook: deploy.sh touches DRAIN_FILE in the outgoing color, traefik's healthcheck sees 503
+  // and stops routing new requests to it, while requests already in flight still finish. Then it is stopped.
+  app.get("/healthz", (_q, r) => {
+    if (existsSync(DRAIN_FILE)) { r.status(503).json({ ok: false, draining: true, sha: cfg.gitSha }); return; }
+    r.json({ ok: true, version: SERVER_VERSION, sha: cfg.gitSha });
+  });
 
   app.use((_req, res) => { res.status(404).type("html").send(errorPage(cfg.baseUrl, "Page not found.")); });
 
