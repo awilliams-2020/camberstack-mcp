@@ -1181,6 +1181,12 @@ describe("OAuth + MCP end to end", () => {
       expect(img.headers.get("content-type")).toContain("image/webp");
     }
     expect(claude).toContain('src="/shots/claude-1.webp"');
+    // Each guide troubleshoots in the words users see, with its own app's fix.
+    const cg = await (await fetch(`${base}/google-ads-claude`)).text(), gg = await (await fetch(`${base}/google-ads-chatgpt`)).text();
+    for (const g of [cg, gg]) for (const msg of ["NOT_ADS_USER", "TWO_STEP_VERIFICATION_NOT_ENROLLED", "Proposal is older than 24 hours", "Plan limit", "sufficient permission for site"])
+      expect(g).toContain(msg);
+    expect(cg).toContain("turn Camberstack on");
+    expect(gg).toContain("@Camberstack how did my campaigns");
     expect((await fetch(`${base}/shots/..%2Fserver.ts`)).status).toBe(404);
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-ads-chatgpt`);
     expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-ads-chatgpt"');

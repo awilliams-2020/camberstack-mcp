@@ -260,6 +260,39 @@ const CAN_CHANGE = `<h2>What it can change</h2>
 <p>Negative keywords, budgets and end dates, pausing and re-enabling, bids, targeting and bid strategy, conversion goals, and whole new
 campaigns (always created paused). You approve each change, and each one can be undone. <a href="/#changes">The full list</a>, and <a href="/tools">every tool</a>.</p>`;
 
+/**
+ * Problems users actually hit (tool_calls.error, 2026-10), with the wording they see, so a search for the message finds
+ * the fix. `notUsed` and `reAdd` are the app-specific steps.
+ */
+const troubleshooting = (app: string, notUsed: string, reAdd: string) => `<h2 id="troubleshooting">Troubleshooting</h2>
+<h3>${app} answers without using Camberstack</h3>
+<p>${notUsed}</p>
+<h3>A tool or feature mentioned here isn't available</h3>
+<p>${app} reads Camberstack's list of tools when you add it, and keeps that list. After Camberstack adds tools, ${reAdd}
+Your Camberstack plan, proposals and change history are kept.</p>
+<h3>"No Google Ads accounts" or only the demo account</h3>
+<p>The Google login you connected with has no access to a Google Ads account (Google's message is <code>NOT_ADS_USER</code>), so Camberstack
+offers the demo account instead. Check which Google login has access in Google Ads, under <strong>Admin</strong>, then
+<strong>Access and security</strong>, and connect again with that one. ${reAdd.replace(/^\w/, (c) => c.toUpperCase())}</p>
+<h3>"Enable 2-Step Verification" (<code>TWO_STEP_VERIFICATION_NOT_ENROLLED</code>)</h3>
+<p>The Google Ads account requires 2-Step Verification on every login that uses it, including through apps like this one. Turn it on
+at <a href="https://myaccount.google.com/security">myaccount.google.com/security</a>, then ask again.</p>
+<h3>A change is refused for lack of permission</h3>
+<p>Reading needs any access to the account; applying a change needs <strong>Standard</strong> or <strong>Admin</strong> access.
+With Read only access, ask an account admin to raise it in Google Ads, under <strong>Admin</strong>, then <strong>Access and security</strong>.</p>
+<h3>"Proposal is older than 24 hours"</h3>
+<p>Proposals expire after a day, because the account may have changed since. Ask ${app} to propose the change again.</p>
+<h3>"Plan limit"</h3>
+<p>The Free plan covers one Google Ads account at a time, so a second one asks you to upgrade, with a personal checkout link.
+An account stops counting ${ACCOUNT_WINDOW_DAYS} days after you last used it. Undo and change history always work. <a href="/#pricing">Plans</a>.</p>
+<h3>"Search Console access isn't part of this Google connection"</h3>
+<p>The Search Console box was unticked on Google's sign-in screen, or you connected before the Search Console tools existed.
+Connect again and leave the box ticked: ${reAdd}</p>
+<h3>"User does not have sufficient permission for site"</h3>
+<p>The website name must match a Search Console property exactly: <code>sc-domain:example.com</code> and
+<code>https://www.example.com/</code> are different properties. Ask <em>"List my Search Console sites"</em> first. If the site isn't
+listed, it's verified under a different Google login.</p>`;
+
 /** The questions every guide answers; `app` is the AI app's name. */
 const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer token?</h3>
 <p>No. Camberstack has its own Google Ads API access. You sign in with Google and choose what to share.</p>
@@ -280,7 +313,7 @@ export function claudeGuidePage(baseUrl: string): string {
     description: "Connect your Google Ads account to Claude with an MCP server. No developer token or Google Cloud project: sign in with Google, then ask Claude about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
-      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-02",
+      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-10",
       author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
       about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
     },
@@ -316,6 +349,10 @@ ${ASK_FIRST}
 
 ${CAN_CHANGE}
 
+${troubleshooting("Claude",
+  "Claude only uses a connector that's switched on for the chat. Click <strong>+</strong> at the bottom left, open <strong>Connectors</strong> and turn Camberstack on. Naming it helps too: <em>\"Use Camberstack to…\"</em>.",
+  "remove the connector in <strong>Settings</strong>, under <strong>Connectors</strong>, and add it again with the same URL.")}
+
 <h2>How it compares with Google's own Google Ads MCP</h2>
 <p>Google publishes an open-source Google Ads MCP server. As of September 2026 it is <strong>read-only</strong>, and you run it
 yourself: you need your own Google Ads API developer token, a Google Cloud project and an OAuth client. That suits developers
@@ -345,7 +382,7 @@ export function chatgptGuidePage(baseUrl: string): string {
     description: "Connect your Google Ads account to ChatGPT with a plugin. No developer token or Google Cloud project: turn on developer mode, add one URL, sign in with Google, then ask about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
-      headline: "Connect Google Ads to ChatGPT", url: `${baseUrl}/google-ads-chatgpt`, dateModified: "2026-10-02",
+      headline: "Connect Google Ads to ChatGPT", url: `${baseUrl}/google-ads-chatgpt`, dateModified: "2026-10-10",
       author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
       about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
     },
@@ -398,6 +435,10 @@ confirm tool calls that change things unless you've turned that off.</li>
 ${ASK_FIRST}
 
 ${CAN_CHANGE}
+
+${troubleshooting("ChatGPT",
+  "ChatGPT uses a custom plugin only when you mention it. Start the message with <strong>@</strong> and its name: <em>\"@Camberstack how did my campaigns do last month?\"</em>",
+  "delete Camberstack under <strong>Plugins</strong> and create it again with the same URL, as in the steps above.")}
 
 <h2>Questions</h2>
 <h3>Why does it take so many steps?</h3>
