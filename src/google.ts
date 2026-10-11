@@ -101,6 +101,48 @@ export function idTokenClaims(idToken: string): { sub: string; email: string; em
   return { sub: String(payload.sub), email: String(payload.email).toLowerCase(), emailVerified: payload.email_verified === true };
 }
 
+const DURING_LITERALS = "TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, LAST_30_DAYS, THIS_MONTH, LAST_MONTH, LAST_BUSINESS_WEEK, "
+  + "THIS_WEEK_MON_TODAY, THIS_WEEK_SUN_TODAY, LAST_WEEK_MON_SUN, LAST_WEEK_SUN_SAT";
+
+/**
+ * How to fix the GAQL and request errors AIs actually hit (tool_calls.error), appended to Google's message.
+ * The rules are in run_gaql's description too, but a fix next to the error gets the retry right first time.
+ */
+export function adsErrorFix(code: string, message: string, field: string): string | null {
+  switch (code) {
+    case "EXPECTED_FILTERS_ON_DATE_RANGE":
+      return "add a finite range to WHERE: segments.date DURING LAST_30_DAYS, or segments.date BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'.";
+    case "EXPECTED_FILTER_ON_A_SINGLE_DAY":
+      return "click_view needs one day: segments.date = 'YYYY-MM-DD'. Query each day separately.";
+    case "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE":
+      return "add that field to SELECT. Every field used in WHERE or ORDER BY must also be selected.";
+    case "INVALID_VALUE_WITH_DURING_OPERATOR":
+      return `DURING accepts only ${DURING_LITERALS}. For any other window use segments.date BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'.`;
+    case "PROHIBITED_METRIC_IN_SELECT_OR_WHERE_CLAUSE":
+      return /impression_share/.test(message)
+        ? "budget- and rank-lost impression share exist only on campaign: run a separate query FROM campaign for them."
+        : "that metric isn't available on this FROM resource or with these segments: drop it, or get it in a separate query.";
+    case "PROHIBITED_RESOURCE_TYPE_IN_SELECT_CLAUSE":
+    case "PROHIBITED_SEGMENT_IN_SELECT_OR_WHERE_CLAUSE":
+      return "that resource or segment can't be combined with this FROM: query it directly, in its own query.";
+    case "UNRECOGNIZED_FIELD":
+      return /campaign\.(start|end)_date'/.test(message)
+        ? "campaign dates are campaign.start_date_time and campaign.end_date_time."
+        : "check the name: fields are prefixed with their resource (campaign.name, ad_group.status, metrics.clicks).";
+    case "BAD_FIELD_NAME":
+      return /'\('/.test(message)
+        ? "GAQL has no parentheses or OR: WHERE conditions can only be joined with AND. Use field IN ('a', 'b') for alternatives, or separate queries."
+        : null;
+    case "INVALID_VALUE":
+      return field === "geo_target_constants"
+        ? "a location ID isn't a valid geo target. Look it up with run_gaql: SELECT geo_target_constant.id, geo_target_constant.canonical_name "
+          + "FROM geo_target_constant WHERE geo_target_constant.name = 'Thailand'"
+        : null;
+    default:
+      return null;
+  }
+}
+
 export class AdsApiError extends Error {
   constructor(public status: number, public body: string) {
     super(AdsApiError.summarize(status, body));
@@ -114,7 +156,8 @@ export class AdsApiError extends Error {
       const msgs = details.map((d: any) => {
         const code = d.errorCode ? Object.values(d.errorCode)[0] : "";
         const field = d.location?.fieldPathElements?.map((p: any) => p.fieldName).join(".");
-        return [code, d.message, field ? `(field ${field})` : ""].filter(Boolean).join(" ");
+        const fix = adsErrorFix(String(code), String(d.message ?? ""), field ?? "");
+        return [code, d.message, field ? `(field ${field})` : "", fix ? `→ ${fix}` : ""].filter(Boolean).join(" ");
       });
       return `Google Ads API ${status}: ${msgs.length ? msgs.join("; ") : e?.message ?? body.slice(0, 300)}`;
     } catch {
@@ -276,7 +319,10 @@ export class SearchConsoleClient {
       if (res.status === 403 && /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(body)) throw new SearchConsoleNotGrantedError();
       let msg = body.slice(0, 300);
       try { msg = JSON.parse(body).error?.message ?? msg; } catch { /* not JSON */ }
-      throw new Error(`Search Console API ${res.status}: ${msg}`);
+      // AIs guess sc-domain:example.com when the user's property is https://www.example.com/ (or the reverse).
+      const fix = res.status === 403 && /permission/i.test(msg)
+        ? " → use a property exactly as search_console_sites lists it: sc-domain:example.com and https://www.example.com/ are different properties." : "";
+      throw new Error(`Search Console API ${res.status}: ${msg}${fix}`);
     }
     return body ? JSON.parse(body) : {};
   }

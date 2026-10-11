@@ -284,8 +284,10 @@ export class UserSession {
   async runQuery(customerId: string, query: string) {
     if (!/^\s*select\b/i.test(query)) throw new Error("Only SELECT (read-only GAQL) queries are allowed. Use propose_changes to change anything.");
     const a = await this.account(customerId);
-    const rows = await this.ads.search(a.customerId, query, a.loginCustomerId);
-    return { ...demoNote(a.customerId), rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
+    const { query: q, rewrote } = expandDuring(query);
+    const rows = await this.ads.search(a.customerId, q, a.loginCustomerId);
+    return { ...demoNote(a.customerId), ...(rewrote.length ? { rewritten: `Google only accepts LAST_7/14/30_DAYS, so ran ${rewrote.join(", ")} (dates in UTC)` } : {}),
+      rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
   }
 
   /** Keyword Planner ideas from seed keywords and/or a URL, biggest first, flagged where the account already has them. */
@@ -841,6 +843,21 @@ export function dateRange(days: number): string {
   const start = new Date(end.getTime() - (d - 1) * 86_400_000);
   const iso = (x: Date) => x.toISOString().slice(0, 10);
   return `segments.date BETWEEN '${iso(start)}' AND '${iso(end)}'`;
+}
+
+/**
+ * AIs reach for DURING LAST_90_DAYS, which Google rejects (INVALID_VALUE_WITH_DURING_OPERATOR): it only has
+ * LAST_7/14/30_DAYS. Run any other LAST_N_DAYS as the same window in explicit dates instead of failing.
+ */
+export function expandDuring(query: string): { query: string; rewrote: string[] } {
+  const rewrote: string[] = [];
+  const q = query.replace(/([\w.]+)\s+DURING\s+LAST_(\d+)_DAYS\b/gi, (m, field: string, n: string) => {
+    if (["7", "14", "30"].includes(n)) return m;
+    const r = dateRange(Number(n)).replace(/^segments\.date/, field);
+    rewrote.push(`LAST_${n}_DAYS as ${r}`);
+    return r;
+  });
+  return { query: q, rewrote };
 }
 
 /** Sum rows' cost, clicks and conversions per key (Google returns one row per segment); `add` sums any extra metrics. */
