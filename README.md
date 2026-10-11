@@ -5,7 +5,11 @@ reads the account with read-only tools and can propose changes, from negative ke
 changes in the account until you approve a specific proposal, and every applied change can be
 undone.**
 
-Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, unlimited changes; Pro $15/mo: up to 10 accounts). Setup: https://camberstack.io/#setup
+Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, unlimited changes; Pro $15/mo: up to 10 accounts).
+
+**Setup guides, with screenshots and troubleshooting:** [Connect Google Ads to Claude](https://camberstack.io/google-ads-claude) ·
+[Connect Google Ads to ChatGPT](https://camberstack.io/google-ads-chatgpt) · [every tool](https://camberstack.io/tools) ·
+[Cursor, VS Code and others](https://camberstack.io/#setup)
 
 ## Tools
 
