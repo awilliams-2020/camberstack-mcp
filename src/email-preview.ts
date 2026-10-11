@@ -14,4 +14,4 @@ const lc = new Lifecycle({ db: openDb(":memory:"), baseUrl: cfg.baseUrl, mail: c
   internalEmails: new Set(), upgradeLink: () => null,
   signingKey: lifecycleSigningKey(cfg.encryptionKey) });
 await lc.preview(to);
-console.log(`sent 2 sample emails to ${to}`);
+console.log(`sent 3 sample emails to ${to}`);

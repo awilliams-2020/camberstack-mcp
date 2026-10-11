@@ -63,6 +63,25 @@ describe("lifecycle emails", () => {
     expect(await lc.run()).toBe(0);
   });
 
+  it("sends check_in once, 2+ days after the first change applied to a real account", async () => {
+    const { lc, sent, user, call, applied } = setup();
+    const used = (id: string) => call(id, "account_overview");   // keeps first_steps out of the way
+    user("acted", "acted@example.com", 5); used("acted"); applied("acted", 3); applied("acted", 1);
+    user("today", "today@example.com", 5); used("today"); applied("today", 0.5);             // too soon
+    user("demo", "demo@example.com", 5); used("demo"); applied("demo", 3, "0000000001");     // demo only
+    user("undo", "undo@example.com", 5); used("undo"); applied("undo", 3, "1112223333", "p0"); // only an undo
+    user("old", "old@example.com", 30); used("old"); applied("old", 20);                    // before this email existed
+    user("pro", "pro@example.com", 5, "pro"); used("pro"); applied("pro", 3);               // Pro gets it too
+    user("me", "me@example.com", 5); used("me"); applied("me", 3);                          // internal
+    expect(await lc.run()).toBe(2);
+    expect(sent.map((m) => m.to[0]).sort()).toEqual(["acted@example.com", "pro@example.com"]);
+    expect(sent[0].subject).toBe("Camberstack: how did it go?");
+    expect(sent[0].text).toContain("How did you find Camberstack?");
+    expect(sent[0].text).not.toMatch(/first (user|customer)/i);
+    expect(sent[0].reply_to).toBe("adam@camberstack.io");
+    expect(await lc.run()).toBe(0);
+  });
+
   it("unsubscribes only on POST with a valid signature, and then sends nothing", async () => {
     const { db, lc, sent, user } = setup();
     user("quiet", "quiet@example.com", 3);
