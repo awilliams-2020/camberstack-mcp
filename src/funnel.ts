@@ -1,6 +1,6 @@
 /**
  * Read-only usage report for the terminal. Same numbers as /admin (both use report.ts).
- *   docker exec camberstack node dist/funnel.js [--days 7] [--exclude me@example.com,other@example.com]
+ *   docker exec $(docker ps -qf name=^camberstack-) node dist/funnel.js [--days 7] [--exclude me@example.com,other@example.com]
  */
 import Database from "better-sqlite3";
 import { join } from "node:path";

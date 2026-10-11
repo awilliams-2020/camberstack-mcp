@@ -1,6 +1,6 @@
 /**
  * Send one sample of each lifecycle email, to check delivery and rendering:
- *   docker exec camberstack node dist/email-preview.js adam@camberstack.io
+ *   docker exec $(docker ps -qf name=^camberstack-) node dist/email-preview.js adam@camberstack.io
  */
 import { loadConfig } from "./config.js";
 import { openDb } from "./db.js";

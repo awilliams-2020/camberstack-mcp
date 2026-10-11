@@ -13,7 +13,7 @@
  *
  * Keys are created on the box, never over HTTP, and each is limited to the conversion actions named
  * at creation, so a leaked key can only add conversions to those actions in that one account:
- *   docker exec camberstack node dist/relay-admin.js create <email> <customer_id> <action_ids> <label> [login_customer_id]
+ *   docker exec $(docker ps -qf name=^camberstack-) node dist/relay-admin.js create <email> <customer_id> <action_ids> <label> [login_customer_id]
  * This is for the operator's own apps; it is not offered to Camberstack users.
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
