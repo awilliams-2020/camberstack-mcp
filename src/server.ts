@@ -19,7 +19,7 @@ import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
-import { errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
+import { aboutPage, errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
 import { indexNowKey, pageDates, pingIndexNow } from "./lastmod.js";
 import { readCookie } from "./http.js";
 
@@ -252,10 +252,12 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     "/google-ads-claude": claudeGuidePage(cfg.baseUrl),
     "/google-ads-chatgpt": chatgptGuidePage(cfg.baseUrl),
     "/tools": toolsPage(cfg.baseUrl, tools),
+    "/about": aboutPage(cfg.baseUrl),
     "/privacy": privacyPage(cfg.baseUrl),
     "/terms": termsPage(cfg.baseUrl),
   };
   for (const [path, html] of Object.entries(pages)) app.get(path, page(html));
+  for (const alias of ["/contact", "/contact-us", "/about-us"]) app.get(alias, (_q, r) => r.redirect(301, "/about"));
   app.get("/google-ads-gemini", page(geminiGuidePage(cfg.baseUrl)));
   const indexed = Object.fromEntries(SITEMAP_PATHS.map((p) => [p, pages[p]!]));
   const { dates: lastmod, changed: changedPages } = pageDates(db, indexed, cfg.gitCommitDate);
@@ -273,6 +275,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   app.get("/favicon.png", brand("favicon-32.png", "image/png"));
   app.get("/favicon.ico", brand("favicon-32.png", "image/png"));
   app.get("/logo.png", brand("logo-wordmark-480.png", "image/png"));
+  app.get("/adam-williams.webp", brand("adam-williams.webp", "image/webp"));
   // Self-hosted IBM Plex (OFL, brand/fonts/OFL.txt), so pages make no third-party font requests.
   app.get("/fonts/:file", (q, r, next) => {
     if (!/^[a-z0-9-]+\.woff2$/.test(q.params.file)) return next();

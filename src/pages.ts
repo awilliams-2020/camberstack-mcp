@@ -108,7 +108,7 @@ ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</sc
 <nav><a href="/#setup">Connect</a><a href="/#pricing">Pricing</a><a href="/account">Account</a></nav></div></header>
 <main class="wrap">${o.body}</main>
 <footer><div class="wrap">
-<a href="/tools">Tools</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
+<a href="/tools">Tools</a><a href="/about">About</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
 <p>Camberstack is independent and not affiliated with or endorsed by Google. Google Ads is a trademark of Google LLC.</p>
 </div></footer>
 <script src="/e.js" defer></script>
@@ -648,6 +648,38 @@ and our total liability is limited to the amount you paid us in the 12 months be
   });
 }
 
+// Who runs it and how to reach them: the same shape as npiradar.com/about and theqrcode.io/about. Company-data
+// crawlers probe /contact, /contact-us and /about-us; server.ts 301s those here. Unlike those sites, this domain has a
+// live mailbox, so email comes first. The photo is brand/adam-williams.webp (the one redbudway and npiradar use).
+const FOUNDER = { name: "Adam Williams", role: "Founder & software engineer", photo: "/adam-williams.webp", linkedin: "https://www.linkedin.com/in/awilliams1989" };
+
+export function aboutPage(baseUrl: string): string {
+  return layout({
+    baseUrl, path: "/about",
+    title: "About Camberstack: who runs it and how to get in touch",
+    description: "Camberstack is an independent Google Ads connector for AI assistants, built and run by Adam Williams, a software engineer. How to reach him.",
+    jsonLd: {
+      "@context": "https://schema.org", "@type": "AboutPage", url: `${baseUrl}/about`,
+      mainEntity: {
+        "@type": "Organization", name: "Camberstack", url: baseUrl, logo: `${baseUrl}/logo.png`, email: CONTACT, sameAs: [SOURCE_URL],
+        founder: { "@type": "Person", name: FOUNDER.name, jobTitle: FOUNDER.role, image: `${baseUrl}${FOUNDER.photo}`, sameAs: [FOUNDER.linkedin] },
+      },
+    },
+    body: `<h1>About Camberstack</h1>
+<div style="display:flex;gap:16px;align-items:center;margin:24px 0">
+<img src="${FOUNDER.photo}" alt="${FOUNDER.name}" width="96" height="96" style="border-radius:50%">
+<div><strong>${FOUNDER.name}</strong><br><span class="muted">${FOUNDER.role}</span><br><a href="${FOUNDER.linkedin}" rel="noopener noreferrer me">Connect on LinkedIn</a></div>
+</div>
+<h2>Who's behind it</h2>
+<p>Camberstack is built and run by me, ${FOUNDER.name}, a software engineer. There's no company behind it and no sales team: email reaches me.</p>
+<h2>Contact</h2>
+<p>Email <a href="mailto:${CONTACT}">${CONTACT}</a> for support, billing, or to have your data deleted. The code is public: <a href="${SOURCE_URL}">${SOURCE_URL.replace("https://", "")}</a>.</p>
+<h2>What it does</h2>
+<p>Camberstack connects your Google Ads account, and optionally Search Console, to an AI assistant such as Claude or ChatGPT. It reads your data, and it changes your account only when you approve a specific proposal. <a href="/tools">The tools page</a> lists everything it can do.</p>
+<p class="muted">Camberstack is independent and not affiliated with or endorsed by Google.</p>`,
+  });
+}
+
 /** A page that brings its own heading (the account page); body is trusted HTML built by the caller. */
 export function appPage(baseUrl: string, title: string, path: string, body: string): string {
   return layout({ baseUrl, path, title: `${esc(title)} | Camberstack`, description: title, body });
@@ -741,7 +773,7 @@ export function robotsTxt(baseUrl: string): string {
 }
 
 /** The indexable pages, in sitemap order. */
-export const SITEMAP_PATHS = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/tools", "/privacy", "/terms"];
+export const SITEMAP_PATHS = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/tools", "/about", "/privacy", "/terms"];
 
 /** `lastmod`: each page's own last-changed date (lastmod.ts), never one date for the whole site. */
 export function sitemapXml(baseUrl: string, lastmod: Record<string, string>): string {
