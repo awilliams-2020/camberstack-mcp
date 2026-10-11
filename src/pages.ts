@@ -699,11 +699,13 @@ export function robotsTxt(baseUrl: string): string {
   return `User-agent: *\nAllow: /\nDisallow: /oauth/\nDisallow: /authorize\nDisallow: /token\nDisallow: /register\nDisallow: /account\n\nSitemap: ${baseUrl}/sitemap.xml\n`;
 }
 
-export function sitemapXml(baseUrl: string, lastmod: string): string {
-  const urls = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/tools", "/privacy", "/terms"];
-  const lm = lastmod ? `<lastmod>${lastmod.slice(0, 10)}</lastmod>` : "";
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
-    .map((u) => `  <url><loc>${baseUrl}${u}</loc>${lm}</url>`).join("\n")}\n</urlset>\n`;
+/** The indexable pages, in sitemap order. */
+export const SITEMAP_PATHS = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/tools", "/privacy", "/terms"];
+
+/** `lastmod`: each page's own last-changed date (lastmod.ts), never one date for the whole site. */
+export function sitemapXml(baseUrl: string, lastmod: Record<string, string>): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${SITEMAP_PATHS
+    .map((u) => `  <url><loc>${baseUrl}${u}</loc>${lastmod[u] ? `<lastmod>${lastmod[u]}</lastmod>` : ""}</url>`).join("\n")}\n</urlset>\n`;
 }
 
 export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {

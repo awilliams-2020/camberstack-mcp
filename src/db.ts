@@ -149,6 +149,13 @@ CREATE TABLE IF NOT EXISTS demo_state (
   state       TEXT NOT NULL,
   updated_at  INTEGER NOT NULL
 );
+
+-- Public pages' content hashes, so the sitemap's lastmod moves only when a page really changes (lastmod.ts).
+CREATE TABLE IF NOT EXISTS page_versions (
+  path     TEXT PRIMARY KEY,
+  hash     TEXT NOT NULL,
+  changed  TEXT NOT NULL      -- YYYY-MM-DD
+);
 `;
 
 export function openDb(dataDir: string): DB {

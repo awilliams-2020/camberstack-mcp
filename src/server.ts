@@ -19,7 +19,8 @@ import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
-import { errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, sitemapXml, termsPage, toolsPage } from "./pages.js";
+import { errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
+import { indexNowKey, pageDates, pingIndexNow } from "./lastmod.js";
 import { readCookie } from "./http.js";
 
 /** brand/ sits beside src/ and dist/ at the package root. */
@@ -35,6 +36,7 @@ export interface Overrides extends Partial<SessionDeps> {
   stripeFetch?: typeof fetch;
   adsConversionFetch?: typeof fetch;
   mailFetch?: typeof fetch;
+  indexNowFetch?: typeof fetch;
 }
 
 export interface Service {
@@ -244,17 +246,24 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     adConversions.captureClick(req, res);  // keeps an ad click id; makes the response private if it does
     res.type("html").send(html);
   };
-  app.get("/", page(homePage(cfg.baseUrl)));
-  app.get("/google-ads-claude", page(claudeGuidePage(cfg.baseUrl)));
-  app.get("/google-ads-chatgpt", page(chatgptGuidePage(cfg.baseUrl)));
-  app.get("/google-ads-gemini", page(geminiGuidePage(cfg.baseUrl)));
   const tools = toolCatalog();
-  app.get("/tools", page(toolsPage(cfg.baseUrl, tools)));
-  app.get("/privacy", page(privacyPage(cfg.baseUrl)));
-  app.get("/terms", page(termsPage(cfg.baseUrl)));
+  const pages: Record<string, string> = {
+    "/": homePage(cfg.baseUrl),
+    "/google-ads-claude": claudeGuidePage(cfg.baseUrl),
+    "/google-ads-chatgpt": chatgptGuidePage(cfg.baseUrl),
+    "/tools": toolsPage(cfg.baseUrl, tools),
+    "/privacy": privacyPage(cfg.baseUrl),
+    "/terms": termsPage(cfg.baseUrl),
+  };
+  for (const [path, html] of Object.entries(pages)) app.get(path, page(html));
+  app.get("/google-ads-gemini", page(geminiGuidePage(cfg.baseUrl)));
+  const indexed = Object.fromEntries(SITEMAP_PATHS.map((p) => [p, pages[p]!]));
+  const { dates: lastmod, changed: changedPages } = pageDates(db, indexed, cfg.gitCommitDate);
+  const inKey = indexNowKey(cfg.encryptionKey);
+  app.get(`/${inKey}.txt`, (_q, r) => { r.type("text/plain").send(inKey); });
   app.get("/robots.txt", (_q, r) => { r.type("text/plain").send(robotsTxt(cfg.baseUrl)); });
   app.get("/llms.txt", (_q, r) => { r.type("text/plain").send(llmsTxt(cfg.baseUrl, tools)); });
-  app.get("/sitemap.xml", (_q, r) => { r.type("application/xml").send(sitemapXml(cfg.baseUrl, cfg.gitCommitDate)); });
+  app.get("/sitemap.xml", (_q, r) => { r.type("application/xml").send(sitemapXml(cfg.baseUrl, lastmod)); });
   // Brand assets: the SVG is the source; the PNGs are rendered from it (brand/).
   const brand = (file: string, type: string) => (_q: express.Request, r: express.Response) => {
     r.setHeader("Cache-Control", "public, max-age=86400");
@@ -302,6 +311,12 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     every(HOUR, "lifecycle", () => lifecycle.run());
     every(HOUR, "ad conversions", () => adConversions.flush());
     every(HOUR, "relay conversions", () => relay.flush());
+    // Pages new or changed since the last boot. Production only: a dev or test origin isn't ours to submit.
+    if (cfg.baseUrl.startsWith("https://")) {
+      pingIndexNow(cfg.baseUrl, inKey, changedPages, overrides.indexNowFetch)
+        .then(() => changedPages.length && console.log(`IndexNow: submitted ${changedPages.join(" ")}`))
+        .catch((e) => console.error(`IndexNow: ${(e as Error).message}`));
+    }
   };
   return { app, billing, startJobs, relay };
 }
