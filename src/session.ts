@@ -534,21 +534,16 @@ export class UserSession {
 
   /**
    * Google's index record for each URL: indexed or not and why, last crawl, canonical chosen vs declared, and
-   * structured-data items. One call per URL, a few at a time (Google allows 600 a minute, 2,000 a day per property).
+   * structured-data items. One call per URL, 10 at a time: each takes seconds at Google, and a call carries at most
+   * 20 URLs, so that is two rounds at most (Google allows 600 a minute, 2,000 a day per property).
    */
   async searchConsoleInspectUrls(site: string, urls: string[]) {
-    const results: Record<string, unknown>[] = new Array(urls.length);
-    let next = 0;
-    const worker = async () => {
-      for (let i = next++; i < urls.length; i = next++) {
-        try { results[i] = inspectionRow(urls[i]!, await this.sc.inspect(site, urls[i]!)); }
-        catch (e) {
-          if (e instanceof SearchConsoleNotGrantedError) throw e;
-          results[i] = { url: urls[i], error: (e as Error).message };
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(5, urls.length) }, worker));
+    const results: Record<string, unknown>[] = await mapLimited(urls, (url) => this.sc.inspect(site, url).then(
+      (r) => inspectionRow(url, r),
+      (e: Error) => {
+        if (e instanceof SearchConsoleNotGrantedError) throw e;
+        return { url, error: e.message };
+      }), 10);
     const tally: Record<string, number> = {};
     for (const r of results) { const k = String(r.coverage_state ?? (r.error ? "error" : "unknown")); tally[k] = (tally[k] ?? 0) + 1; }
     return {
