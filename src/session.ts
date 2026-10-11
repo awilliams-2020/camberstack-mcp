@@ -27,6 +27,30 @@ export interface Account {
 }
 
 const tokenCache = new Map<string, { token: string; exp: number }>();
+/**
+ * Each user's account list, shared across requests. A UserSession lives for one MCP request, so a cache on the
+ * instance never hit and every account-scoped tool paid ~1s re-listing accounts before doing its own work.
+ */
+const accountsCache = new Map<string, { at: number; list: Account[]; unreadable: { customerId: string; error: string }[] }>();
+const ACCOUNTS_TTL_MS = 10 * 60_000;
+
+/**
+ * `fn` over `items`, at most `limit` at a time, results in input order. If any fail, throws the error of the
+ * earliest item that failed, the same error a one-by-one loop would have thrown.
+ */
+async function mapLimited<T, R>(items: T[], fn: (x: T) => Promise<R>, limit = 6): Promise<R[]> {
+  const out = new Array<PromiseSettledResult<R>>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < items.length; i = next++) {
+      out[i] = await fn(items[i]!).then((value) => ({ status: "fulfilled", value }), (reason) => ({ status: "rejected", reason }));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  const failed = out.find((r) => r.status === "rejected");
+  if (failed) throw failed.reason;
+  return out.map((r) => (r as PromiseFulfilledResult<R>).value);
+}
 
 export interface SessionDeps {
   db: DB;
@@ -91,7 +115,6 @@ const publicResults = (outcomes: Outcome[]) => outcomes.map(({ describe, ok, err
 export class UserSession {
   readonly ads: Ads;
   readonly sc: SearchConsole;
-  private accountsCache?: { at: number; list: Account[] };
   /** Accounts the login can see but Google refused to read, from the last accounts() call. */
   lastUnreadable: { customerId: string; error: string }[] = [];
 
@@ -196,8 +219,13 @@ export class UserSession {
 
   // ---------------------------------------------------------------- read
 
-  async accounts(): Promise<Account[]> {
-    if (this.accountsCache && Date.now() - this.accountsCache.at < 10 * 60_000) return this.accountsCache.list;
+  /** `fresh` skips the cache: list_accounts, and an account id the cached list doesn't have (it may be new). */
+  async accounts(opts: { fresh?: boolean } = {}): Promise<Account[]> {
+    const hit = accountsCache.get(this.user.id);
+    if (!opts.fresh && hit && Date.now() - hit.at < ACCOUNTS_TTL_MS) {
+      this.lastUnreadable = hit.unreadable;
+      return hit.list;
+    }
     const out = new Map<string, Account>();
     const unreadable: { customerId: string; error: string }[] = [];
     let roots: string[] = [];
@@ -208,19 +236,20 @@ export class UserSession {
       if (e instanceof NotConnectedError) throw e;
       unreadable.push({ customerId: "this Google login", error: (e as Error).message });
     }
-    for (const root of roots) {
-      let rows: any[] = [];
-      try {
-        rows = await this.ads.search(root, `SELECT customer_client.id, customer_client.descriptive_name,
-            customer_client.currency_code, customer_client.manager, customer_client.level, customer_client.status
-          FROM customer_client WHERE customer_client.level <= 1 AND customer_client.status = 'ENABLED'`, root);
-      } catch (e) {
+    // All roots at once; merged below in Google's order, so the result is the same as reading them one by one.
+    const perRoot = await Promise.all(roots.map((root) => this.ads.search(root, `SELECT customer_client.id, customer_client.descriptive_name,
+        customer_client.currency_code, customer_client.manager, customer_client.level, customer_client.status
+      FROM customer_client WHERE customer_client.level <= 1 AND customer_client.status = 'ENABLED'`, root)
+      .then((rows) => ({ rows }), (e: Error) => ({ error: e.message }))));
+    for (const [i, root] of roots.entries()) {
+      const got = perRoot[i]!;
+      if ("error" in got) {
         // One cancelled account shouldn't hide the rest, but the reason must never be swallowed:
         // an empty list that is really an API refusal reads as "you have no accounts".
-        unreadable.push({ customerId: root, error: (e as Error).message });
+        unreadable.push({ customerId: root, error: got.error });
         continue;
       }
-      for (const r of rows) {
+      for (const r of got.rows) {
         const c = r.customerClient;
         const cid = String(c.id);
         const viaSelf = cid === root;
@@ -239,14 +268,15 @@ export class UserSession {
     // and keep the reason in lastUnreadable so list_accounts still says why the real ones are missing.
     if (!list.some((a) => !a.manager)) list.push(DEMO_ACCOUNT);
     this.lastUnreadable = unreadable;
-    this.accountsCache = { at: Date.now(), list };
+    accountsCache.set(this.user.id, { at: Date.now(), list, unreadable });
     return list;
   }
 
   async account(customerId: string): Promise<Account> {
     const cid = bareCid(customerId);
     if (cid === DEMO_CID) return DEMO_ACCOUNT;  // anyone can try the demo by its id
-    const a = (await this.accounts()).find((x) => x.customerId === cid);
+    const a = (await this.accounts()).find((x) => x.customerId === cid)
+      ?? (await this.accounts({ fresh: true })).find((x) => x.customerId === cid);
     if (!a) throw new Error(`Account ${customerId} is not accessible with this Google login. Call list_accounts to see the ones that are.`);
     if (a.manager) throw new Error(`${a.name} (${cid}) is a manager account; pick one of the client accounts under it.`);
     return a;
@@ -599,13 +629,13 @@ export class UserSession {
     const changes: Change[] = rawChanges.map((c) => ChangeSchema.parse(c));
     const count = changes.reduce((n, c) => n + (c.type === "add_negative_keywords" || c.type === "add_keywords" ? c.keywords.length : 1), 0);
     if (count > MAX_CHANGES) throw new Error(`At most ${MAX_CHANGES} changes per proposal (got ${count}). Split it.`);
-    const resolved: ResolvedChange[] = [];
     const pending = pendingOf(changes);
-    for (const c of changes) resolved.push(await resolveChange(this.ads, a.customerId, a.loginCustomerId, c, pending));
+    // Resolving only reads, and `pending` already carries what sibling changes set, so the changes resolve in parallel.
+    const resolved: ResolvedChange[] = await mapLimited(changes, (c) => resolveChange(this.ads, a.customerId, a.loginCustomerId, c, pending));
     const live = resolved.filter((r) => r.operations.length);
     if (!live.length) throw new Error("Nothing to change: every requested change is already in place.");
     // Dry run against Google so problems surface now, not after the user approves.
-    for (const r of live) await this.ads.mutate(a.customerId, r.service, r.operations, { validateOnly: true, loginCustomerId: a.loginCustomerId });
+    await mapLimited(live, (r) => this.ads.mutate(a.customerId, r.service, r.operations, { validateOnly: true, loginCustomerId: a.loginCustomerId }));
     const id = `p_${randomUUID().slice(0, 8)}`;
     const summary = summarize(live);
     this.deps.db.prepare(`INSERT INTO proposals (id, user_id, customer_id, login_customer_id, changes, summary, status, undo_of, created_at)
@@ -621,12 +651,17 @@ export class UserSession {
     if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
     const changes = JSON.parse(p.changes) as Change[];
     const pending = pendingOf(changes);
+    // Re-resolve: the account may have moved since the proposal was made. Reads only, so all at once (as propose
+    // does); the writes below stay one at a time and in order.
+    const fresh = await mapLimited(changes, (c) => resolveChange(this.ads, p.customer_id, p.login_customer_id, c, pending)
+      .then((r) => ({ r }), (e: Error) => ({ e })));
     const outcomes: Outcome[] = [];
-    for (const c of changes) {
+    for (const [i, c] of changes.entries()) {
       let describe = c.type as string;
       try {
-        // Re-resolve: the account may have moved since the proposal was made.
-        const r = await resolveChange(this.ads, p.customer_id, p.login_customer_id, c, pending);
+        const got = fresh[i]!;
+        if ("e" in got) throw got.e;
+        const r = got.r;
         describe = r.describe;
         if (!r.operations.length) { outcomes.push({ describe: `${describe} (already in place)`, ok: true }); continue; }
         const res = await this.ads.mutate(p.customer_id, r.service, r.operations, { loginCustomerId: p.login_customer_id });
@@ -682,6 +717,7 @@ export class UserSession {
   private forgetGoogle(): void {
     this.deps.db.prepare("UPDATE users SET enc_refresh = NULL WHERE id = ?").run(this.user.id);
     tokenCache.delete(this.user.id);
+    accountsCache.delete(this.user.id);
   }
 
   private proposal(id: string): ProposalRow {

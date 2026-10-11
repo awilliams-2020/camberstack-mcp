@@ -428,6 +428,16 @@ describe("OAuth + MCP end to end", () => {
     expect(r.json.campaigns.length).toBeGreaterThan(0);
   });
 
+  it("lists accounts once across requests, not once per tool call", async () => {
+    const real = ads.listAccessibleCustomers.bind(ads);
+    let lists = 0;
+    ads.listAccessibleCustomers = async () => { lists++; return real(); };
+    await call(token, "list_accounts");
+    for (let i = 0; i < 3; i++) expect((await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 })).isError).toBe(false);
+    ads.listAccessibleCustomers = real;
+    expect(lists).toBe(1);
+  });
+
   it("serves 2026-07-28 clients: server/discover, then a tool call bound to the caller", async () => {
     const before = (db.prepare("SELECT COUNT(*) n FROM tool_calls").get() as any).n;
     const meta = {
@@ -568,7 +578,7 @@ describe("OAuth + MCP end to end", () => {
       if (q.includes("FROM customer_client")) throw new Error("Google Ads API 403: ACTION_NOT_PERMITTED The Google Cloud project is only approved for use with test accounts.");
       return realSearch(cid, q);
     };
-    // A fresh token means a fresh session, so the accounts cache from earlier tests doesn't apply.
+    // list_accounts always reads Google, so the accounts cached by earlier tests don't apply.
     const fresh = await connect();
     const r = await call(fresh, "list_accounts");
     ads.search = realSearch;

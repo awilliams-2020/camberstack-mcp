@@ -95,7 +95,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     annotations: read,
   }, async () => {
     const s = session();
-    const accounts = await s.accounts();
+    const accounts = await s.accounts({ fresh: true });
     const demo = accounts.some((a) => isDemo(a.customerId));
     return {
       accounts,
