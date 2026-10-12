@@ -44,7 +44,8 @@ What a proposal can do:
   daily budget (never a shared budget) or its end date.
 - **Build:** create a whole Search campaign (ad groups, keywords, responsive search ads, targeting, negatives,
   sitelinks), a Display campaign (responsive display ads from image URLs or existing image assets) or a
-  Demand Gen campaign with YouTube video ads, always created **paused**. YouTube goes through Demand Gen
+  Demand Gen campaign with YouTube video ads, or a Performance Max campaign (asset groups; business name and
+  logo linked to the campaign, as brand guidelines require; no shopping feed), always created **paused**. YouTube goes through Demand Gen
   because the Ads API refuses to create Video campaigns (`MUTATE_NOT_ALLOWED`, v23). Image URLs are
   fetched SSRF-safe (`src/fetch-safe.ts`); add an ad group, keywords, an ad or sitelinks to an existing campaign.
 - **Tune:** keyword and ad group bids, bid strategy, location and language targeting, presence-only location

@@ -7,7 +7,7 @@
  *              change records its inverse, so any applied proposal can be undone.
  *
  * Surface: negatives, pause/enable keyword, ad group or campaign, daily budget, campaign end date, and
- * building: a whole Search, Display or Demand Gen campaign (always created PAUSED, so building and spending
+ * building: a whole Search, Display, Demand Gen or Performance Max campaign (always created PAUSED, so building and spending
  * are two separate approvals), ad groups, keywords, responsive search ads, sitelinks, and which conversion
  * category a campaign bids on. YouTube is Demand Gen with video ads: the API refuses to create VIDEO
  * campaigns (MUTATE_NOT_ALLOWED, checked against v23 on 2026-10-12). No bid strategy changes on existing campaigns, no deleting anything a user built:
@@ -94,6 +94,17 @@ const demandGenAdGroupSpec = z.object({
   language_ids: z.array(id).min(1).max(20).default(["1000"]).describe("Google language ids, e.g. 1000 English"),
   ads: z.array(demandGenVideoAdSpec).min(1).max(3),
 });
+const assetGroupSpec = z.object({
+  name: z.string().min(1).max(255),
+  final_url: url.describe("The landing page (Google may also send people to other pages on the same site)"),
+  headlines: z.array(z.string().min(1).max(30)).min(3).max(15).describe("3 to 15 headlines, each at most 30 characters"),
+  long_headlines: z.array(z.string().min(1).max(90)).min(1).max(5).describe("1 to 5 long headlines, each at most 90 characters"),
+  descriptions: z.array(z.string().min(1).max(90)).min(2).max(5).describe("2 to 5 descriptions, each at most 90 characters; Google recommends one of 60 or fewer"),
+  marketing_images: images("1 to 20 landscape images, 1.91:1 (e.g. 1200×628)", 1, 20),
+  square_marketing_images: images("1 to 20 square images, 1:1 (e.g. 1200×1200)", 1, 20),
+  portrait_marketing_images: images("0 to 20 portrait images, 4:5 (e.g. 960×1200)", 0, 20).default([]),
+  videos: z.array(youtubeVideo).max(5).default([]).describe("0 to 5 YouTube videos; without one, Google may auto-generate a video from the images"),
+}).describe("An asset group: the headlines, descriptions, images and videos Google combines into ads on every channel");
 const shared = {
   name: z.string().min(1).max(255).describe("Campaign name; must not match an existing campaign"),
   daily_budget: z.number().positive().max(1_000_000).describe("Average daily budget in the account's currency, e.g. 20 for $20.00/day"),
@@ -170,6 +181,18 @@ const PUBLIC_CHANGES = [
       .describe("Demand Gen bids automatically: MAXIMIZE_CONVERSIONS (needs conversion tracking) or MAXIMIZE_CLICKS"),
     ad_groups: z.array(demandGenAdGroupSpec).min(1).max(5),
   }).describe("Build a new Demand Gen campaign with YouTube video ads, which is how to advertise on YouTube through the API (Google doesn't allow creating Video campaigns there). It is created PAUSED: nothing spends until a separate enable_campaign"),
+  z.object({
+    type: z.literal("create_performance_max_campaign"),
+    ...shared,
+    bidding: z.enum(["MAXIMIZE_CONVERSIONS", "MAXIMIZE_CONVERSION_VALUE"]).default("MAXIMIZE_CONVERSIONS")
+      .describe("Performance Max bids for conversions only: MAXIMIZE_CONVERSIONS, or MAXIMIZE_CONVERSION_VALUE when conversions carry values"),
+    target_cpa: bid.optional().describe("MAXIMIZE_CONVERSIONS only: target cost per conversion"),
+    location_ids: z.array(id).min(1).max(50).default(["2840"]).describe("Google geo target ids, e.g. 2840 United States"),
+    language_ids: z.array(id).min(1).max(20).default(["1000"]).describe("Google language ids, e.g. 1000 English"),
+    business_name: z.string().min(1).max(25).describe("The advertiser's name, at most 25 characters (linked to the campaign, per Google's brand guidelines)"),
+    logo_images: images("1 to 5 square logos, 1:1 (e.g. 1200×1200, at least 128×128), linked to the campaign", 1, 5),
+    asset_groups: z.array(assetGroupSpec).min(1).max(5),
+  }).describe("Build a new Performance Max campaign: one budget, Google places ads across Search, YouTube, Display, Discover, Gmail and Maps from the asset groups' text, images and videos. No shopping feed (non-retail). It is created PAUSED: nothing spends until a separate enable_campaign"),
   z.object({ type: z.literal("add_ad_group"), campaign_id: campaignId, ad_group: adGroupSpec })
     .describe("Add an ad group, with its keywords and ads, to an existing Search campaign"),
   z.object({ type: z.literal("add_keywords"), ad_group_id: adGroupId, keywords: z.array(keywordSpec).min(1).max(MAX_CHANGES) })
@@ -522,6 +545,68 @@ export async function resolveChange(
           `${c.daily_budget.toFixed(2)}/day, ${biddingLabel(c.bidding)}${c.end_date ? `, ends ${c.end_date}` : ""}; ` +
           `${c.ad_groups.length} ad group(s): ${groups.join("; ")}; ${vids.count} video(s), ${imgs.summary}` +
           (c.bidding === "MAXIMIZE_CONVERSIONS" ? " ⚠ maximize conversions needs working conversion tracking, or Google has nothing to optimize for" : "") +
+          (c.daily_budget >= 100 ? ` ⚠ budget ${c.daily_budget.toFixed(2)}/day` : ""),
+      };
+    }
+    case "create_performance_max_campaign": {
+      const c = change;
+      await buildChecks(q, c);
+      if (c.target_cpa != null && c.bidding !== "MAXIMIZE_CONVERSIONS") throw new Error("target_cpa only goes with MAXIMIZE_CONVERSIONS.");
+      const T = tempIds(customerId);
+      const budget = T.next("campaignBudgets"), campaign = T.next("campaigns");
+      const imgs = await imageAssets(q, T, customerId, [...c.logo_images, ...c.asset_groups.flatMap((g) =>
+        [...g.marketing_images, ...g.square_marketing_images, ...g.portrait_marketing_images])]);
+      const vids = videoAssets(T, c.name, c.asset_groups.flatMap((g) => g.videos));
+      const texts = textAssets(T);
+      const businessName = texts.of(c.business_name);
+      const groups = c.asset_groups.map((g) => {
+        const group = T.next("assetGroups");
+        const link = (asset: string, fieldType: string) => ({ assetGroupAssetOperation: { create: { assetGroup: group, asset, fieldType } } });
+        return {
+          create: { assetGroupOperation: { create: { resourceName: group, campaign, name: g.name, finalUrls: [g.final_url], status: "ENABLED" } } },
+          links: [
+            ...g.headlines.map((t) => link(texts.of(t), "HEADLINE")),
+            ...g.long_headlines.map((t) => link(texts.of(t), "LONG_HEADLINE")),
+            ...g.descriptions.map((t) => link(texts.of(t), "DESCRIPTION")),
+            ...g.marketing_images.map((x) => link(imgs.of(x), "MARKETING_IMAGE")),
+            ...g.square_marketing_images.map((x) => link(imgs.of(x), "SQUARE_MARKETING_IMAGE")),
+            ...g.portrait_marketing_images.map((x) => link(imgs.of(x), "PORTRAIT_MARKETING_IMAGE")),
+            ...g.videos.map((v) => link(vids.of(v), "YOUTUBE_VIDEO")),
+          ],
+        };
+      });
+      const ops: object[] = [
+        budgetOp(budget, c.name, c.daily_budget),
+        { campaignOperation: { create: {
+          resourceName: campaign, name: c.name, status: "PAUSED", campaignBudget: budget, advertisingChannelType: "PERFORMANCE_MAX",
+          containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+          // Google's default since brand guidelines: business name and logo belong to the campaign, not the asset groups.
+          brandGuidelinesEnabled: true,
+          ...(c.bidding === "MAXIMIZE_CONVERSION_VALUE" ? { maximizeConversionValue: {} }
+            : { maximizeConversions: c.target_cpa ? { targetCpaMicros: toMicros(c.target_cpa) } : {} }),
+          ...(c.end_date ? { endDateTime: `${c.end_date} 23:59:59` } : {}),
+        } } },
+        ...c.location_ids.map((g) => ({ campaignCriterionOperation: { create: { campaign, location: { geoTargetConstant: `geoTargetConstants/${g}` } } } })),
+        ...c.language_ids.map((l) => ({ campaignCriterionOperation: { create: { campaign, language: { languageConstant: `languageConstants/${l}` } } } })),
+        ...imgs.ops, ...vids.ops, ...texts.ops(),
+        { campaignAssetOperation: { create: { campaign, asset: businessName, fieldType: "BUSINESS_NAME" } } },
+        ...c.logo_images.map((x) => ({ campaignAssetOperation: { create: { campaign, asset: imgs.of(x), fieldType: "LOGO" } } })),
+        // An asset group and its assets must arrive in one request, which the cross-service mutate gives us.
+        ...groups.flatMap((g) => [g.create, ...g.links]),
+      ];
+      const places = await names(q, "geo_target_constant", "canonical_name", c.location_ids.map((g) => `geoTargetConstants/${g}`));
+      const langs = await names(q, "language_constant", "name", c.language_ids.map((l) => `languageConstants/${l}`));
+      const bidding = c.bidding === "MAXIMIZE_CONVERSION_VALUE" ? "maximize conversion value"
+        : `maximize conversions${c.target_cpa ? ` (target ${c.target_cpa.toFixed(2)}/conversion)` : ""}`;
+      return {
+        change, service: "googleAds", operations: ops,
+        describe: `Create Performance Max campaign "${c.name}", PAUSED (nothing spends until you enable it): ${c.daily_budget.toFixed(2)}/day, ${bidding}, ` +
+          `${places.join(", ")}, ${langs.join(", ")}${c.end_date ? `, ends ${c.end_date}` : ""}; business name "${c.business_name}"; ` +
+          `${c.asset_groups.length} asset group(s): ${c.asset_groups.map((g) => `"${g.name}" (${g.headlines.length} headlines, ` +
+            `${g.descriptions.length} descriptions, ${g.marketing_images.length + g.square_marketing_images.length + g.portrait_marketing_images.length} images, ` +
+            `${g.videos.length} video(s) → ${g.final_url})`).join("; ")}; ${imgs.summary}` +
+          " ⚠ Performance Max optimizes for conversions: without working conversion tracking it has nothing to learn from" +
+          (c.asset_groups.some((g) => !g.videos.length) ? "; with no video, Google may auto-generate one from the images" : "") +
           (c.daily_budget >= 100 ? ` ⚠ budget ${c.daily_budget.toFixed(2)}/day` : ""),
       };
     }
@@ -922,6 +1007,19 @@ function videoAssets(T: ReturnType<typeof tempIds>, campaign: string, refs: stri
   return { ops, of: (ref: string) => byId.get(youtubeId(ref))!, count: byId.size };
 }
 
+/** Text assets for Performance Max, one per distinct text: a repeat in the same request would be a duplicate asset. */
+function textAssets(T: ReturnType<typeof tempIds>) {
+  const byText = new Map<string, string>();
+  return {
+    of: (text: string) => {
+      let rn = byText.get(text);
+      if (!rn) { rn = T.next("assets"); byText.set(text, rn); }
+      return rn;
+    },
+    ops: () => [...byText].map(([text, resourceName]) => ({ assetOperation: { create: { resourceName, textAsset: { text } } } })),
+  };
+}
+
 function keywordCreate(adGroup: string, k: { text: string; match_type: string; max_cpc?: number }) {
   return { adGroup, status: "ENABLED", keyword: { text: k.text, matchType: k.match_type }, ...(k.max_cpc ? { cpcBidMicros: toMicros(k.max_cpc) } : {}) };
 }
@@ -1001,7 +1099,7 @@ export function inverseAfterApply(r: ResolvedChange, resourceNames: string[]): C
     return { type: "remove_negative_keywords", campaign_id: c.campaign_id, resource_names: resourceNames };
   }
   // Undo of a build removes the top of what was built; Google removes what hangs off it.
-  if ((c.type === "create_campaign" || c.type === "create_display_campaign" || c.type === "create_demand_gen_campaign") && of("campaigns")[0]) return { type: "remove_campaign", resource_name: of("campaigns")[0]!, name: c.name };
+  if ((c.type === "create_campaign" || c.type === "create_display_campaign" || c.type === "create_demand_gen_campaign" || c.type === "create_performance_max_campaign") && of("campaigns")[0]) return { type: "remove_campaign", resource_name: of("campaigns")[0]!, name: c.name };
   if (c.type === "add_ad_group" && of("adGroups")[0]) return { type: "remove_ad_group", resource_name: of("adGroups")[0]!, name: c.ad_group.name };
   if (c.type === "add_keywords" && resourceNames.length) {
     return { type: "remove_keywords", resource_names: resourceNames, what: `${resourceNames.length} keyword(s) Camberstack added: ${c.keywords.map((k) => fmtKw(k.text, k.match_type)).join(", ")}` };

@@ -1040,7 +1040,7 @@ describe("OAuth + MCP end to end", () => {
     expect(ads.goals).toEqual({ PURCHASE: true, SIGNUP: true });
   });
 
-  it("builds paused Display and Demand Gen (YouTube) campaigns with uploaded images, and undoes them", async () => {
+  it("builds paused Display, Demand Gen (YouTube) and Performance Max campaigns with uploaded images, and undoes them", async () => {
     const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };
     const PNG = (n: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from([n])]);
     const fetched: string[] = [];
@@ -1094,6 +1094,34 @@ describe("OAuth + MCP end to end", () => {
       await expect(propose([{ type: "create_demand_gen_campaign", name: "Bad", daily_budget: 5, ad_groups: [{ name: "x", ads: [{ ...{ headlines: ["a"], long_headlines: ["b"],
         descriptions: ["c"], business_name: "d", logo_image: "https://img.example.com/logo.png", final_url: "https://example.com/" }, videos: ["https://vimeo.com/123"] }] }] }]))
         .rejects.toThrow("isn't a YouTube video id or URL");
+
+      // Performance Max: business name + logo on the campaign (brand guidelines), the rest on the asset group,
+      // and text shared between two asset groups is one asset.
+      const group = (name: string) => ({ name, final_url: "https://example.com/", headlines: ["Invoices that get paid", "Pay by card", "Start free"],
+        long_headlines: ["Send an invoice with a pay button"], descriptions: ["Clients pay by card.", "Free to start."],
+        marketing_images: ["https://img.example.com/wide.png"], square_marketing_images: ["https://img.example.com/square.png"] });
+      await expect(propose([{ type: "create_performance_max_campaign", name: "P", daily_budget: 5, bidding: "MAXIMIZE_CONVERSION_VALUE", target_cpa: 9,
+        business_name: "Acme", logo_images: ["https://img.example.com/logo.png"], asset_groups: [group("a")] }])).rejects.toThrow("target_cpa only goes with MAXIMIZE_CONVERSIONS");
+      const pm = await propose([{ type: "create_performance_max_campaign", name: "PMax Test", daily_budget: 25, target_cpa: 12, business_name: "Acme",
+        logo_images: ["https://img.example.com/logo.png"], asset_groups: [group("Invoicing"), { ...group("Payments"), videos: ["dQw4w9WgXcQ"] }] }]);
+      expect(pm.summary).toContain('Create Performance Max campaign "PMax Test", PAUSED (nothing spends until you enable it): 25.00/day, maximize conversions (target 12.00/conversion)');
+      expect(pm.summary).toContain("⚠ Performance Max optimizes for conversions");
+      const pops = ads.mutations.at(-1)!.operations;
+      expect(pops[1].campaignOperation.create).toMatchObject({ advertisingChannelType: "PERFORMANCE_MAX", brandGuidelinesEnabled: true,
+        maximizeConversions: { targetCpaMicros: "12000000" } });
+      expect(pops.filter((o: any) => o.campaignAssetOperation).map((o: any) => o.campaignAssetOperation.create.fieldType)).toEqual(["BUSINESS_NAME", "LOGO"]);
+      expect(pops.filter((o: any) => o.assetGroupOperation)).toHaveLength(2);
+      expect(pops.filter((o: any) => o.assetOperation?.create.textAsset)).toHaveLength(7);  // 3 + 1 + 2 shared texts, plus the business name
+      const links = pops.filter((o: any) => o.assetGroupAssetOperation).map((o: any) => o.assetGroupAssetOperation.create.fieldType);
+      expect(links.filter((f: string) => f === "HEADLINE")).toHaveLength(6);
+      expect(links).toContain("YOUTUBE_VIDEO");
+      expect(links).not.toContain("BUSINESS_NAME");
+      // Every asset is created before anything links to it.
+      const firstLink = pops.findIndex((o: any) => o.campaignAssetOperation || o.assetGroupAssetOperation);
+      expect(pops.slice(firstLink).some((o: any) => o.assetOperation)).toBe(false);
+      await call(token, "apply_changes", { proposal_id: pm.proposal_id });
+      const pu = await call(token, "undo_changes", { proposal_id: pm.proposal_id });
+      expect(pu.json.summary).toContain('Remove campaign "PMax Test" that Camberstack created');
     } finally {
       io.fetchImage = real;
     }
