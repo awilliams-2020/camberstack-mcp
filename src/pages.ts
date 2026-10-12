@@ -153,7 +153,7 @@ changes only after you approve each one.</p>
 <ul>
 <li>Works with manager (MCC) accounts.</li>
 <li>Any question about your account is answered with read-only queries.</li>
-<li>Changes range from negative keywords and budgets to bids, targeting and whole new campaigns. Each applied change can be undone.</li>
+<li>Changes range from negative keywords and budgets to bids, targeting and whole new Search, Performance Max, Display and YouTube campaigns. Each applied change can be undone.</li>
 <li>Optional, read-only Search Console: see where you already rank, and which searches you may be paying for twice.</li>
 </ul>
 <p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;Free plan, no card</span></p>
@@ -254,6 +254,7 @@ const ASK_FIRST = `<h2>What to ask first</h2>
 <li><em>"How did each campaign do last month: spend, clicks, conversions?"</em></li>
 <li><em>"Which search terms cost the most in the last 30 days?"</em></li>
 <li><em>"Add 'jobs' as a negative keyword to my Search campaign. Show me the change first."</em></li>
+<li><em>"Build a paused Performance Max campaign for my homepage, using the images already in my account."</em></li>
 <li><em>"What did you change this week? Undo the last change."</em></li>
 <li><em>"Which searches am I paying for that my site already ranks for organically?"</em></li>
 <li>Not ready to use your real account? <em>"Show me Camberstack's demo account."</em></li>
@@ -261,7 +262,7 @@ const ASK_FIRST = `<h2>What to ask first</h2>
 
 const CAN_CHANGE = `<h2>What it can change</h2>
 <p>Negative keywords, budgets and end dates, pausing and re-enabling, bids, targeting and bid strategy, conversion goals, and whole new
-campaigns (always created paused). You approve each change, and each one can be undone. <a href="/#changes">The full list</a>, and <a href="/tools">every tool</a>.</p>`;
+Search, Performance Max, Display and YouTube campaigns (always created paused). You approve each change, and each one can be undone. <a href="/#changes">The full list</a>, and <a href="/tools">every tool</a>.</p>`;
 
 /**
  * Problems users actually hit (tool_calls.error, 2026-10), with the wording they see, so a search for the message finds
@@ -552,6 +553,7 @@ read-only Search Console. The AI reads the account and proposes changes. Nothing
 <ul>
 <li><a href="#connect">Connect</a></li>
 <li><a href="#how-it-works">How it works: read, propose, approve, apply, undo</a></li>
+<li><a href="#building">Building campaigns: Search, Performance Max, Display, YouTube</a></li>
 <li><a href="#search-console">Search Console</a></li>
 <li><a href="#demo">Demo account</a></li>
 <li><a href="#plans">Plans and limits</a></li>
@@ -589,6 +591,22 @@ or belongs to someone else. Keep your AI app's confirmation prompt on for <code>
 <code>change_history</code> lists everything applied.</li>
 </ol>
 ${CAN_CHANGE}
+
+<h2 id="building">Building campaigns</h2>
+<p>Your AI can build four kinds of campaign. Each is created <strong>paused</strong>, so building it and letting it spend are two separate approvals, and undo removes it.</p>
+<ul>
+<li><strong>Search</strong>: ad groups, keywords, responsive search ads, negatives and sitelinks.</li>
+<li><strong>Performance Max</strong>: asset groups of headlines (at least 3), long headlines, descriptions (at least 2), images and optional YouTube videos.
+Google requires the business name and logo on the campaign itself. Bidding is for conversions (with an optional target cost per conversion) or conversion value,
+so conversion tracking needs to work first. Shopping feeds (retail Performance Max) aren't supported.</li>
+<li><strong>Display</strong>: responsive display ads, from which Google assembles image ads on its Display Network.</li>
+<li><strong>YouTube</strong>, through a Demand Gen campaign with video ads that run on YouTube (in-stream, in-feed and Shorts), Discover and Gmail.
+Google's API doesn't allow creating classic Video campaigns, so Demand Gen is the way in. Give YouTube video links or IDs; the videos must be public or unlisted.
+Demand Gen sets locations and languages per ad group.</li>
+</ul>
+<p><strong>Images</strong> can be ones already in your Google Ads account (your AI finds them with a query) or public https links to PNG, JPEG or GIF files of up to 5 MB,
+which Camberstack downloads and uploads to your account. Shapes: landscape 1.91:1 (e.g. 1200×628), square 1:1 (e.g. 1200×1200), portrait 4:5 (Performance Max),
+and logos square 1:1 or landscape 4:1. Google reviews every new ad against its policies; if it rejects one, your AI gets the reason and can reword it.</p>
 
 <h2 id="search-console">Search Console</h2>
 <p>If you leave the Search Console box ticked when you sign in, your AI can read (never change) your sites' search data: totals against the previous
@@ -669,6 +687,7 @@ Humans at Camberstack do not read your Google Ads data unless you ask us to for 
 <tr><td>A usage log: which tool ran, for which Google Ads account ID, when, how long it took and any error message. Never the tool's inputs or results</td><td>Find and fix failures, see which features are used, and count how many Google Ads accounts you use for your plan</td><td>You ask us to delete it</td></tr>
 </table>
 <p>Reports, search-term lists and query results are computed on request and returned to your AI assistant. We do not store them.
+When a proposed ad uses an image URL, we download that image only to upload it to your Google Ads account as an image asset; we do not keep the file.
 Standard web server logs (IP address, time, path) are kept for a limited period for security and then deleted.</p>
 
 <h2>Your AI assistant</h2>

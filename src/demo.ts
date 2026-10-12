@@ -203,9 +203,15 @@ export class DemoAds {
           campaignCriterion: { resourceName: n.resourceName, criterionId: n.resourceName.split("~")[1], type: "KEYWORD", negative: true,
             keyword: { text: n.text, matchType: n.match } },
         }));
+      // So a build's summary names its targeting ("United States, English") as it does on a real account.
+      case "geo_target_constant":
+        return Object.entries(GEOS).map(([id, canonicalName]) =>
+          ({ geoTargetConstant: { resourceName: `geoTargetConstants/${id}`, id, name: canonicalName.split(",")[0], canonicalName } }));
+      case "language_constant":
+        return Object.entries(LANGUAGES).map(([id, name]) => ({ languageConstant: { resourceName: `languageConstants/${id}`, id, name } }));
       default:
         throw new Error(`The demo account supports these GAQL resources: customer, campaign, ad_group, keyword_view, ad_group_criterion, `
-          + `search_term_view, campaign_criterion, conversion_action. "${resource}" isn't one of them.`);
+          + `search_term_view, campaign_criterion, conversion_action, geo_target_constant, language_constant. "${resource}" isn't one of them.`);
     }
   }
 
@@ -295,6 +301,13 @@ function collectionOf(opKey: string): string {
 // ---------------------------------------------------------------- a small GAQL reader
 
 const camel = (s: string) => s.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
+/** The locations and languages the demo can name: the ones the tools' descriptions use as examples, plus the demo's own city. */
+const GEOS: Record<string, string> = {
+  "2840": "United States", "2826": "United Kingdom", "2124": "Canada", "2036": "Australia", "2372": "Ireland", "2554": "New Zealand",
+  "1016367": "Chicago,Illinois,United States",
+};
+const LANGUAGES: Record<string, string> = { "1000": "English", "1003": "Spanish", "1002": "French", "1001": "German" };
+
 const get = (row: any, path: string[]) => path.reduce((o, k) => (o == null ? undefined : o[k]), row);
 const lit = (v: string): string | number => {
   const t = v.trim();
