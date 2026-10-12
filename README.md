@@ -89,6 +89,12 @@ BASE_URL=https://your.host npm run dev
 | `FREE_ACCOUNTS` / `PRO_ACCOUNTS` / `PRO_EMAILS` | Google Ads accounts each plan covers, counted as distinct accounts used in the last 30 days, manager and demo accounts excluded (defaults 1 / 10) / emails treated as Pro |
 | `STRIPE_SECRET_KEY` / `STRIPE_PRO_PRICE_ID` | Pro subscription via Stripe Checkout; unset = no upgrade links |
 
+The hosted HTTP server is `npm run start:http` (the Docker image runs `node dist/server.js`).
+`npm start` is a stdio mode that needs no env, database or Google login: it lists every tool for
+directory inspectors (Glama runs `mcp-proxy -- pnpm run start`), and any tool call answers with
+the hosted URL to connect to. `pnpm-workspace.yaml` turns off native builds for pnpm installs, so
+stdio mode installs anywhere; production installs with npm.
+
 `scripts/try-account.ts` runs the read tools against a real account from an existing refresh
 token, skipping OAuth. Use it for dogfooding.
 

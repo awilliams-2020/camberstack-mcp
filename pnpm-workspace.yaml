@@ -1,0 +1,6 @@
+# For pnpm installs (Glama's build runs `pnpm run start`): the stdio entry needs no native module, so
+# neither dependency runs its install script and nothing compiles on the build host. Production uses
+# npm (package-lock.json, Dockerfile) and builds better-sqlite3 as usual.
+allowBuilds:
+  better-sqlite3: false
+  esbuild: false
