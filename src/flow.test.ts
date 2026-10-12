@@ -515,6 +515,12 @@ describe("OAuth + MCP end to end", () => {
     expect(blocked.text).toContain("Plan limit:");
     expect(blocked.text).toContain("1 Google Ads account in the last 30 days (1112223333)");
     const link = blocked.text.match(/https?:\/\/\S+\/upgrade\?t=[\w.-]+/)![0];
+    // The refusal is structured: facts as fields, no instructions to the assistant.
+    const limit = JSON.parse(blocked.text.slice(blocked.text.indexOf("\n") + 1));
+    expect(limit).toMatchObject({ error: "plan_limit", plan: "free", accounts_in_use: ["1112223333"], accounts_included: 1,
+      refused_account: "9998887777", upgrade: { plan: "pro", accounts_included: 10 } });
+    expect(limit.upgrade.upgrade_url).toBe(link);
+    expect(blocked.text).not.toMatch(/word for word|Show the user/i);
     // A refused call doesn't count as use, and the demo never counts.
     expect((await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).isError).toBe(false);
 
@@ -1170,6 +1176,21 @@ describe("OAuth + MCP end to end", () => {
     expect(page).toContain("https://github.com/awilliams-2020/camberstack-mcp");
     expect(page).toContain('<span class="pill act">Needs your go-ahead</span>');
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/tools`);
+  });
+
+  it("serves /docs and points the OAuth metadata's documentation at it", async () => {
+    const d = await fetch(`${base}/docs`);
+    expect(d.status).toBe(200);
+    const html = await d.text();
+    expect(html).toContain("<h1>Camberstack documentation</h1>");
+    expect(html).toContain(`${base}/mcp`);
+    expect(html).toContain("under its own developer-token access, with the user's Google OAuth consent");
+    expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/docs`);
+    expect(await (await fetch(`${base}/llms.txt`)).text()).toContain(`${base}/docs`);
+    const prm = await (await fetch(`${base}/.well-known/oauth-protected-resource`)).json();
+    expect(prm.resource_documentation).toBe(`${base}/docs`);
+    const as = await (await fetch(`${base}/.well-known/oauth-authorization-server`)).json();
+    expect(as.service_documentation).toBe(`${base}/docs`);
   });
 
   it("serves the Claude guide and lists it in the sitemap", async () => {

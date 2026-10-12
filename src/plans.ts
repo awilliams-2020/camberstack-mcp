@@ -8,3 +8,11 @@ export const PLAN_LIMIT_PREFIX = "Plan limit:";
 
 /** "1 Google Ads account" / "10 Google Ads accounts". */
 export const accountsLabel = (n: number) => `${n} Google Ads account${n === 1 ? "" : "s"}`;
+
+/**
+ * The account gate's refusal. `message` keeps the PLAN_LIMIT_PREFIX sentence (logs, lifecycle.ts); `detail` is
+ * the same facts as fields, which tools.ts returns as a structured error for the assistant to present.
+ */
+export class PlanLimitError extends Error {
+  constructor(message: string, readonly detail: Record<string, unknown>) { super(message); }
+}

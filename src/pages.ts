@@ -105,10 +105,10 @@ function layout(o: { title: string; description: string; path: string; body: str
 ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</script>` : ""}
 </head><body>
 <header><div class="wrap"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="24" height="24" style="vertical-align:-5px;margin-right:8px">Camberstack</a>
-<nav><a href="/#setup">Connect</a><a href="/#pricing">Pricing</a><a href="/account">Account</a></nav></div></header>
+<nav><a href="/#setup">Connect</a><a href="/docs">Docs</a><a href="/#pricing">Pricing</a><a href="/account">Account</a></nav></div></header>
 <main class="wrap">${o.body}</main>
 <footer><div class="wrap">
-<a href="/tools">Tools</a><a href="/about">About</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
+<a href="/docs">Docs</a><a href="/tools">Tools</a><a href="/about">About</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
 <p>Camberstack is independent and not affiliated with or endorsed by Google. Google Ads is a trademark of Google LLC.</p>
 </div></footer>
 <script src="/e.js" defer></script>
@@ -236,7 +236,7 @@ Reports and query results are not stored. Details in the <a href="/privacy">priv
 tool, though some apps (ChatGPT, for one) block disconnect requests from chat.</p>
 <h3>What counts as an account?</h3>
 <p>Each Google Ads account you actually use Camberstack on in the last ${ACCOUNT_WINDOW_DAYS} days, not every account your login can see.
-A manager (MCC) account and the demo account don't count. On Free, using a second account asks you to upgrade: your AI shows a personal
+A manager (MCC) account and the demo account don't count. On Free, using a second account returns a plan-limit error with a personal
 checkout link. An account stops counting ${ACCOUNT_WINDOW_DAYS} days after you last used it, so you can switch. Undo and change history always work.</p>
 <h3>Does it work with a manager (MCC) account?</h3>
 <p>Yes. It lists the client accounts under any manager your login can reach.</p>
@@ -534,6 +534,97 @@ ${commonQuestions("Gemini")}
   });
 }
 
+/**
+ * The documentation page: the one URL the MCP directory listing, OAuth metadata and llms.txt point at for "how do I set
+ * this up and what does it do". Links out to the per-app guides and /tools rather than repeating them.
+ */
+export function docsPage(baseUrl: string): string {
+  const mcpUrl = `${baseUrl}/mcp`;
+  return layout({
+    baseUrl, path: "/docs",
+    title: "Camberstack documentation: set up and use the Google Ads MCP server",
+    description: "How to connect Camberstack to Claude, ChatGPT or any MCP client, how proposals, approval and undo work, plans and limits, data, and troubleshooting.",
+    body: `
+<h1>Camberstack documentation</h1>
+<p class="lede">Camberstack is a hosted MCP server that gives your AI assistant access to your Google Ads account and, optionally,
+read-only Search Console. The AI reads the account and proposes changes. Nothing changes until you approve a specific proposal, and every applied change can be undone.</p>
+<ul>
+<li><a href="#connect">Connect</a></li>
+<li><a href="#how-it-works">How it works: read, propose, approve, apply, undo</a></li>
+<li><a href="#search-console">Search Console</a></li>
+<li><a href="#demo">Demo account</a></li>
+<li><a href="#plans">Plans and limits</a></li>
+<li><a href="#access">Google API access and your data</a></li>
+<li><a href="#disconnect">Disconnect</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+</ul>
+
+<h2 id="connect">Connect</h2>
+<p>The server URL is:</p>
+<div class="url"><code>${mcpUrl}</code><button class="copy" type="button" data-copy="${mcpUrl}">Copy</button></div>
+${COPY_JS}
+<p>It speaks Streamable HTTP with OAuth 2.1 (dynamic client registration), so your AI app handles sign-in: you sign in with Google
+and choose what to share. No Google Ads developer token or API key is needed.</p>
+<h3>Claude (web and desktop app)</h3>
+<p>Find Camberstack in Claude's connector directory, or add the URL above as a custom connector in <strong>Settings</strong>, under <strong>Connectors</strong>.
+<a href="/google-ads-claude">Setup guide with screenshots</a>.</p>
+<h3>ChatGPT</h3>
+<p>Turn on developer mode, add the URL as an MCP app, then type <strong>@Camberstack</strong> in a chat. <a href="/google-ads-chatgpt">Step-by-step guide</a>.</p>
+<h3>Claude Code</h3>
+${cmd(`claude mcp add --transport http camberstack ${mcpUrl}`)}
+<h3>Cursor, VS Code and other MCP clients</h3>
+${cmd(`{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }`)}
+<p>Start by asking <em>"List my Google Ads accounts"</em>. A manager (MCC) login lists the client accounts under it.</p>
+
+<h2 id="how-it-works">How it works</h2>
+<ol>
+<li><strong>Read.</strong> <code>account_overview</code> summarises an account; <code>run_gaql</code> runs any read-only Google Ads query;
+<code>keyword_ideas</code> and <code>keyword_metrics</code> size search demand. None of these change anything.</li>
+<li><strong>Propose.</strong> <code>propose_changes</code> stores the change as a proposal and checks it with Google (validate-only). Nothing is applied.</li>
+<li><strong>Approve.</strong> Your AI shows you the proposal. You approve that specific proposal in the conversation.</li>
+<li><strong>Apply.</strong> <code>apply_changes</code> applies an approved proposal. The server refuses anything that wasn't proposed first, is older than 24 hours,
+or belongs to someone else. Keep your AI app's confirmation prompt on for <code>apply_changes</code>.</li>
+<li><strong>Undo.</strong> <code>undo_changes</code> builds the reverse of an applied proposal, which you approve and apply the same way.
+<code>change_history</code> lists everything applied.</li>
+</ol>
+${CAN_CHANGE}
+
+<h2 id="search-console">Search Console</h2>
+<p>If you leave the Search Console box ticked when you sign in, your AI can read (never change) your sites' search data: totals against the previous
+period, queries and pages, rising and falling queries, near-page-1 opportunities, index status for given URLs, sitemap status, and
+searches you pay for that already rank organically. Camberstack can't request indexing or submit sitemaps; you do that in Search Console.</p>
+
+<h2 id="demo">Demo account</h2>
+<p>Account <code>000-000-0001</code> is a sample plumbing business with six months of campaigns and search terms. Every tool works on it,
+changes there never reach Google, and it doesn't count toward your plan. Ask <em>"Show me Camberstack's demo account"</em>.</p>
+
+<h2 id="plans">Plans and limits</h2>
+<table><tr><th>Plan</th><th>Covers</th></tr>
+<tr><td>Free</td><td>Every tool, unlimited applied changes, on 1 Google Ads account. No card.</td></tr>
+<tr><td>Pro, ${PRO_PRICE_LABEL}</td><td>The same, on up to 10 Google Ads accounts. Cancel any time.</td></tr></table>
+<p>An account counts when you use Camberstack on it; it stops counting ${ACCOUNT_WINDOW_DAYS} days after its last use. Manager (MCC) accounts and the demo don't count.
+Using one more account than your plan covers returns a <code>plan_limit</code> error listing the accounts in use, when one frees up, and, on Free,
+a personal upgrade link valid for 7 days. Undo, change history and billing are never limited. Ask <em>"What plan am I on?"</em> to see your usage.</p>
+
+<h2 id="access">Google API access and your data</h2>
+<p>Camberstack accesses the Google Ads API under its own developer-token access, with the user's Google OAuth consent. Search Console is read
+through Google's Search Console API under the same consent, with a read-only scope. Camberstack is independent and not affiliated with Google.</p>
+<p>It stores your Google email, an encrypted Google refresh token, and your proposals with their results so you can undo them. Reports and query results are not stored.
+Details in the <a href="/privacy">privacy policy</a>.</p>
+
+<h2 id="disconnect">Disconnect</h2>
+<p>Sign in at <a href="/account">camberstack.io/account</a> and choose <strong>Disconnect Google Ads</strong>, or remove Camberstack at
+<a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>. You can also ask your AI to use the <code>disconnect</code> tool.</p>
+
+${troubleshooting("Your AI app",
+  "Mention Camberstack by name, for example <em>\"Using Camberstack, how did my campaigns do last month?\"</em>, and check the connector is enabled for this chat.",
+  "remove Camberstack from your AI app and add it again.")}
+
+<h2>More</h2>
+<p><a href="/tools">Every tool and its parameters</a> · <a href="${SOURCE_URL}">Source code (MIT)</a> · Questions: <a href="mailto:${CONTACT}">${CONTACT}</a></p>`,
+  });
+}
+
 export function privacyPage(baseUrl: string): string {
   return layout({
     baseUrl, path: "/privacy",
@@ -773,7 +864,7 @@ export function robotsTxt(baseUrl: string): string {
 }
 
 /** The indexable pages, in sitemap order. */
-export const SITEMAP_PATHS = ["/", "/google-ads-claude", "/google-ads-chatgpt", "/tools", "/about", "/privacy", "/terms"];
+export const SITEMAP_PATHS = ["/", "/docs", "/google-ads-claude", "/google-ads-chatgpt", "/tools", "/about", "/privacy", "/terms"];
 
 /** `lastmod`: each page's own last-changed date (lastmod.ts), never one date for the whole site. */
 export function sitemapXml(baseUrl: string, lastmod: Record<string, string>): string {
@@ -792,6 +883,7 @@ export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
 - Search Console (optional, read-only scope): site totals, query/page performance, period-over-period trends, ranking opportunities, URL Inspection (index status), sitemap status, and paid vs organic overlap with the Ads account.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
 - Pricing: Free plan covers 1 Google Ads account (every tool, unlimited applied changes); Pro ${PRO_PRICE_LABEL} covers up to 10. Accounts are counted as those used in the last ${ACCOUNT_WINDOW_DAYS} days; manager (MCC) and demo accounts don't count. Undo is always free.
+- [Documentation](${baseUrl}/docs)
 - [Setup](${baseUrl}/#setup)
 - [Pricing](${baseUrl}/#pricing)
 - [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)

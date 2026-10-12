@@ -20,7 +20,7 @@ import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
-import { aboutPage, errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
+import { aboutPage, docsPage, errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
 import { indexNowKey, pageDates, pingIndexNow } from "./lastmod.js";
 import { readCookie } from "./http.js";
 const DRAIN_FILE = "/tmp/drain";
@@ -113,14 +113,14 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   const issuer = new URL(cfg.baseUrl).origin;
   const resourceMetadata = {
     resource: mcpUrl.href, authorization_servers: [issuer], scopes_supported: [MCP_SCOPE],
-    resource_name: RESOURCE_NAME, resource_documentation: `${cfg.baseUrl}/#setup`,
+    resource_name: RESOURCE_NAME, resource_documentation: `${cfg.baseUrl}/docs`,
   };
   app.get(["/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource"], (_q, r) => {
     r.set("Access-Control-Allow-Origin", "*").json(resourceMetadata);
   });
   app.get("/.well-known/oauth-authorization-server", (_q, r) => {
     r.set("Access-Control-Allow-Origin", "*").json({
-      issuer, service_documentation: `${cfg.baseUrl}/#setup`,
+      issuer, service_documentation: `${cfg.baseUrl}/docs`,
       authorization_endpoint: `${issuer}/authorize`, response_types_supported: ["code"],
       code_challenge_methods_supported: ["S256"],
       token_endpoint: `${issuer}/token`, token_endpoint_auth_methods_supported: ["client_secret_post", "none"],
@@ -137,7 +137,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     resourceServerUrl: mcpUrl,
     scopesSupported: [MCP_SCOPE],
     resourceName: RESOURCE_NAME,
-    serviceDocumentationUrl: new URL(`${cfg.baseUrl}/#setup`),
+    serviceDocumentationUrl: new URL(`${cfg.baseUrl}/docs`),
   }));
 
   if (cfg.glamaClaim) {
@@ -253,6 +253,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     "/": homePage(cfg.baseUrl),
     "/google-ads-claude": claudeGuidePage(cfg.baseUrl),
     "/google-ads-chatgpt": chatgptGuidePage(cfg.baseUrl),
+    "/docs": docsPage(cfg.baseUrl),
     "/tools": toolsPage(cfg.baseUrl, tools),
     "/about": aboutPage(cfg.baseUrl),
     "/privacy": privacyPage(cfg.baseUrl),

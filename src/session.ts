@@ -10,7 +10,7 @@ import {
   AdsClient, SearchConsoleClient, SearchConsoleNotGrantedError, micros, refreshGoogleToken, revokeGoogleToken,
   type GoogleCreds, type SearchAnalyticsRequest, type SearchAnalyticsRow, type UrlInspection,
 } from "./google.js";
-import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, accountsLabel } from "./plans.js";
+import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError, accountsLabel } from "./plans.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
 import {
   ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, pendingOf, resolveChange, summarize,
@@ -189,15 +189,20 @@ export class UserSession {
       if (counted.length < this.accountLimit) return;
     }
     const window = `in the last ${ACCOUNT_WINDOW_DAYS} days`;
+    const common = { plan: this.isPro ? "pro" : "free", accounts_in_use: counted, accounts_included: this.accountLimit,
+      window_days: ACCOUNT_WINDOW_DAYS, refused_account: cid,
+      still_available: ["the accounts already in use", "undo_changes", "change_history", "billing"] };
     if (this.isPro) {
-      throw new Error(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(counted.length)} ${window}; Pro covers ${this.deps.proAccounts}. `
-        + `Accounts drop out ${ACCOUNT_WINDOW_DAYS} days after their last use. For more, the user can email adam@camberstack.io.`);
+      throw new PlanLimitError(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(counted.length)} ${window}; Pro covers ${this.deps.proAccounts}.`,
+        { error: "plan_limit", ...common, account_frees_up: `${ACCOUNT_WINDOW_DAYS} days after its last use`, contact: "adam@camberstack.io" });
     }
-    const url = this.deps.billingLink?.("upgrade", this.user.id);
-    throw new Error(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(counted.length)} ${window} (${counted.join(", ")}); `
-      + `the Free plan covers ${this.deps.freeAccounts}. Camberstack Pro (${PRO_PRICE_LABEL}, cancel any time) covers up to ${this.deps.proAccounts}. `
-      + (url ? `Show the user this personal upgrade link: ${url} — then try again once they have paid. ` : `Upgrades open soon; see ${this.deps.baseUrl}/#pricing. `)
-      + `Otherwise keep using the account already in use; an account drops out ${ACCOUNT_WINDOW_DAYS} days after its last use. Undo and change history always work.`);
+    const url = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
+    throw new PlanLimitError(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(counted.length)} ${window} (${counted.join(", ")}); `
+      + `the Free plan covers ${this.deps.freeAccounts}.`,
+      { error: "plan_limit", ...common, account_frees_up: `${ACCOUNT_WINDOW_DAYS} days after its last use`,
+        upgrade: { plan: "pro", price: PRO_PRICE_LABEL, accounts_included: this.deps.proAccounts, cancel: "any time",
+          upgrade_url: url, upgrade_url_expires: url ? "7 days; personal to this user" : null,
+          pricing_page: url ? null : `${this.deps.baseUrl}/#pricing` } });
   }
 
   plan() {
@@ -214,7 +219,7 @@ export class UserSession {
       : { plan: "free", account_page, ...usage,
           included: "every tool on 1 Google Ads account, with unlimited applied changes; undo and history always work",
           pro: `up to ${accountsLabel(this.deps.proAccounts)}, ${PRO_PRICE_LABEL}, cancel any time`, upgrade_url: upgrade,
-          note: upgrade ? "Show the user upgrade_url as a link; it is personal and expires in 7 days." : "Upgrades are not open yet." };
+          note: upgrade ? "upgrade_url is personal to this user and expires in 7 days." : "Upgrades are not open yet." };
   }
 
   // ---------------------------------------------------------------- read

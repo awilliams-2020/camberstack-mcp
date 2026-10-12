@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import { PublicChangeSchema } from "./changes.js";
+import { PlanLimitError } from "./plans.js";
 import { isDemo, type UserSession } from "./session.js";
 
 export const SERVER_NAME = "camberstack";
@@ -10,7 +11,7 @@ export const SERVER_VERSION = "0.9.0";
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
-The Free plan covers 1 Google Ads account (Pro covers 10), counted as accounts used in the last 30 days; undo and change history always work. If a tool reports the plan limit, explain it and show the upgrade link it returns, word for word.
+The Free plan covers 1 Google Ads account (Pro covers 10), counted as accounts used in the last 30 days; undo and change history always work.
 To grow an account, keyword_ideas finds what people search for around a seed or a landing page; keyword_metrics checks volume and bids for a given list. Pass the account's own market: location_ids default to the United States.
 Search Console (read-only): search_console_sites lists the user's websites; search_console_summary gives site totals against the previous period (lead with these: per-query rows leave out rare queries); search_console_performance shows their organic queries and pages; search_console_trend shows what is rising, falling, new and lost between two periods; search_console_opportunities finds near-page-1 queries and weak snippets; search_console_inspect_urls says whether Google has indexed given pages and why not; search_console_sitemaps shows when Google last read each sitemap; paid_organic_overlap joins one site with one Ads account to find searches paid for that already rank organically, and organic searches with no ads. Camberstack can't request indexing or submit sitemaps: the user does that in Search Console.
 Account 000-000-0001 is a demo with sample data: anyone can try every tool on it, and changes there never touch Google. Always say when you are using it.`;
@@ -42,7 +43,9 @@ function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 function fail(e: unknown) {
-  return { content: [{ type: "text" as const, text: `Error: ${(e as Error).message}` }], isError: true };
+  // A plan limit carries its facts as fields (plans.ts PlanLimitError); the first line stays the sentence logs match on.
+  const detail = e instanceof PlanLimitError ? `\n${JSON.stringify(e.detail, null, 2)}` : "";
+  return { content: [{ type: "text" as const, text: `Error: ${(e as Error).message}${detail}` }], isError: true };
 }
 
 export interface ToolCall {
