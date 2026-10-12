@@ -1080,8 +1080,8 @@ describe("OAuth + MCP end to end", () => {
         ad_groups: [{ name: "Explainer", ads: [{ videos: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
           headlines: ["Invoices that get paid"], long_headlines: ["Send an invoice with a pay button"], descriptions: ["Clients pay by card."],
           business_name: "Acme", logo_image: "https://img.example.com/logo.png", final_url: "https://example.com/" }] }] }]);
-      expect(dg.summary).toContain('Create Demand Gen campaign "YouTube Test" with YouTube video ads, PAUSED');
-      expect(dg.summary).toContain("⚠ maximize conversions needs working conversion tracking");
+      expect(dg.summary).toContain('Create Demand Gen (YouTube video ads) campaign "YouTube Test", PAUSED (nothing spends until you enable it): 15.00/day, maximize conversions');
+      expect(dg.summary).toContain("⚠ bidding for conversions needs working conversion tracking");
       const gops = ads.mutations.at(-1)!.operations;
       expect(gops[1].campaignOperation.create).toMatchObject({ advertisingChannelType: "DEMAND_GEN", maximizeConversions: {} });
       expect(gops.filter((o: any) => o.campaignCriterionOperation)).toHaveLength(0);
@@ -1089,7 +1089,7 @@ describe("OAuth + MCP end to end", () => {
       const vids = gops.filter((o: any) => o.assetOperation?.create.type === "YOUTUBE_VIDEO");
       expect(vids).toHaveLength(1);
       const ad = gops.find((o: any) => o.adGroupAdOperation).adGroupAdOperation.create.ad;
-      expect(ad.name).toBe("Explainer video ad 1");
+      expect(ad.name).toBe("Video ad 1");
       expect(ad.demandGenVideoResponsiveAd.videos).toEqual([{ asset: vids[0].assetOperation.create.resourceName }, { asset: vids[0].assetOperation.create.resourceName }]);
       await expect(propose([{ type: "create_demand_gen_campaign", name: "Bad", daily_budget: 5, ad_groups: [{ name: "x", ads: [{ ...{ headlines: ["a"], long_headlines: ["b"],
         descriptions: ["c"], business_name: "d", logo_image: "https://img.example.com/logo.png", final_url: "https://example.com/" }, videos: ["https://vimeo.com/123"] }] }] }]))
@@ -1105,7 +1105,7 @@ describe("OAuth + MCP end to end", () => {
       const pm = await propose([{ type: "create_performance_max_campaign", name: "PMax Test", daily_budget: 25, target_cpa: 12, business_name: "Acme",
         logo_images: ["https://img.example.com/logo.png"], asset_groups: [group("Invoicing"), { ...group("Payments"), videos: ["dQw4w9WgXcQ"] }] }]);
       expect(pm.summary).toContain('Create Performance Max campaign "PMax Test", PAUSED (nothing spends until you enable it): 25.00/day, maximize conversions (target 12.00/conversion)');
-      expect(pm.summary).toContain("⚠ Performance Max optimizes for conversions");
+      expect(pm.summary).toContain("⚠ bidding for conversions needs working conversion tracking");
       const pops = ads.mutations.at(-1)!.operations;
       expect(pops[1].campaignOperation.create).toMatchObject({ advertisingChannelType: "PERFORMANCE_MAX", brandGuidelinesEnabled: true,
         maximizeConversions: { targetCpaMicros: "12000000" } });

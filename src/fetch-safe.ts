@@ -14,7 +14,7 @@ import dns from "node:dns";
 import net from "node:net";
 import type { LookupFunction } from "node:net";
 
-export const MAX_IMAGE_BYTES = 5120 * 1024;
+const MAX_IMAGE_BYTES = 5120 * 1024;
 const TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 3;
 const USER_AGENT = "Camberstack/1.0 (+https://camberstack.io) image fetch for a Google Ads asset";

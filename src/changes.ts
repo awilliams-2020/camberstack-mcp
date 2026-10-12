@@ -7,11 +7,11 @@
  *              change records its inverse, so any applied proposal can be undone.
  *
  * Surface: negatives, pause/enable keyword, ad group or campaign, daily budget, campaign end date, and
- * building: a whole Search, Display, Demand Gen or Performance Max campaign (always created PAUSED, so building and spending
- * are two separate approvals), ad groups, keywords, responsive search ads, sitelinks, and which conversion
- * category a campaign bids on. YouTube is Demand Gen with video ads: the API refuses to create VIDEO
- * campaigns (MUTATE_NOT_ALLOWED, checked against v23 on 2026-10-12). No bid strategy changes on existing campaigns, no deleting anything a user built:
- * the only removals are undos of things this service created.
+ * building: a whole Search, Display, Demand Gen or Performance Max campaign (always created PAUSED, so
+ * building and spending are two separate approvals), ad groups, keywords, responsive search ads,
+ * sitelinks, and which conversion category a campaign bids on. YouTube is Demand Gen with video ads: the
+ * API refuses to create VIDEO campaigns (MUTATE_NOT_ALLOWED, checked against v23 on 2026-10-12). Nothing
+ * a user built is ever deleted: the only removals are undos of things this service created.
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -415,66 +415,42 @@ export async function resolveChange(
     case "create_campaign": {
       const c = change;
       await buildChecks(q, c);
-      if (c.bidding === "MANUAL_CPC") {
-        const missing = c.ad_groups.filter((g) => g.default_max_cpc == null && g.keywords.some((k) => k.max_cpc == null));
-        if (missing.length) throw new Error(`Manual CPC needs a bid: give default_max_cpc for ad group(s) ${missing.map((g) => `"${g.name}"`).join(", ")}.`);
-      }
+      requireBids(c.bidding, c.ad_groups.filter((g) => g.default_max_cpc == null && g.keywords.some((k) => k.max_cpc == null)));
       const T = tempIds(customerId);
-      const budget = T.next("campaignBudgets"), campaign = T.next("campaigns");
+      const { campaign, ops: base } = campaignOps(T, c, "SEARCH", {
+        networkSettings: { targetGoogleSearch: true, targetSearchNetwork: c.search_partners, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+        ...geoMode(c.presence_only), ...biddingFields(c.bidding, { ceiling: c.max_cpc_ceiling }),
+      });
       const ops: object[] = [
-        budgetOp(budget, c.name, c.daily_budget),
-        { campaignOperation: { create: {
-          resourceName: campaign, name: c.name, status: "PAUSED", campaignBudget: budget, advertisingChannelType: "SEARCH",
-          containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
-          networkSettings: { targetGoogleSearch: true, targetSearchNetwork: c.search_partners, targetContentNetwork: false, targetPartnerSearchNetwork: false },
-          geoTargetTypeSetting: { positiveGeoTargetType: c.presence_only ? "PRESENCE" : "PRESENCE_OR_INTEREST", negativeGeoTargetType: "PRESENCE" },
-          ...biddingFields(c.bidding, c.max_cpc_ceiling),
-          ...(c.end_date ? { endDateTime: `${c.end_date} 23:59:59` } : {}),
-        } } },
-        ...c.location_ids.map((g) => ({ campaignCriterionOperation: { create: { campaign, location: { geoTargetConstant: `geoTargetConstants/${g}` } } } })),
-        ...c.language_ids.map((l) => ({ campaignCriterionOperation: { create: { campaign, language: { languageConstant: `languageConstants/${l}` } } } })),
+        ...base,
+        ...targetingOps({ campaign }, c.location_ids, c.language_ids),
         ...c.negative_keywords.map((k) => ({ campaignCriterionOperation: { create: { campaign, negative: true, keyword: { text: k.text, matchType: k.match_type } } } })),
         ...sitelinkOps(T, campaign, c.sitelinks),
         ...c.ad_groups.flatMap((g) => adGroupOps(T, campaign, g)),
       ];
-      const places = await names(q, "geo_target_constant", "canonical_name", c.location_ids.map((g) => `geoTargetConstants/${g}`));
-      const langs = await names(q, "language_constant", "name", c.language_ids.map((l) => `languageConstants/${l}`));
-      const bidding = biddingLabel(c.bidding, c.max_cpc_ceiling);
       const groups = c.ad_groups.map((g) => `"${g.name}" (${g.keywords.length} keyword(s)${g.default_max_cpc ? `, bid ${g.default_max_cpc.toFixed(2)}` : ""}, ${g.ads.length} ad(s) → ${g.ads[0]!.final_url})`);
       return {
         change, service: "googleAds", operations: ops,
-        describe: `Create Search campaign "${c.name}", PAUSED (nothing spends until you enable it): ${c.daily_budget.toFixed(2)}/day, ${bidding}, ` +
-          `${places.join(", ")}${c.presence_only ? " (people in the location)" : ""}, ${langs.join(", ")}` +
+        describe: `${buildHead("Search", c)}, ${biddingLabel(c.bidding, { ceiling: c.max_cpc_ceiling })}, ` +
+          `${await targetingLabel(q, c.location_ids, c.language_ids, c.presence_only)}` +
           `${c.end_date ? `, ends ${c.end_date}` : ""}${c.search_partners ? ", plus search partners" : ""}; ` +
           `${c.ad_groups.length} ad group(s): ${groups.join("; ")}` +
           `${c.negative_keywords.length ? `; ${c.negative_keywords.length} negative keyword(s)` : ""}` +
-          `${c.sitelinks.length ? `; ${c.sitelinks.length} sitelink(s)` : ""}` +
-          (c.daily_budget >= 100 ? ` ⚠ budget ${c.daily_budget.toFixed(2)}/day` : ""),
+          `${c.sitelinks.length ? `; ${c.sitelinks.length} sitelink(s)` : ""}` + budgetWarn(c.daily_budget),
       };
     }
     case "create_display_campaign": {
       const c = change;
       await buildChecks(q, c);
-      if (c.bidding === "MANUAL_CPC") {
-        const missing = c.ad_groups.filter((g) => g.default_max_cpc == null);
-        if (missing.length) throw new Error(`Manual CPC needs a bid: give default_max_cpc for ad group(s) ${missing.map((g) => `"${g.name}"`).join(", ")}.`);
-      }
+      requireBids(c.bidding, c.ad_groups.filter((g) => g.default_max_cpc == null));
       const T = tempIds(customerId);
-      const budget = T.next("campaignBudgets"), campaign = T.next("campaigns");
+      const { campaign, ops: base } = campaignOps(T, c, "DISPLAY", { ...geoMode(c.presence_only), ...biddingFields(c.bidding, { ceiling: c.max_cpc_ceiling }) });
       const imgs = await imageAssets(q, T, customerId, c.ad_groups.flatMap((g) => g.ads.flatMap((a) =>
         [...a.marketing_images, ...a.square_marketing_images, ...a.square_logo_images, ...a.logo_images])));
       const ref = (xs: string[]) => xs.map((x) => ({ asset: imgs.of(x) }));
       const ops: object[] = [
-        budgetOp(budget, c.name, c.daily_budget),
-        { campaignOperation: { create: {
-          resourceName: campaign, name: c.name, status: "PAUSED", campaignBudget: budget, advertisingChannelType: "DISPLAY",
-          containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
-          geoTargetTypeSetting: { positiveGeoTargetType: c.presence_only ? "PRESENCE" : "PRESENCE_OR_INTEREST", negativeGeoTargetType: "PRESENCE" },
-          ...biddingFields(c.bidding, c.max_cpc_ceiling),
-          ...(c.end_date ? { endDateTime: `${c.end_date} 23:59:59` } : {}),
-        } } },
-        ...c.location_ids.map((g) => ({ campaignCriterionOperation: { create: { campaign, location: { geoTargetConstant: `geoTargetConstants/${g}` } } } })),
-        ...c.language_ids.map((l) => ({ campaignCriterionOperation: { create: { campaign, language: { languageConstant: `languageConstants/${l}` } } } })),
+        ...base,
+        ...targetingOps({ campaign }, c.location_ids, c.language_ids),
         ...imgs.ops,
         ...c.ad_groups.flatMap((g) => {
           const adGroup = T.next("adGroups");
@@ -482,8 +458,7 @@ export async function resolveChange(
             { adGroupOperation: { create: { resourceName: adGroup, campaign, name: g.name, status: "ENABLED", type: "DISPLAY_STANDARD",
               ...(g.default_max_cpc ? { cpcBidMicros: toMicros(g.default_max_cpc) } : {}) } } },
             ...g.ads.map((a) => ({ adGroupAdOperation: { create: { adGroup, status: "ENABLED", ad: { finalUrls: [a.final_url], responsiveDisplayAd: {
-              headlines: a.headlines.map((text) => ({ text })), longHeadline: { text: a.long_headline },
-              descriptions: a.descriptions.map((text) => ({ text })), businessName: a.business_name,
+              headlines: textList(a.headlines), longHeadline: { text: a.long_headline }, descriptions: textList(a.descriptions), businessName: a.business_name,
               marketingImages: ref(a.marketing_images), squareMarketingImages: ref(a.square_marketing_images),
               ...(a.square_logo_images.length ? { squareLogoImages: ref(a.square_logo_images) } : {}),
               ...(a.logo_images.length ? { logoImages: ref(a.logo_images) } : {}),
@@ -491,61 +466,45 @@ export async function resolveChange(
           ];
         }),
       ];
-      const places = await names(q, "geo_target_constant", "canonical_name", c.location_ids.map((g) => `geoTargetConstants/${g}`));
-      const langs = await names(q, "language_constant", "name", c.language_ids.map((l) => `languageConstants/${l}`));
       const groups = c.ad_groups.map((g) => `"${g.name}" (${g.default_max_cpc ? `bid ${g.default_max_cpc.toFixed(2)}, ` : ""}${g.ads.length} ad(s) → ${g.ads[0]!.final_url})`);
       return {
         change, service: "googleAds", operations: ops,
-        describe: `Create Display campaign "${c.name}", PAUSED (nothing spends until you enable it): ${c.daily_budget.toFixed(2)}/day, ${biddingLabel(c.bidding, c.max_cpc_ceiling)}, ` +
-          `${places.join(", ")}${c.presence_only ? " (people in the location)" : ""}, ${langs.join(", ")}${c.end_date ? `, ends ${c.end_date}` : ""}; ` +
-          `${c.ad_groups.length} ad group(s): ${groups.join("; ")}; ${imgs.summary}` +
-          (c.daily_budget >= 100 ? ` ⚠ budget ${c.daily_budget.toFixed(2)}/day` : ""),
+        describe: `${buildHead("Display", c)}, ${biddingLabel(c.bidding, { ceiling: c.max_cpc_ceiling })}, ` +
+          `${await targetingLabel(q, c.location_ids, c.language_ids, c.presence_only)}${c.end_date ? `, ends ${c.end_date}` : ""}; ` +
+          `${c.ad_groups.length} ad group(s): ${groups.join("; ")}; ${imgs.summary}` + budgetWarn(c.daily_budget),
       };
     }
     case "create_demand_gen_campaign": {
       const c = change;
       await buildChecks(q, c);
       const T = tempIds(customerId);
-      const budget = T.next("campaignBudgets"), campaign = T.next("campaigns");
+      const { campaign, ops: base } = campaignOps(T, c, "DEMAND_GEN", biddingFields(c.bidding));
       const imgs = await imageAssets(q, T, customerId, c.ad_groups.flatMap((g) => g.ads.map((a) => a.logo_image)));
-      const vids = videoAssets(T, c.name, c.ad_groups.flatMap((g) => g.ads.flatMap((a) => a.videos)));
+      const vids = videoAssets(T, c.ad_groups.flatMap((g) => g.ads.flatMap((a) => a.videos)));
       const ops: object[] = [
-        budgetOp(budget, c.name, c.daily_budget),
-        { campaignOperation: { create: {
-          resourceName: campaign, name: c.name, status: "PAUSED", campaignBudget: budget, advertisingChannelType: "DEMAND_GEN",
-          containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
-          ...biddingFields(c.bidding),
-          ...(c.end_date ? { endDateTime: `${c.end_date} 23:59:59` } : {}),
-        } } },
-        ...imgs.ops, ...vids.ops,
+        ...base, ...imgs.ops, ...vids.ops,
         ...c.ad_groups.flatMap((g) => {
           const adGroup = T.next("adGroups");
           return [
             { adGroupOperation: { create: { resourceName: adGroup, campaign, name: g.name, status: "ENABLED" } } },
             // Demand Gen takes locations and languages on the ad group; Google rejects them on the campaign.
-            ...g.location_ids.map((l) => ({ adGroupCriterionOperation: { create: { adGroup, location: { geoTargetConstant: `geoTargetConstants/${l}` } } } })),
-            ...g.language_ids.map((l) => ({ adGroupCriterionOperation: { create: { adGroup, language: { languageConstant: `languageConstants/${l}` } } } })),
+            ...targetingOps({ adGroup }, g.location_ids, g.language_ids),
             ...g.ads.map((a, i) => ({ adGroupAdOperation: { create: { adGroup, status: "ENABLED", ad: {
-              name: `${g.name} video ad ${i + 1}`.slice(0, 255), finalUrls: [a.final_url], demandGenVideoResponsiveAd: {
+              name: `Video ad ${i + 1}`, finalUrls: [a.final_url], demandGenVideoResponsiveAd: {
                 videos: a.videos.map((v) => ({ asset: vids.of(v) })), logoImages: [{ asset: imgs.of(a.logo_image) }],
-                headlines: a.headlines.map((text) => ({ text })), longHeadlines: a.long_headlines.map((text) => ({ text })),
-                descriptions: a.descriptions.map((text) => ({ text })), businessName: { text: a.business_name },
+                headlines: textList(a.headlines), longHeadlines: textList(a.long_headlines),
+                descriptions: textList(a.descriptions), businessName: { text: a.business_name },
               } } } } })),
           ];
         }),
       ];
-      const groups = await Promise.all(c.ad_groups.map(async (g) => {
-        const places = await names(q, "geo_target_constant", "canonical_name", g.location_ids.map((l) => `geoTargetConstants/${l}`));
-        const langs = await names(q, "language_constant", "name", g.language_ids.map((l) => `languageConstants/${l}`));
-        return `"${g.name}" (${places.join(", ")}, ${langs.join(", ")}; ${g.ads.length} video ad(s) → ${g.ads[0]!.final_url})`;
-      }));
+      const groups = await Promise.all(c.ad_groups.map(async (g) =>
+        `"${g.name}" (${await targetingLabel(q, g.location_ids, g.language_ids)}; ${g.ads.length} video ad(s) → ${g.ads[0]!.final_url})`));
       return {
         change, service: "googleAds", operations: ops,
-        describe: `Create Demand Gen campaign "${c.name}" with YouTube video ads, PAUSED (nothing spends until you enable it): ` +
-          `${c.daily_budget.toFixed(2)}/day, ${biddingLabel(c.bidding)}${c.end_date ? `, ends ${c.end_date}` : ""}; ` +
+        describe: `${buildHead("Demand Gen (YouTube video ads)", c)}, ${biddingLabel(c.bidding)}${c.end_date ? `, ends ${c.end_date}` : ""}; ` +
           `${c.ad_groups.length} ad group(s): ${groups.join("; ")}; ${vids.count} video(s), ${imgs.summary}` +
-          (c.bidding === "MAXIMIZE_CONVERSIONS" ? " ⚠ maximize conversions needs working conversion tracking, or Google has nothing to optimize for" : "") +
-          (c.daily_budget >= 100 ? ` ⚠ budget ${c.daily_budget.toFixed(2)}/day` : ""),
+          (c.bidding === "MAXIMIZE_CONVERSIONS" ? CONVERSIONS_WARN : "") + budgetWarn(c.daily_budget),
       };
     }
     case "create_performance_max_campaign": {
@@ -553,61 +512,44 @@ export async function resolveChange(
       await buildChecks(q, c);
       if (c.target_cpa != null && c.bidding !== "MAXIMIZE_CONVERSIONS") throw new Error("target_cpa only goes with MAXIMIZE_CONVERSIONS.");
       const T = tempIds(customerId);
-      const budget = T.next("campaignBudgets"), campaign = T.next("campaigns");
+      // Google's default since brand guidelines: business name and logo belong to the campaign, not the asset groups.
+      const { campaign, ops: base } = campaignOps(T, c, "PERFORMANCE_MAX", { brandGuidelinesEnabled: true, ...biddingFields(c.bidding, { targetCpa: c.target_cpa }) });
       const imgs = await imageAssets(q, T, customerId, [...c.logo_images, ...c.asset_groups.flatMap((g) =>
         [...g.marketing_images, ...g.square_marketing_images, ...g.portrait_marketing_images])]);
-      const vids = videoAssets(T, c.name, c.asset_groups.flatMap((g) => g.videos));
+      const vids = videoAssets(T, c.asset_groups.flatMap((g) => g.videos));
       const texts = textAssets(T);
       const businessName = texts.of(c.business_name);
-      const groups = c.asset_groups.map((g) => {
-        const group = T.next("assetGroups");
-        const link = (asset: string, fieldType: string) => ({ assetGroupAssetOperation: { create: { assetGroup: group, asset, fieldType } } });
-        return {
-          create: { assetGroupOperation: { create: { resourceName: group, campaign, name: g.name, finalUrls: [g.final_url], status: "ENABLED" } } },
-          links: [
-            ...g.headlines.map((t) => link(texts.of(t), "HEADLINE")),
-            ...g.long_headlines.map((t) => link(texts.of(t), "LONG_HEADLINE")),
-            ...g.descriptions.map((t) => link(texts.of(t), "DESCRIPTION")),
-            ...g.marketing_images.map((x) => link(imgs.of(x), "MARKETING_IMAGE")),
-            ...g.square_marketing_images.map((x) => link(imgs.of(x), "SQUARE_MARKETING_IMAGE")),
-            ...g.portrait_marketing_images.map((x) => link(imgs.of(x), "PORTRAIT_MARKETING_IMAGE")),
-            ...g.videos.map((v) => link(vids.of(v), "YOUTUBE_VIDEO")),
-          ],
-        };
+      const groups = c.asset_groups.flatMap((g) => {
+        const assetGroup = T.next("assetGroups");
+        const link = (asset: string, fieldType: string) => ({ assetGroupAssetOperation: { create: { assetGroup, asset, fieldType } } });
+        return [
+          { assetGroupOperation: { create: { resourceName: assetGroup, campaign, name: g.name, finalUrls: [g.final_url], status: "ENABLED" } } },
+          ...g.headlines.map((t) => link(texts.of(t), "HEADLINE")),
+          ...g.long_headlines.map((t) => link(texts.of(t), "LONG_HEADLINE")),
+          ...g.descriptions.map((t) => link(texts.of(t), "DESCRIPTION")),
+          ...g.marketing_images.map((x) => link(imgs.of(x), "MARKETING_IMAGE")),
+          ...g.square_marketing_images.map((x) => link(imgs.of(x), "SQUARE_MARKETING_IMAGE")),
+          ...g.portrait_marketing_images.map((x) => link(imgs.of(x), "PORTRAIT_MARKETING_IMAGE")),
+          ...g.videos.map((v) => link(vids.of(v), "YOUTUBE_VIDEO")),
+        ];
       });
       const ops: object[] = [
-        budgetOp(budget, c.name, c.daily_budget),
-        { campaignOperation: { create: {
-          resourceName: campaign, name: c.name, status: "PAUSED", campaignBudget: budget, advertisingChannelType: "PERFORMANCE_MAX",
-          containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
-          // Google's default since brand guidelines: business name and logo belong to the campaign, not the asset groups.
-          brandGuidelinesEnabled: true,
-          ...(c.bidding === "MAXIMIZE_CONVERSION_VALUE" ? { maximizeConversionValue: {} }
-            : { maximizeConversions: c.target_cpa ? { targetCpaMicros: toMicros(c.target_cpa) } : {} }),
-          ...(c.end_date ? { endDateTime: `${c.end_date} 23:59:59` } : {}),
-        } } },
-        ...c.location_ids.map((g) => ({ campaignCriterionOperation: { create: { campaign, location: { geoTargetConstant: `geoTargetConstants/${g}` } } } })),
-        ...c.language_ids.map((l) => ({ campaignCriterionOperation: { create: { campaign, language: { languageConstant: `languageConstants/${l}` } } } })),
+        ...base,
+        ...targetingOps({ campaign }, c.location_ids, c.language_ids),
+        // Every asset before anything links to it; an asset group and its links must share one request, which this is.
         ...imgs.ops, ...vids.ops, ...texts.ops(),
         { campaignAssetOperation: { create: { campaign, asset: businessName, fieldType: "BUSINESS_NAME" } } },
         ...c.logo_images.map((x) => ({ campaignAssetOperation: { create: { campaign, asset: imgs.of(x), fieldType: "LOGO" } } })),
-        // An asset group and its assets must arrive in one request, which the cross-service mutate gives us.
-        ...groups.flatMap((g) => [g.create, ...g.links]),
+        ...groups,
       ];
-      const places = await names(q, "geo_target_constant", "canonical_name", c.location_ids.map((g) => `geoTargetConstants/${g}`));
-      const langs = await names(q, "language_constant", "name", c.language_ids.map((l) => `languageConstants/${l}`));
-      const bidding = c.bidding === "MAXIMIZE_CONVERSION_VALUE" ? "maximize conversion value"
-        : `maximize conversions${c.target_cpa ? ` (target ${c.target_cpa.toFixed(2)}/conversion)` : ""}`;
+      const summary = c.asset_groups.map((g) => `"${g.name}" (${g.headlines.length} headlines, ${g.descriptions.length} descriptions, ` +
+        `${g.marketing_images.length + g.square_marketing_images.length + g.portrait_marketing_images.length} images, ${g.videos.length} video(s) → ${g.final_url})`);
       return {
         change, service: "googleAds", operations: ops,
-        describe: `Create Performance Max campaign "${c.name}", PAUSED (nothing spends until you enable it): ${c.daily_budget.toFixed(2)}/day, ${bidding}, ` +
-          `${places.join(", ")}, ${langs.join(", ")}${c.end_date ? `, ends ${c.end_date}` : ""}; business name "${c.business_name}"; ` +
-          `${c.asset_groups.length} asset group(s): ${c.asset_groups.map((g) => `"${g.name}" (${g.headlines.length} headlines, ` +
-            `${g.descriptions.length} descriptions, ${g.marketing_images.length + g.square_marketing_images.length + g.portrait_marketing_images.length} images, ` +
-            `${g.videos.length} video(s) → ${g.final_url})`).join("; ")}; ${imgs.summary}` +
-          " ⚠ Performance Max optimizes for conversions: without working conversion tracking it has nothing to learn from" +
-          (c.asset_groups.some((g) => !g.videos.length) ? "; with no video, Google may auto-generate one from the images" : "") +
-          (c.daily_budget >= 100 ? ` ⚠ budget ${c.daily_budget.toFixed(2)}/day` : ""),
+        describe: `${buildHead("Performance Max", c)}, ${biddingLabel(c.bidding, { targetCpa: c.target_cpa })}, ` +
+          `${await targetingLabel(q, c.location_ids, c.language_ids)}${c.end_date ? `, ends ${c.end_date}` : ""}; business name "${c.business_name}"; ` +
+          `${c.asset_groups.length} asset group(s): ${summary.join("; ")}; ${imgs.summary}` + CONVERSIONS_WARN +
+          (c.asset_groups.some((g) => !g.videos.length) ? "; with no video, Google may auto-generate one from the images" : "") + budgetWarn(c.daily_budget),
       };
     }
     case "add_ad_group": {
@@ -929,19 +871,65 @@ async function buildChecks(q: (query: string) => Promise<any[]>, c: { name: stri
   if (c.end_date && c.end_date < new Date().toISOString().slice(0, 10)) throw new Error(`End date ${c.end_date} is in the past.`);
 }
 
-function budgetOp(resourceName: string, name: string, daily: number): object {
-  return { campaignBudgetOperation: { create: { resourceName, name: `${name} budget`, amountMicros: toMicros(daily), deliveryMethod: "STANDARD", explicitlyShared: false } } };
+function requireBids(bidding: string, missing: { name: string }[]): void {
+  if (bidding === "MANUAL_CPC" && missing.length) {
+    throw new Error(`Manual CPC needs a bid: give default_max_cpc for ad group(s) ${missing.map((g) => `"${g.name}"`).join(", ")}.`);
+  }
 }
 
-function biddingFields(bidding: "MANUAL_CPC" | "MAXIMIZE_CLICKS" | "MAXIMIZE_CONVERSIONS", ceiling?: number): object {
-  return bidding === "MANUAL_CPC" ? { manualCpc: { enhancedCpcEnabled: false } }
-    : bidding === "MAXIMIZE_CLICKS" ? { targetSpend: ceiling ? { cpcBidCeilingMicros: toMicros(ceiling) } : {} }
-    : { maximizeConversions: {} };
+/** The budget and the PAUSED campaign every build starts with. */
+function campaignOps(T: ReturnType<typeof tempIds>, c: { name: string; daily_budget: number; end_date?: string }, channel: string, fields: object) {
+  const budget = T.next("campaignBudgets"), campaign = T.next("campaigns");
+  return { campaign, ops: [
+    { campaignBudgetOperation: { create: { resourceName: budget, name: `${c.name} budget`, amountMicros: toMicros(c.daily_budget), deliveryMethod: "STANDARD", explicitlyShared: false } } },
+    { campaignOperation: { create: {
+      resourceName: campaign, name: c.name, status: "PAUSED", campaignBudget: budget, advertisingChannelType: channel,
+      containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING", ...fields,
+      ...(c.end_date ? { endDateTime: `${c.end_date} 23:59:59` } : {}),
+    } } },
+  ] };
 }
 
-function biddingLabel(bidding: string, ceiling?: number): string {
-  return bidding === "MANUAL_CPC" ? "manual CPC" : bidding === "MAXIMIZE_CLICKS"
-    ? `maximize clicks${ceiling ? ` (max ${ceiling.toFixed(2)}/click)` : ""}` : "maximize conversions";
+const buildHead = (kind: string, c: { name: string; daily_budget: number }) =>
+  `Create ${kind} campaign "${c.name}", PAUSED (nothing spends until you enable it): ${c.daily_budget.toFixed(2)}/day`;
+const budgetWarn = (daily: number) => (daily >= 100 ? ` ⚠ budget ${daily.toFixed(2)}/day` : "");
+const CONVERSIONS_WARN = " ⚠ bidding for conversions needs working conversion tracking, or Google has nothing to optimize for";
+const textList = (xs: string[]) => xs.map((text) => ({ text }));
+const geoMode = (presenceOnly: boolean) =>
+  ({ geoTargetTypeSetting: { positiveGeoTargetType: presenceOnly ? "PRESENCE" : "PRESENCE_OR_INTEREST", negativeGeoTargetType: "PRESENCE" } });
+
+/** Location and language criteria on a campaign, or on an ad group (Demand Gen). */
+function targetingOps(owner: { campaign: string } | { adGroup: string }, locationIds: string[], languageIds: string[]): object[] {
+  const op = "campaign" in owner ? "campaignCriterionOperation" : "adGroupCriterionOperation";
+  return [
+    ...locationIds.map((g) => ({ [op]: { create: { ...owner, location: { geoTargetConstant: `geoTargetConstants/${g}` } } } })),
+    ...languageIds.map((l) => ({ [op]: { create: { ...owner, language: { languageConstant: `languageConstants/${l}` } } } })),
+  ];
+}
+
+async function targetingLabel(q: (query: string) => Promise<any[]>, locationIds: string[], languageIds: string[], presenceOnly = false): Promise<string> {
+  const places = await names(q, "geo_target_constant", "canonical_name", locationIds.map((g) => `geoTargetConstants/${g}`));
+  const langs = await names(q, "language_constant", "name", languageIds.map((l) => `languageConstants/${l}`));
+  return `${places.join(", ")}${presenceOnly ? " (people in the location)" : ""}, ${langs.join(", ")}`;
+}
+
+type Bidding = "MANUAL_CPC" | "MAXIMIZE_CLICKS" | "MAXIMIZE_CONVERSIONS" | "MAXIMIZE_CONVERSION_VALUE";
+function biddingFields(bidding: Bidding, o: { ceiling?: number; targetCpa?: number } = {}): object {
+  switch (bidding) {
+    case "MANUAL_CPC": return { manualCpc: { enhancedCpcEnabled: false } };
+    case "MAXIMIZE_CLICKS": return { targetSpend: o.ceiling ? { cpcBidCeilingMicros: toMicros(o.ceiling) } : {} };
+    case "MAXIMIZE_CONVERSIONS": return { maximizeConversions: o.targetCpa ? { targetCpaMicros: toMicros(o.targetCpa) } : {} };
+    case "MAXIMIZE_CONVERSION_VALUE": return { maximizeConversionValue: {} };
+  }
+}
+
+function biddingLabel(bidding: Bidding, o: { ceiling?: number; targetCpa?: number } = {}): string {
+  switch (bidding) {
+    case "MANUAL_CPC": return "manual CPC";
+    case "MAXIMIZE_CLICKS": return `maximize clicks${o.ceiling ? ` (max ${o.ceiling.toFixed(2)}/click)` : ""}`;
+    case "MAXIMIZE_CONVERSIONS": return `maximize conversions${o.targetCpa ? ` (target ${o.targetCpa.toFixed(2)}/conversion)` : ""}`;
+    case "MAXIMIZE_CONVERSION_VALUE": return "maximize conversion value";
+  }
 }
 
 /** Swappable so tests don't download anything. */
@@ -982,7 +970,7 @@ async function imageAssets(q: (query: string) => Promise<any[]>, T: ReturnType<t
     byRef.set(u, rn);
   });
   const parts = [byHash.size && `${byHash.size} image(s) to upload`, ids.length && `${ids.length} existing image asset(s)`].filter(Boolean);
-  return { ops, of: (ref: string) => byRef.get(ref)!, summary: parts.join(", ") || "no images" };
+  return { ops, of: (ref: string) => byRef.get(ref)!, summary: parts.join(", ") };
 }
 
 /** A YouTube video id from an id or a youtube.com / youtu.be URL. */
@@ -994,7 +982,7 @@ export function youtubeId(input: string): string {
   return m[1]!;
 }
 
-function videoAssets(T: ReturnType<typeof tempIds>, campaign: string, refs: string[]) {
+function videoAssets(T: ReturnType<typeof tempIds>, refs: string[]) {
   const byId = new Map<string, string>();
   const ops: object[] = [];
   for (const r of refs) {
@@ -1002,7 +990,7 @@ function videoAssets(T: ReturnType<typeof tempIds>, campaign: string, refs: stri
     if (byId.has(v)) continue;
     const rn = T.next("assets");
     byId.set(v, rn);
-    ops.push({ assetOperation: { create: { resourceName: rn, name: `${campaign} video ${v}`.slice(0, 128), type: "YOUTUBE_VIDEO", youtubeVideoAsset: { youtubeVideoId: v } } } });
+    ops.push({ assetOperation: { create: { resourceName: rn, type: "YOUTUBE_VIDEO", youtubeVideoAsset: { youtubeVideoId: v } } } });
   }
   return { ops, of: (ref: string) => byId.get(youtubeId(ref))!, count: byId.size };
 }
