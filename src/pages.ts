@@ -198,8 +198,8 @@ queries and positions, and line them up against your ads:</p>
 <div class="url"><code>${mcpUrl}</code><button class="copy" type="button" data-copy="${mcpUrl}">Copy</button></div>
 ${COPY_JS}
 <h3>Claude (web and desktop app)</h3>
-<p>Add it as a custom connector in <strong>Settings</strong>, under <strong>Connectors</strong>. About two minutes.
-<a href="/google-ads-claude">Setup guide with screenshots</a></p>
+<p>Camberstack is in Claude's connector directory: <a href="https://claude.ai/directory/connectors/camberstack">open it there and click Connect</a>, then sign in with Google.
+<a href="/google-ads-claude">Setup guide</a></p>
 <h3>ChatGPT (Plus, Pro, Business, Enterprise)</h3>
 <p>Turn on developer mode, add it as an MCP app, then type <strong>@Camberstack</strong> in a chat.
 <a href="/google-ads-chatgpt">Step-by-step setup guide</a></p>
@@ -313,33 +313,31 @@ export function claudeGuidePage(baseUrl: string): string {
     description: "Connect your Google Ads account to Claude with an MCP server. No developer token or Google Cloud project: sign in with Google, then ask Claude about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
-      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-10",
+      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-12",
       author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
       about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
     },
     body: `
 <h1>Connect Google Ads to Claude</h1>
 <p class="lede">Claude can read your Google Ads account, answer questions about it,
-and make the changes you approve. It takes one connector URL and a Google sign-in. No developer token, no Google Cloud project.</p>
+and make the changes you approve. Camberstack is in Claude's connector directory, so it takes a few clicks and a Google sign-in. No developer token, no Google Cloud project.</p>
 
 <h2>Set it up</h2>
 <p>Camberstack is a hosted Google Ads MCP server. MCP (Model Context Protocol) is how Claude connects to outside tools.</p>
 <h3>Claude on the web or desktop app</h3>
 <ol class="steps">
-<li>Click your name at the bottom of the sidebar and choose <strong>Settings</strong>.
-${shot("claude-1.webp", 540, 546, "Claude's account menu, open over the sidebar, with Settings highlighted")}</li>
-<li>Open the <strong>Connectors</strong> tab and click <strong>Add</strong>.
-${shot("claude-2.webp", 540, 643, "Claude's Settings on the Connectors tab, with the Add button highlighted")}</li>
-<li>Choose <strong>Add custom connector</strong>.
-${shot("claude-3.webp", 540, 423, "The Add menu with Add custom connector highlighted")}</li>
-<li>Name it Camberstack, paste the server URL <code>${mcpUrl}</code> and click <strong>Continue</strong>.
-${shot("claude-4.webp", 540, 885, "The Add custom connector form, with the Name and MCP server URL fields highlighted")}</li>
+<li>Open <a href="https://claude.ai/directory/connectors/camberstack">Camberstack in Claude's connector directory</a> and click <strong>Connect</strong>.
+You can also find it from <strong>Settings</strong>, under <strong>Connectors</strong>, by browsing the directory for Camberstack.</li>
 <li>Sign in with the Google account that has access to your Google Ads.
 Google shows exactly what's being shared before you agree.</li>
 <li>In a chat, click <strong>+</strong> at the bottom left, open <strong>Connectors</strong> and make sure Camberstack is switched on.</li>
 </ol>
-<p class="muted">On the Free plan you can add one custom connector. On a Team or Enterprise plan, an Owner adds it first in
-<strong>Organization settings</strong>, under <strong>Connectors</strong> (choose Add, Custom, then Web); then each member connects it from their own Settings.</p>
+<p class="muted">On a Team or Enterprise plan, an Owner may need to allow Camberstack for the organization first, in <strong>Organization settings</strong>, under <strong>Connectors</strong>.</p>
+<details><summary>Added Camberstack as a custom connector before it was in the directory?</summary>
+<p>It keeps working, but you can switch to the directory version: remove the custom one in <strong>Settings</strong>, under
+<strong>Connectors</strong>, then connect from <a href="https://claude.ai/directory/connectors/camberstack">the directory</a>. Your Camberstack plan, proposals and change history are kept,
+because they belong to your Google login, not the connector.</p>
+</details>
 <h3>Claude Code</h3>
 ${cmd(`claude mcp add --transport http camberstack ${mcpUrl}`)}
 ${COPY_JS}
@@ -351,7 +349,7 @@ ${CAN_CHANGE}
 
 ${troubleshooting("Claude",
   "Claude only uses a connector that's switched on for the chat. Click <strong>+</strong> at the bottom left, open <strong>Connectors</strong> and turn Camberstack on. Naming it helps too: <em>\"Use Camberstack to…\"</em>.",
-  "remove the connector in <strong>Settings</strong>, under <strong>Connectors</strong>, and add it again with the same URL.")}
+  "disconnect Camberstack in <strong>Settings</strong>, under <strong>Connectors</strong>, and connect it again from <a href=\"https://claude.ai/directory/connectors/camberstack\">the directory</a>.")}
 
 <h2>How it compares with Google's own Google Ads MCP</h2>
 <p>Google publishes an open-source Google Ads MCP server. As of September 2026 it is <strong>read-only</strong>, and you run it
@@ -566,8 +564,8 @@ ${COPY_JS}
 <p>It speaks Streamable HTTP with OAuth 2.1 (dynamic client registration), so your AI app handles sign-in: you sign in with Google
 and choose what to share. No Google Ads developer token or API key is needed.</p>
 <h3>Claude (web and desktop app)</h3>
-<p>Find Camberstack in Claude's connector directory, or add the URL above as a custom connector in <strong>Settings</strong>, under <strong>Connectors</strong>.
-<a href="/google-ads-claude">Setup guide with screenshots</a>.</p>
+<p>Connect from <a href="https://claude.ai/directory/connectors/camberstack">Camberstack's page in Claude's connector directory</a>, or browse the directory in <strong>Settings</strong>, under <strong>Connectors</strong>.
+You don't need the URL above. <a href="/google-ads-claude">Setup guide</a>.</p>
 <h3>ChatGPT</h3>
 <p>Turn on developer mode, add the URL as an MCP app, then type <strong>@Camberstack</strong> in a chat. <a href="/google-ads-chatgpt">Step-by-step guide</a>.</p>
 <h3>Claude Code</h3>

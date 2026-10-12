@@ -1211,7 +1211,10 @@ describe("OAuth + MCP end to end", () => {
       expect(img.status).toBe(200);
       expect(img.headers.get("content-type")).toContain("image/webp");
     }
-    expect(claude).toContain('src="/shots/claude-1.webp"');
+    // Claude setup goes through the connector directory, not a custom connector.
+    const dir = await (await fetch(`${base}/google-ads-claude`)).text();
+    expect(dir).toContain('href="https://claude.ai/directory/connectors/camberstack"');
+    expect(dir).not.toContain("paste the server URL");
     // Each guide troubleshoots in the words users see, with its own app's fix.
     const cg = await (await fetch(`${base}/google-ads-claude`)).text(), gg = await (await fetch(`${base}/google-ads-chatgpt`)).text();
     for (const g of [cg, gg]) for (const msg of ["NOT_ADS_USER", "TWO_STEP_VERIFICATION_NOT_ENROLLED", "Proposal is older than 24 hours", "Plan limit", "sufficient permission for site"])
