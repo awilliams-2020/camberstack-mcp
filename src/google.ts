@@ -133,6 +133,12 @@ export function adsErrorFix(code: string, message: string, field: string): strin
       return /'\('/.test(message)
         ? "GAQL has no parentheses or OR: WHERE conditions can only be joined with AND. Use field IN ('a', 'b') for alternatives, or separate queries."
         : null;
+    case "POLICY_FINDING":
+      return "Google's ad policy check rejected the ad text, images or video. Common causes: repeated punctuation (\"!!\"), "
+        + "ALL CAPS, symbols or emoji used for emphasis, phone numbers in headlines, or a video or landing page that breaks policy. "
+        + "Reword the ad and propose again; the full reasons show under Policy in Google Ads.";
+    case "ASPECT_RATIO_NOT_ALLOWED":
+      return "an image has the wrong shape for its slot: marketing images 1.91:1, square images and square logos 1:1, landscape logos 4:1.";
     case "INVALID_VALUE":
       return field === "geo_target_constants"
         ? "a location ID isn't a valid geo target. Look it up with run_gaql: SELECT geo_target_constant.id, geo_target_constant.canonical_name "

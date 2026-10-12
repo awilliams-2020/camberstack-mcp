@@ -13,6 +13,7 @@ import type { Config } from "./config.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { createRelayKey } from "./relay.js";
 import { SearchConsoleNotGrantedError } from "./google.js";
+import { io } from "./changes.js";
 
 const key = randomBytes(32);
 const idToken = (sub: string, email: string) =>
@@ -1037,6 +1038,65 @@ describe("OAuth + MCP end to end", () => {
     const gu = await call(token, "undo_changes", { proposal_id: g.proposal_id });
     await call(token, "apply_changes", { proposal_id: gu.json.proposal_id });
     expect(ads.goals).toEqual({ PURCHASE: true, SIGNUP: true });
+  });
+
+  it("builds paused Display and Demand Gen (YouTube) campaigns with uploaded images, and undoes them", async () => {
+    const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };
+    const PNG = (n: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from([n])]);
+    const fetched: string[] = [];
+    const real = io.fetchImage;
+    // The landscape and square URLs differ but the logo repeats the square's bytes: one upload, not two.
+    io.fetchImage = async (u: string) => { fetched.push(u); return PNG(u.includes("wide") ? 1 : 2); };
+    try {
+      const display = { type: "create_display_campaign", name: "Display Test", daily_budget: 10, max_cpc_ceiling: 0.8,
+        ad_groups: [{ name: "Remarketing", ads: [{ headlines: ["Invoices that get paid"], long_headline: "Send an invoice with a pay button",
+          descriptions: ["Clients pay by card."], business_name: "Acme", final_url: "https://example.com/",
+          marketing_images: ["https://img.example.com/wide.png"], square_marketing_images: ["https://img.example.com/square.png"],
+          square_logo_images: ["https://img.example.com/logo.png"] }] }] };
+      await expect(propose([{ ...display, ad_groups: [{ ...display.ad_groups[0], ads: [{ ...display.ad_groups[0]!.ads[0], marketing_images: ["123"] }] }] }]))
+        .rejects.toThrow("Image asset 123 isn't in this account");
+
+      const before = ads.mutations.length;
+      const d = await propose([display]);
+      expect(d.summary).toContain('Create Display campaign "Display Test", PAUSED (nothing spends until you enable it): 10.00/day, maximize clicks (max 0.80/click)');
+      expect(d.summary).toContain("2 image(s) to upload");
+      const ops = ads.mutations[before]!.operations;
+      expect(ads.mutations[before]!.validateOnly).toBe(true);
+      expect(ops[1].campaignOperation.create).toMatchObject({ status: "PAUSED", advertisingChannelType: "DISPLAY", targetSpend: { cpcBidCeilingMicros: "800000" } });
+      expect(ops.filter((o: any) => o.assetOperation)).toHaveLength(2);
+      expect(ops.find((o: any) => o.adGroupOperation).adGroupOperation.create.type).toBe("DISPLAY_STANDARD");
+      const rda = ops.find((o: any) => o.adGroupAdOperation).adGroupAdOperation.create.ad.responsiveDisplayAd;
+      expect(rda.squareLogoImages[0].asset).toBe(rda.squareMarketingImages[0].asset);
+      expect(rda.marketingImages[0].asset).not.toBe(rda.squareMarketingImages[0].asset);
+      expect(rda).toMatchObject({ longHeadline: { text: "Send an invoice with a pay button" }, businessName: "Acme" });
+
+      const applied = await call(token, "apply_changes", { proposal_id: d.proposal_id });
+      expect(applied.json.status).toBe("applied");
+      const u = await call(token, "undo_changes", { proposal_id: d.proposal_id });
+      expect(u.json.summary).toContain('Remove campaign "Display Test" that Camberstack created');
+
+      // Demand Gen: targeting goes on the ad group; YouTube URLs and ids resolve to one video asset.
+      const dg = await propose([{ type: "create_demand_gen_campaign", name: "YouTube Test", daily_budget: 15,
+        ad_groups: [{ name: "Explainer", ads: [{ videos: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+          headlines: ["Invoices that get paid"], long_headlines: ["Send an invoice with a pay button"], descriptions: ["Clients pay by card."],
+          business_name: "Acme", logo_image: "https://img.example.com/logo.png", final_url: "https://example.com/" }] }] }]);
+      expect(dg.summary).toContain('Create Demand Gen campaign "YouTube Test" with YouTube video ads, PAUSED');
+      expect(dg.summary).toContain("⚠ maximize conversions needs working conversion tracking");
+      const gops = ads.mutations.at(-1)!.operations;
+      expect(gops[1].campaignOperation.create).toMatchObject({ advertisingChannelType: "DEMAND_GEN", maximizeConversions: {} });
+      expect(gops.filter((o: any) => o.campaignCriterionOperation)).toHaveLength(0);
+      expect(gops.filter((o: any) => o.adGroupCriterionOperation)).toHaveLength(2);  // US + English on the ad group
+      const vids = gops.filter((o: any) => o.assetOperation?.create.type === "YOUTUBE_VIDEO");
+      expect(vids).toHaveLength(1);
+      const ad = gops.find((o: any) => o.adGroupAdOperation).adGroupAdOperation.create.ad;
+      expect(ad.name).toBe("Explainer video ad 1");
+      expect(ad.demandGenVideoResponsiveAd.videos).toEqual([{ asset: vids[0].assetOperation.create.resourceName }, { asset: vids[0].assetOperation.create.resourceName }]);
+      await expect(propose([{ type: "create_demand_gen_campaign", name: "Bad", daily_budget: 5, ad_groups: [{ name: "x", ads: [{ ...{ headlines: ["a"], long_headlines: ["b"],
+        descriptions: ["c"], business_name: "d", logo_image: "https://img.example.com/logo.png", final_url: "https://example.com/" }, videos: ["https://vimeo.com/123"] }] }] }]))
+        .rejects.toThrow("isn't a YouTube video id or URL");
+    } finally {
+      io.fetchImage = real;
+    }
   });
 
   it("relays an app's conversions with the key owner's connection, only for the key's actions", async () => {

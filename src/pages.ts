@@ -166,6 +166,8 @@ changes only after you approve each one.</p>
 <tr><td>Change a campaign's daily budget (not shared budgets)</td><td>Restores the previous amount</td></tr>
 <tr><td>Set or remove the last day a campaign runs</td><td>Restores the previous end date</td></tr>
 <tr><td>Build a Search campaign: budget, bidding, locations, languages, ad groups, keywords, responsive search ads, negatives, sitelinks. Created paused</td><td>Removes the campaign it built</td></tr>
+<tr><td>Build a Display campaign: responsive display ads from your image URLs or existing image assets, budget, bidding, locations, languages. Created paused</td><td>Removes the campaign it built</td></tr>
+<tr><td>Build a Demand Gen campaign with YouTube video ads (the API's route onto YouTube; Google doesn't let it create Video campaigns). Created paused</td><td>Removes the campaign it built</td></tr>
 <tr><td>Add an ad group, keywords, a responsive search ad or sitelinks to an existing campaign</td><td>Removes exactly what it added</td></tr>
 <tr><td>Make a campaign count and bid on one conversion category only (e.g. sign-ups)</td><td>Restores the previous goals</td></tr>
 <tr><td>Change a keyword's or ad group's max CPC</td><td>Restores the previous bid</td></tr>
@@ -877,7 +879,7 @@ export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
 
 - MCP endpoint (Streamable HTTP, OAuth 2.1 with dynamic client registration): ${baseUrl}/mcp
 - Tools: ${tools.map((t) => t.name).join(", ")}
-- Writes (each one proposed, approved, then applied; every applied change can be undone): negative keywords; pause/enable campaign, ad group, keyword or ad; daily budget; end date; build a Search campaign (created paused); add ad groups, keywords, ads, sitelinks; bids; bid strategy; location/language targeting; URL suffix; conversion actions and goals.
+- Writes (each one proposed, approved, then applied; every applied change can be undone): negative keywords; pause/enable campaign, ad group, keyword or ad; daily budget; end date; build a Search, Display or Demand Gen (YouTube video) campaign (created paused); add ad groups, keywords, ads, sitelinks; bids; bid strategy; location/language targeting; URL suffix; conversion actions and goals.
 - Search Console (optional, read-only scope): site totals, query/page performance, period-over-period trends, ranking opportunities, URL Inspection (index status), sitemap status, and paid vs organic overlap with the Ads account.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
 - Pricing: Free plan covers 1 Google Ads account (every tool, unlimited applied changes); Pro ${PRO_PRICE_LABEL} covers up to 10. Accounts are counted as those used in the last ${ACCOUNT_WINDOW_DAYS} days; manager (MCC) and demo accounts don't count. Undo is always free.

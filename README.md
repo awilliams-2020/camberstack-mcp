@@ -43,7 +43,10 @@ What a proposal can do:
 - **Control:** add negative keywords; pause or enable a campaign, ad group, keyword or ad; set a campaign's
   daily budget (never a shared budget) or its end date.
 - **Build:** create a whole Search campaign (ad groups, keywords, responsive search ads, targeting, negatives,
-  sitelinks), always created **paused**; add an ad group, keywords, an ad or sitelinks to an existing campaign.
+  sitelinks), a Display campaign (responsive display ads from image URLs or existing image assets) or a
+  Demand Gen campaign with YouTube video ads, always created **paused**. YouTube goes through Demand Gen
+  because the Ads API refuses to create Video campaigns (`MUTATE_NOT_ALLOWED`, v23). Image URLs are
+  fetched SSRF-safe (`src/fetch-safe.ts`); add an ad group, keywords, an ad or sitelinks to an existing campaign.
 - **Tune:** keyword and ad group bids, bid strategy, location and language targeting, presence-only location
   mode, final URL suffix.
 - **Measure:** create a conversion action, set its counting, scope a campaign to one conversion goal.

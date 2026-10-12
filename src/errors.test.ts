@@ -18,6 +18,8 @@ describe("AdsApiError fix hints", () => {
     [{ queryError: "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE" }, "The following field must be present in SELECT clause: 'campaign.id'.", undefined, "add that field to SELECT"],
     [{ queryError: "EXPECTED_FILTERS_ON_DATE_RANGE" }, "Expects filters on the following field to limit a finite date range: 'segments.date'.", undefined, "finite range"],
     [{ fieldError: "INVALID_VALUE" }, "The input has an invalid value.", "geo_target_constants", "FROM geo_target_constant"],
+    [{ policyFindingError: "POLICY_FINDING" }, "The resource has been disapproved since the policy summary includes policy topics of type PROHIBITED.", "ad", "repeated punctuation"],
+    [{ imageError: "ASPECT_RATIO_NOT_ALLOWED" }, "The aspect ratio of the image does not match the expected aspect ratios provided in the asset spec.", "logo_images", "1.91:1"],
   ])("%j → hint", (code, message, field, hint) => {
     const e = new AdsApiError(400, body(code, message, field));
     expect(e.message).toContain(message);   // Google's own words stay
