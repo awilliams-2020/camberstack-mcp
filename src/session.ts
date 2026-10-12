@@ -679,7 +679,8 @@ export class UserSession {
       proposal_id: p.id,
       status: allOk ? "applied" : anyOk ? "partially applied" : "failed",
       results: publicResults(outcomes),
-      undo: anyOk ? `To reverse this, call undo_changes with proposal_id "${p.id}".` : undefined,
+      // A removal has no inverse (a removed campaign can't be restored), so don't offer an undo that would fail.
+      undo: outcomes.some((o) => o.ok && o.inverse) ? `To reverse this, call undo_changes with proposal_id "${p.id}".` : undefined,
     };
   }
 

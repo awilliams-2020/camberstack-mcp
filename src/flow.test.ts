@@ -1122,6 +1122,10 @@ describe("OAuth + MCP end to end", () => {
       await call(token, "apply_changes", { proposal_id: pm.proposal_id });
       const pu = await call(token, "undo_changes", { proposal_id: pm.proposal_id });
       expect(pu.json.summary).toContain('Remove campaign "PMax Test" that Camberstack created');
+      // Applying a removal offers no undo: a removed campaign can't come back.
+      const removed = await call(token, "apply_changes", { proposal_id: pu.json.proposal_id });
+      expect(removed.json.status).toBe("applied");
+      expect(removed.json.undo).toBeUndefined();
     } finally {
       io.fetchImage = real;
     }

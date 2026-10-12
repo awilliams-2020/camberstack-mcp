@@ -123,6 +123,12 @@ export function adsErrorFix(code: string, message: string, field: string): strin
         ? "budget- and rank-lost impression share exist only on campaign: run a separate query FROM campaign for them."
         : "that metric isn't available on this FROM resource or with these segments: drop it, or get it in a separate query.";
     case "PROHIBITED_RESOURCE_TYPE_IN_SELECT_CLAUSE":
+      if (/'CAMPAIGN_BUDGET'/.test(message)) {
+        return "campaign_budget fields can only be selected FROM campaign or FROM campaign_budget: drop them here and get budgets in a "
+          + "separate query, e.g. SELECT campaign.id, campaign_budget.amount_micros FROM campaign.";
+      }
+      return "that resource can't be selected with this FROM: drop it and query it in its own query, FROM that resource "
+        + "(or FROM campaign if it's a campaign-level resource).";
     case "PROHIBITED_SEGMENT_IN_SELECT_OR_WHERE_CLAUSE":
       return "that resource or segment can't be combined with this FROM: query it directly, in its own query.";
     case "UNRECOGNIZED_FIELD":

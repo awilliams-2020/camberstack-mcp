@@ -122,7 +122,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       + "(segments.date DURING LAST_30_DAYS, or BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'); click_view needs a single day (segments.date = 'YYYY-MM-DD'); "
       + "every field used in WHERE or ORDER BY must also be in SELECT; fields can only come from the FROM resource or resources it is "
       + "compatible with (if Google says a resource is incompatible, query that resource directly instead); "
-      + "a campaign's end date is campaign.end_date_time, not campaign.end_date.",
+      + "campaign_budget fields (e.g. campaign_budget.amount_micros) can only be selected FROM campaign or FROM campaign_budget; "
+      + "a campaign's dates are campaign.start_date_time and campaign.end_date_time, not campaign.start_date or campaign.end_date.",
     inputSchema: { customer_id: customerId, query: z.string().describe("A GAQL SELECT statement") },
     annotations: read,
   }, ({ customer_id, query }: { customer_id: string; query: string }) => session().runQuery(customer_id, query));
