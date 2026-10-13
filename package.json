@@ -1,6 +1,6 @@
 {
   "name": "camberstack-mcp",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Google Ads + Search Console MCP server: build Search, Performance Max, Display and YouTube (Demand Gen) campaigns, research keywords, and make only the changes you approve, with undo.",
   "private": true,
   "type": "module",
@@ -46,9 +46,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/awilliams-2020/camberstack-mcp.git"
+    "url": "git+https://github.com/zwznco/camberstack-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/awilliams-2020/camberstack-mcp/issues"
+    "url": "https://github.com/zwznco/camberstack-mcp/issues"
   }
 }

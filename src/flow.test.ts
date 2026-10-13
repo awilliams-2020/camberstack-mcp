@@ -1265,7 +1265,7 @@ describe("OAuth + MCP end to end", () => {
     // Parameters come from the schemas: defaults and descriptions, not hand-written copy.
     expect(page).toContain("<code>location_ids</code>");
     expect(page).toContain("Default [&quot;2840&quot;].");
-    expect(page).toContain("https://github.com/awilliams-2020/camberstack-mcp");
+    expect(page).toContain("https://github.com/zwznco/camberstack-mcp");
     expect(page).toContain('<span class="pill act">Needs your go-ahead</span>');
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/tools`);
   });
