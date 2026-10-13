@@ -144,15 +144,16 @@ ${apps.length ? `<div class="chips">${apps.map((a) => `<span class="chip">${esc(
     const change = (h: typeof entries[number]) => {
       const undo = undoneBy.get(h.proposal_id);
       const state = undo ? "undone" : h.undo_of ? "proposed" : h.status;
-      const label = undo ? `Undone ${when(at(undo))}`
+      const label = undo ? "Undone"
         : h.undo_of ? "Undo waiting for approval" : ({ applied: "Applied", proposed: "Waiting for approval", failed: "Failed", discarded: "Discarded" } as Record<string, string>)[h.status] ?? h.status;
       const lines = h.summary.split("\n").map((l) => l.replace(/^\d+\.\s*/, "").trim()).filter(Boolean);
       const li = (ls: string[]) => ls.map((l) => `<li>${esc(l)}</li>`).join("");
       // A long change shows a clamped preview of its first line; the full list opens on tap.
       const fold = lines.length > FOLD_LINES || lines.join(" ").length > FOLD_CHARS;
       const canUndo = h.status === "applied" && !undo && !h.undo_of;
-      return `<div class="change"><div class="change-top"><span class="change-meta">${clock(at(h))} · account ${esc(fmtCid(h.customer_id))}</span>
-<span class="pill ${state}">${esc(label)}</span></div>
+      // Status and time share a row that never wraps; the account, which can be long, gets its own line.
+      return `<div class="change"><div class="change-head"><span class="pill ${state}">${esc(label)}</span><span class="change-time">${clock(at(h))}</span></div>
+<p class="change-acct">Account ${esc(fmtCid(h.customer_id))}</p>
 ${fold ? `<details class="fold"><summary><span class="preview">${esc(lines[0])}</span><span class="toggle"><span class="closed">Show full change${lines.length > 1 ? ` (${lines.length} items)` : ""}</span><span class="opened">Show less</span></span></summary><ul>${li(lines)}</ul></details>`
   : `<ul>${li(lines)}</ul>`}
 ${canUndo ? `<div class="change-foot"><span>To reverse it, paste this into your AI:</span>
@@ -166,15 +167,16 @@ ${canUndo ? `<div class="change-foot"><span>To reverse it, paste this into your 
       lastDay = d;
       return head + change(h);
     }).join("");
-    const rangeName = (n: number) => n ? `${n} day${n > 1 ? "s" : ""}` : "All";
+    const rangeName = (n: number) => n === 1 ? "24 hours" : n ? `${n} days` : "All";
     const rangeBar = `<nav class="range" aria-label="Show changes from">${RANGES.map((n) =>
-      `<a href="/account?days=${n}#changes"${n === days ? ` aria-current="true"` : ""}>${n ? `${n}d` : "All"}</a>`).join("")}</nav>`;
+      `<a href="/account?days=${n}#changes"${n === days ? ` aria-current="page"` : ""}>${n === 1 ? "24h" : rangeName(n)}</a>`).join("")}</nav>`;
     const countLine = `<p class="muted range-note">${entries.length} change${entries.length === 1 ? "" : "s"}${days ? ` in the last ${rangeName(days)}` : ""}${days && all.length > entries.length ? ` · ${all.length} in total` : ""}</p>`;
 
     res.type("html").send(shell("Your account", `<div class="acct">
 <div class="acct-head"><h1>Your account</h1><form method="post" action="/account/logout" class="who muted">${esc(u.email)} · <button class="linkish">Sign out</button></form></div>
 <div class="grid">${planCard}${connCard}</div>
-<div class="changes-head"><h2 id="changes">Changes</h2>${all.length ? rangeBar : ""}</div>
+<h2 id="changes">Changes</h2>
+${all.length ? rangeBar : ""}
 ${!all.length ? `<div class="card"><p class="muted">No changes yet. Ask your AI about your Google Ads account to start.</p></div>`
   : entries.length ? countLine + changes
   : `<div class="card"><p class="muted">No changes in the last ${rangeName(days)}. <a href="/account?days=0#changes">See all ${all.length}</a>.</p></div>`}
