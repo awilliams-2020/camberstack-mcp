@@ -24,6 +24,8 @@ export interface Account {
   manager: boolean;
   /** Header Google needs when the account is reached through a manager (MCC). */
   loginCustomerId: string | null;
+  /** The account's IANA time zone, e.g. "America/New_York". */
+  timeZone?: string;
 }
 
 const tokenCache = new Map<string, { token: string; exp: number }>();
@@ -243,7 +245,7 @@ export class UserSession {
     }
     // All roots at once; merged below in Google's order, so the result is the same as reading them one by one.
     const perRoot = await Promise.all(roots.map((root) => this.ads.search(root, `SELECT customer_client.id, customer_client.descriptive_name,
-        customer_client.currency_code, customer_client.manager, customer_client.level, customer_client.status
+        customer_client.currency_code, customer_client.time_zone, customer_client.manager, customer_client.level, customer_client.status
       FROM customer_client WHERE customer_client.level <= 1 AND customer_client.status = 'ENABLED'`, root)
       .then((rows) => ({ rows }), (e: Error) => ({ error: e.message }))));
     for (const [i, root] of roots.entries()) {
@@ -265,6 +267,7 @@ export class UserSession {
           currency: c.currencyCode ?? "",
           manager: !!c.manager,
           loginCustomerId: viaSelf ? null : root,
+          ...(c.timeZone ? { timeZone: c.timeZone } : {}),
         });
       }
     }
@@ -272,6 +275,9 @@ export class UserSession {
     // Nothing readable (no Ads access, or blocked e.g. by 2-Step Verification): offer the demo account,
     // and keep the reason in lastUnreadable so list_accounts still says why the real ones are missing.
     if (!list.some((a) => !a.manager)) list.push(DEMO_ACCOUNT);
+    // A first guess at their time zone, until they work on a specific account (account() below).
+    const tz = list.find((a) => !a.manager && a.timeZone)?.timeZone;
+    if (tz) this.deps.db.prepare("UPDATE users SET time_zone = ? WHERE id = ? AND time_zone IS NULL").run(tz, this.user.id);
     this.lastUnreadable = unreadable;
     accountsCache.set(this.user.id, { at: Date.now(), list, unreadable });
     return list;
@@ -284,6 +290,8 @@ export class UserSession {
       ?? (await this.accounts({ fresh: true })).find((x) => x.customerId === cid);
     if (!a) throw new Error(`Account ${customerId} is not accessible with this Google login. Call list_accounts to see the ones that are.`);
     if (a.manager) throw new Error(`${a.name} (${cid}) is a manager account; pick one of the client accounts under it.`);
+    // The account they actually work on sets their time zone (lifecycle emails go out in their morning).
+    if (a.timeZone) this.deps.db.prepare("UPDATE users SET time_zone = ? WHERE id = ? AND time_zone IS NOT ?").run(a.timeZone, this.user.id, a.timeZone);
     return a;
   }
 

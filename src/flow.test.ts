@@ -44,7 +44,7 @@ class FakeAds {
   async listAccessibleCustomers() { return ["1112223333"]; }
   async search(_cid: string, q: string): Promise<any[]> {
     if (q.includes("FROM customer_client")) {
-      return [{ customerClient: { id: "1112223333", descriptiveName: "Acme", currencyCode: "USD", manager: false, level: 0 } }];
+      return [{ customerClient: { id: "1112223333", descriptiveName: "Acme", currencyCode: "USD", timeZone: "Europe/London", manager: false, level: 0 } }];
     }
     if (q.includes("FROM campaign_criterion")) {
       return this.negatives.map((n) => ({ campaign: { id: "10" }, campaignCriterion: { keyword: { text: n.text, matchType: n.matchType } } }));
@@ -427,6 +427,11 @@ describe("OAuth + MCP end to end", () => {
     const r = await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 });
     expect(r.isError).toBe(false);
     expect(r.json.campaigns.length).toBeGreaterThan(0);
+  });
+
+  it("remembers the time zone of the account they work on, for lifecycle email timing", async () => {
+    await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 });
+    expect(db.prepare("SELECT DISTINCT time_zone tz FROM users WHERE enc_refresh IS NOT NULL").all()).toEqual([{ tz: "Europe/London" }]);
   });
 
   it("lists accounts once across requests, not once per tool call", async () => {

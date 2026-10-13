@@ -3,6 +3,8 @@
  *   first_steps    connected 2–14 days ago and never asked anything real → the first question to ask, and the demo
  *   limit_reached  a tool refused a second Google Ads account (the Free plan's limit), still free 3+ days later → one note: what Pro covers, the upgrade link
  *   check_in       first applied a change to a real account 2–14 days ago → a personal note from Adam asking how it went (replies go to him)
+ * Each goes out in the user's morning (SEND_HOURS in the time zone of their Google Ads account, or FALLBACK_TZ),
+ * so being due only holds it until the next hourly run inside that window.
  * Never sent to internal accounts (ADMIN_EMAILS, PRO_EMAILS) or anyone who unsubscribed; first_steps and limit_reached
  * also skip Pro users and the disconnected.
  *
@@ -29,12 +31,24 @@ export interface LifecycleDeps {
   internalEmails: Set<string>;
   upgradeLink: (userId: string) => string | null;
   fetch?: typeof fetch;
+  /** Tests pin the time of day. */
+  clock?: () => Date;
 }
 
 /** Key for unsubscribe links; server.ts and email-preview.ts must sign alike. */
 export const lifecycleSigningKey = (encryptionKey: Buffer) => deriveKey(encryptionKey, "email-links");
 
 const DAY = 86400;
+/** Local hours an email may go out in: three hourly runs, so one always lands. */
+const SEND_HOURS = { from: 9, to: 12 };
+/** For users whose Google Ads time zone we never saw: 9am Central is 10 Eastern, 7 Pacific. */
+export const FALLBACK_TZ = "America/Chicago";
+
+/** Hour of day (0–23) at `at` in `tz`; an unknown zone counts as FALLBACK_TZ. */
+export function localHour(at: Date, tz: string | null | undefined): number {
+  const fmt = (zone: string) => Number(new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", hourCycle: "h23" }).format(at));
+  try { return fmt(tz || FALLBACK_TZ); } catch { return fmt(FALLBACK_TZ); }
+}
 type Kind = "first_steps" | "limit_reached" | "check_in";
 const USED_TOOLS = "('account_overview','run_gaql','keyword_ideas','keyword_metrics','propose_changes')";
 
@@ -55,27 +69,30 @@ export class Lifecycle {
     const t = now();
     const eligible = `u.enc_refresh IS NOT NULL AND u.email_opt_out = 0 AND u.plan = 'free'`;
     const notSent = (k: string) => `NOT EXISTS (SELECT 1 FROM email_log e WHERE e.user_id = u.id AND e.kind = '${k}')`;
-    const first = this.d.db.prepare(`SELECT u.id, u.email, u.created_at FROM users u WHERE ${eligible}
+    const first = this.d.db.prepare(`SELECT u.id, u.email, u.time_zone, u.created_at FROM users u WHERE ${eligible}
       AND u.created_at BETWEEN ? AND ? AND ${notSent("first_steps")}
       AND NOT EXISTS (SELECT 1 FROM tool_calls c WHERE c.user_id = u.id AND c.ok = 1 AND c.tool IN ${USED_TOOLS})`)
-      .all(t - 14 * DAY, t - 2 * DAY) as { id: string; email: string; created_at: number }[];
+      .all(t - 15 * DAY, t - 2 * DAY) as { id: string; email: string; time_zone: string | null; created_at: number }[];
     // Refused a second account by the plan gate (session.ts checkAccount), the last refusal 3–30 days ago.
-    const limit = this.d.db.prepare(`SELECT u.id, u.email, max(c.at) last
+    const limit = this.d.db.prepare(`SELECT u.id, u.email, u.time_zone, max(c.at) last
       FROM users u JOIN tool_calls c ON c.user_id = u.id AND c.ok = 0 AND c.error LIKE ?
       WHERE ${eligible} AND ${notSent("limit_reached")}
       GROUP BY u.id HAVING last BETWEEN ? AND ?`)
-      .all(`${PLAN_LIMIT_PREFIX}%`, t - 30 * DAY, t - 3 * DAY) as { id: string; email: string; last: number }[];
+      .all(`${PLAN_LIMIT_PREFIX}%`, t - 31 * DAY, t - 3 * DAY) as { id: string; email: string; time_zone: string | null; last: number }[];
     // First applied change to a real account (not the demo, not an undo) 2–14 days ago; any plan, connected or not.
-    const checkIn = this.d.db.prepare(`SELECT u.id, u.email, min(p.applied_at) first FROM users u
+    const checkIn = this.d.db.prepare(`SELECT u.id, u.email, u.time_zone, min(p.applied_at) first FROM users u
       JOIN proposals p ON p.user_id = u.id AND p.status = 'applied' AND p.undo_of IS NULL AND p.customer_id <> ?
       WHERE u.email_opt_out = 0 AND ${notSent("check_in")}
       GROUP BY u.id HAVING first BETWEEN ? AND ?`)
-      .all(DEMO_CID, t - 14 * DAY, t - 2 * DAY) as { id: string; email: string; first: number }[];
-    const ok = (e: string) => !this.d.internalEmails.has(e.toLowerCase());
+      .all(DEMO_CID, t - 15 * DAY, t - 2 * DAY) as { id: string; email: string; time_zone: string | null; first: number }[];
+    // Upper bounds carry a day past the nominal window: waiting for their morning can take up to ~21h.
+    const at = this.d.clock?.() ?? new Date();
+    const morning = (u: { time_zone: string | null }) => { const h = localHour(at, u.time_zone); return h >= SEND_HOURS.from && h < SEND_HOURS.to; };
+    const ok = (u: { email: string; time_zone: string | null }) => !this.d.internalEmails.has(u.email.toLowerCase()) && morning(u);
     return [
-      ...first.filter((u) => ok(u.email)).map((u) => ({ kind: "first_steps" as const, id: u.id, email: u.email, days: Math.floor((t - u.created_at) / DAY) })),
-      ...limit.filter((u) => ok(u.email)).map((u) => ({ kind: "limit_reached" as const, id: u.id, email: u.email, days: 0 })),
-      ...checkIn.filter((u) => ok(u.email)).map((u) => ({ kind: "check_in" as const, id: u.id, email: u.email, days: 0 })),
+      ...first.filter(ok).map((u) => ({ kind: "first_steps" as const, id: u.id, email: u.email, days: Math.floor((t - u.created_at) / DAY) })),
+      ...limit.filter(ok).map((u) => ({ kind: "limit_reached" as const, id: u.id, email: u.email, days: 0 })),
+      ...checkIn.filter(ok).map((u) => ({ kind: "check_in" as const, id: u.id, email: u.email, days: 0 })),
     ];
   }
 

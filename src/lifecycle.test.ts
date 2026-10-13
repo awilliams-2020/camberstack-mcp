@@ -5,12 +5,14 @@ import { openDb, now } from "./db.js";
 import { Lifecycle } from "./lifecycle.js";
 
 const DAY = 86400;
+/** 10am in Chicago (the fallback zone), so the morning window is open unless a test says otherwise. */
+const MORNING = new Date("2026-10-13T15:00:00Z");
 
-function setup() {
+function setup(clock = () => MORNING) {
   const db = openDb(":memory:");
   const sent: any[] = [];
   const lc = new Lifecycle({
-    db, baseUrl: "https://camberstack.io", signingKey: Buffer.alloc(32, 7),
+    db, clock, baseUrl: "https://camberstack.io", signingKey: Buffer.alloc(32, 7),
     mail: { apiKey: "re_test", from: "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" },
     internalEmails: new Set(["me@example.com"]),
     upgradeLink: (u) => `https://camberstack.io/upgrade?t=${u}.sig`,
@@ -82,6 +84,29 @@ describe("lifecycle emails", () => {
     expect(await lc.run()).toBe(0);
   });
 
+  it("waits for the user's morning, in their Google Ads time zone", async () => {
+    let at = new Date("2026-10-13T07:12:00Z");  // 3:12am New York, 8:12am London, 6:12pm Sydney
+    const { db, lc, sent, user, call, applied } = setup(() => at);
+    const tz = (id: string, zone: string | null) => db.prepare("UPDATE users SET time_zone = ? WHERE id = ?").run(zone, id);
+    for (const [id, zone] of [["ny", "America/New_York"], ["uk", "Europe/London"], ["none", null], ["bogus", "Not/AZone"]] as const) {
+      user(id, `${id}@example.com`, 5); call(id, "account_overview"); applied(id, 2.5); tz(id, zone);
+    }
+    expect(await lc.run()).toBe(0);                                 // nobody's 9–12 yet
+    at = new Date("2026-10-13T09:00:00Z");                          // 10am London
+    expect(await lc.run()).toBe(1);
+    expect(sent.map((m) => m.to[0])).toEqual(["uk@example.com"]);
+    at = new Date("2026-10-13T14:00:00Z");                          // 10am New York, 9am Chicago (no zone, or a bad one)
+    expect(await lc.run()).toBe(3);
+    expect(sent.map((m) => m.to[0]).sort()).toEqual(["bogus@example.com", "none@example.com", "ny@example.com", "uk@example.com"]);
+  });
+
+  it("still sends check_in to someone whose morning comes after the nominal 14 days", async () => {
+    const { lc, sent, user, call, applied } = setup();
+    user("late", "late@example.com", 20); call("late", "account_overview"); applied("late", 14.5);
+    expect(await lc.run()).toBe(1);
+    expect(sent[0].to).toEqual(["late@example.com"]);
+  });
+
   it("unsubscribes only on POST with a valid signature, and then sends nothing", async () => {
     const { db, lc, sent, user } = setup();
     user("quiet", "quiet@example.com", 3);
@@ -105,7 +130,7 @@ describe("lifecycle emails", () => {
   it("retries a failed send next run instead of marking it sent", async () => {
     const { db, user } = setup();
     let fail = true; const sent: any[] = [];
-    const lc = new Lifecycle({ db, baseUrl: "https://camberstack.io", signingKey: Buffer.alloc(32), internalEmails: new Set(),
+    const lc = new Lifecycle({ db, clock: () => MORNING, baseUrl: "https://camberstack.io", signingKey: Buffer.alloc(32), internalEmails: new Set(),
       mail: { apiKey: "k", from: "f", replyTo: "r" }, upgradeLink: () => null,
       fetch: (async (_u: string, init: RequestInit) => { if (fail) return new Response("down", { status: 500 }); sent.push(init.body); return new Response("{}"); }) as any });
     user("quiet", "quiet@example.com", 3);
