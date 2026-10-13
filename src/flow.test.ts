@@ -1299,6 +1299,15 @@ describe("OAuth + MCP end to end", () => {
     expect(await r.text()).toBe("tok_test_123");
   });
 
+  it("serves the Search Console page, listed and linked", async () => {
+    const r = await fetch(`${base}/google-search-console-mcp`);
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain("<h1>Google Search Console MCP server</h1>");
+    expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/google-search-console-mcp`);
+    expect(await (await fetch(`${base}/llms.txt`)).text()).toContain(`${base}/google-search-console-mcp`);
+    expect(await (await fetch(`${base}/`)).text()).toContain('href="/google-search-console-mcp"');
+  });
+
   it("serves the Claude guide and lists it in the sitemap", async () => {
     const g = await fetch(`${base}/google-ads-claude`);
     expect(g.status).toBe(200);

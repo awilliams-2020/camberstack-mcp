@@ -194,7 +194,8 @@ queries and positions, and line them up against your ads:</p>
 <li><strong>Opportunities:</strong> searches just off page 1, and top results with a click-through rate low enough to point at the title.</li>
 <li><strong>Indexing:</strong> whether Google has indexed a page and why not, when it last crawled it, and when it last read your sitemap.</li>
 </ul>
-<p class="muted">Camberstack can't change anything in Search Console. Untick it and every Google Ads tool still works; reconnect later to add it.</p>
+<p class="muted">Camberstack can't change anything in Search Console. Untick it and every Google Ads tool still works; reconnect later to add it.
+The Search Console tools work without a Google Ads account too: <a href="/google-search-console-mcp">Search Console MCP</a>.</p>
 
 <h2 id="setup">Connect</h2>
 <p>Add this server URL to your AI app, then sign in with Google.</p>
@@ -484,6 +485,83 @@ in <a href="#before">Before you start</a> is OpenAI's requirement, not ours.</p>
 }
 
 /**
+ * Use-case page for "google search console mcp" (480/mo, rising, low competition; scripts/seo/audits/camberstack.md,
+ * 2026-10-10). The Search Console tools are ungated (tools.ts GATED), so they work with no Google Ads account and don't
+ * count toward the plan; only paid_organic_overlap needs an Ads account.
+ */
+export function searchConsolePage(baseUrl: string): string {
+  const mcpUrl = `${baseUrl}/mcp`;
+  return layout({
+    baseUrl, path: "/google-search-console-mcp",
+    title: "Google Search Console MCP server, hosted and read-only | Camberstack",
+    description: "A hosted Google Search Console MCP server for Claude, ChatGPT and Cursor. Sign in with Google: no Cloud project, service account or API key. Queries, trends, indexing and sitemaps, read-only.",
+    jsonLd: {
+      "@context": "https://schema.org", "@type": "TechArticle",
+      headline: "Google Search Console MCP server", url: `${baseUrl}/google-search-console-mcp`, dateModified: "2026-10-13",
+      author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
+      about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
+    },
+    body: `
+<h1>Google Search Console MCP server</h1>
+<p class="lede">Ask your AI assistant how your site is doing in Google Search, and it reads your Search Console data to answer:
+clicks, queries, pages, what's rising or falling, and why a page isn't indexed. Camberstack is hosted, so setup is a Google
+sign-in. It can't change anything in Search Console.</p>
+
+<h2>Questions it answers</h2>
+<table>
+<tr><th>Ask</th><th>What it reads</th></tr>
+<tr><td><em>"How did my site do in Google Search last month, against the month before?"</em></td><td>Site totals for both periods: clicks, impressions, CTR, average position</td></tr>
+<tr><td><em>"Which pages lost the most clicks in the last 28 days?"</em></td><td>Every query and page compared with the period before: rising, falling, new and lost</td></tr>
+<tr><td><em>"Which searches am I on page 2 for?"</em></td><td>Queries in positions 4 to 20, with the clicks a realistic climb would add, and top results whose CTR is low enough to point at the title</td></tr>
+<tr><td><em>"Is /pricing indexed? If not, why?"</em></td><td>Google's index record for the page: the coverage reason, last crawl, robots.txt, and the canonical Google chose</td></tr>
+<tr><td><em>"When did Google last read my sitemap?"</em></td><td>Each submitted sitemap's last download, URL count, errors and warnings</td></tr>
+<tr><td><em>"Which searches do I pay for that I already rank for?"</em></td><td>Your Google Ads search terms joined with your organic queries over the same days (needs a Google Ads account)</td></tr>
+</table>
+<p>Answers come from the Search Console API, so they match what Search Console shows, with its limits: data goes back 16 months,
+the last two or three days are still filling in, and Google leaves rare queries out of per-query rows for privacy. Site totals
+are the complete numbers, so your AI leads with those.</p>
+
+<h2>Set it up</h2>
+<p>Connect Camberstack in your AI app (<a href="/google-ads-claude">Claude</a>, <a href="/google-ads-chatgpt">ChatGPT</a>, or any MCP
+client with <code>${mcpUrl}</code>). On Google's sign-in screen, leave the <strong>Search Console</strong> box ticked: it grants
+read-only access (<code>webmasters.readonly</code>), nothing more. Then ask <em>"List my Search Console sites"</em> and use a site
+from that list.</p>
+<p>Google's screen also asks for Google Ads access, because Camberstack is a Google Ads tool too. You don't need a Google Ads account
+to use the Search Console tools. Without one, Camberstack offers its demo Ads account and every Search Console tool works on your real sites.</p>
+
+<h2>Domain and URL-prefix properties</h2>
+<p>Search Console treats <code>sc-domain:example.com</code> (a Domain property, verified by DNS, covering every subdomain and
+protocol) and <code>https://www.example.com/</code> (a URL-prefix property) as different sites, with different data. If your AI
+says it has no access to a site you can see in Search Console, it's usually using the other form. The site list shows the exact
+names your login can read.</p>
+
+<h2>What it can't do</h2>
+<ul>
+<li>Change anything in Search Console. The access is read-only.</li>
+<li>Request indexing or submit a sitemap. Google offers no API for requesting indexing of ordinary pages, so you still do that in Search Console.</li>
+<li>Read the Enhancements reports (rich results, Core Web Vitals) as Search Console's UI shows them. URL inspection includes each page's
+structured-data items and their errors, which covers the same ground one page at a time.</li>
+</ul>
+
+<h2>Compared with running your own</h2>
+<p>Open-source Search Console MCP servers run on your machine and need a Google Cloud project with the Search Console API enabled,
+plus an OAuth client or a service account added as a user on each property. That suits a developer on one laptop. Camberstack
+runs that part for you: one Google sign-in, and it works the same in Claude on the web, on your phone, and in ChatGPT.</p>
+
+<h2>Questions</h2>
+<h3>What does it cost?</h3>
+<p>The Search Console tools are free and don't count toward a plan. Plans count Google Ads accounts only: <a href="/#pricing">Free covers one, Pro ten</a>.</p>
+<h3>Which Search Console permission do I need?</h3>
+<p>Any user of the property can read its performance data. Only the sites your Google login can see in Search Console are listed.</p>
+<h3>Do you store my search data?</h3>
+<p>No. Camberstack fetches it when your AI asks and passes it on; reports and query results aren't kept. Details in the <a href="/privacy">privacy policy</a>.</p>
+
+<p><a class="btn" href="/#setup">Connect Search Console</a> <a href="/tools#search_console_sites">See the Search Console tools</a></p>
+`,
+  });
+}
+
+/**
  * Use-case page for "gemini google ads". Gemini takes outside MCP servers as "custom apps" (Gemini Spark), which
  * Google limits to personal accounts, 18+, in the US, with Keep Activity on, on a Google AI Pro or Ultra plan
  * (support.google.com/gemini/answer/17209137, read 2026-10-02). Screenshots are the operator's, mobile web, 2026-10-02; the path (Settings, Personal Intelligence,
@@ -638,7 +716,8 @@ and logos square 1:1 or landscape 4:1. Google reviews every new ad against its p
 <h2 id="search-console">Search Console</h2>
 <p>If you leave the Search Console box ticked when you sign in, your AI can read (never change) your sites' search data: totals against the previous
 period, queries and pages, rising and falling queries, near-page-1 opportunities, index status for given URLs, sitemap status, and
-searches you pay for that already rank organically. Camberstack can't request indexing or submit sitemaps; you do that in Search Console.</p>
+searches you pay for that already rank organically. Camberstack can't request indexing or submit sitemaps; you do that in Search Console.
+<a href="/google-search-console-mcp">More on the Search Console tools</a>.</p>
 
 <h2 id="demo">Demo account</h2>
 <p>Account <code>000-000-0001</code> is a sample plumbing business with six months of campaigns and search terms. Every tool works on it,
@@ -911,7 +990,7 @@ export function robotsTxt(baseUrl: string): string {
 }
 
 /** The indexable pages, in sitemap order. */
-export const SITEMAP_PATHS = ["/", "/docs", "/google-ads-claude", "/google-ads-chatgpt", "/tools", "/about", "/privacy", "/terms"];
+export const SITEMAP_PATHS = ["/", "/docs", "/google-ads-claude", "/google-ads-chatgpt", "/google-search-console-mcp", "/tools", "/about", "/privacy", "/terms"];
 
 /** `lastmod`: each page's own last-changed date (lastmod.ts), never one date for the whole site. */
 export function sitemapXml(baseUrl: string, lastmod: Record<string, string>): string {
@@ -935,6 +1014,7 @@ export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
 - [Pricing](${baseUrl}/#pricing)
 - [Connect Google Ads to Claude (guide with a worked example)](${baseUrl}/google-ads-claude)
 - [Connect Google Ads to ChatGPT (step-by-step guide)](${baseUrl}/google-ads-chatgpt)
+- [Google Search Console MCP (read-only; works without a Google Ads account)](${baseUrl}/google-search-console-mcp)
 - [Every tool, with its parameters](${baseUrl}/tools)
 - [Source (MIT)](${SOURCE_URL})
 - [Privacy](${baseUrl}/privacy)
