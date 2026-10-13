@@ -246,7 +246,7 @@ beforeAll(async () => {
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    ({ app, billing, relay } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"),
+    ({ app, billing, relay } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
       conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
@@ -1288,6 +1288,13 @@ describe("OAuth + MCP end to end", () => {
     expect(prm.resource_documentation).toBe(`${base}/docs`);
     const as = await (await fetch(`${base}/.well-known/oauth-authorization-server`)).json();
     expect(as.service_documentation).toBe(`${base}/docs`);
+  });
+
+  it("serves the ChatGPT plugin domain token as bare plain text", async () => {
+    const r = await fetch(`${base}/.well-known/openai-apps-challenge`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toContain("text/plain");
+    expect(await r.text()).toBe("tok_test_123");
   });
 
   it("serves the Claude guide and lists it in the sitemap", async () => {

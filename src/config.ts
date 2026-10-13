@@ -39,6 +39,8 @@ export interface Config {
   mail?: import("./lifecycle.js").MailConfig;
   /** Glama ownership token for /.well-known/glama.json (from Glama's claim panel); unset = 404. */
   glamaClaim?: string;
+  /** ChatGPT plugin domain-verification token for /.well-known/openai-apps-challenge (from the plugin portal); unset = 404. */
+  openaiAppsChallenge?: string;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
   matomo?: { url: string; siteId: string; token: string };
   gitSha: string;
@@ -73,6 +75,7 @@ export function loadConfig(): Config {
     adminUrl: process.env.ADMIN_URL?.replace(/\/+$/, "") || undefined,
     adminEmails: emails(process.env.ADMIN_EMAILS),
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
+    openaiAppsChallenge: process.env.OPENAI_APPS_CHALLENGE || undefined,
     mail: process.env.RESEND_API_KEY
       ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" }
       : undefined,

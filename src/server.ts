@@ -145,6 +145,10 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
       r.json({ $schema: "https://glama.ai/mcp/schemas/connector.json", claim: cfg.glamaClaim });
     });
   }
+  if (cfg.openaiAppsChallenge) {
+    // ChatGPT's plugin portal wants the bare token as plain text, not JSON.
+    app.get("/.well-known/openai-apps-challenge", (_q, r) => { r.type("text/plain").send(cfg.openaiAppsChallenge); });
+  }
   // The GEO audit that used to live on this domain. Gone for good, so say so instead of a plain 404.
   for (const p of ["/geo-audit", "/aeo-audit", "/ai-visibility-audit", "/ai-visibility-checker", "/methodology", "/report/:id", "/fixpack/:id"]) {
     app.get(p, (_q, r) => { r.status(410).type("html").send(errorPage(cfg.baseUrl, "That page belonged to an earlier product and has been removed.")); });
