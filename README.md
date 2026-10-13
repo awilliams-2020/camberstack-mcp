@@ -1,9 +1,9 @@
 # Camberstack: a Google Ads MCP server
 
 Connect Google Ads (and, optionally, Search Console) to Claude, ChatGPT, Cursor or any MCP client. Your AI
-reads the account with read-only tools and can propose changes, from negative keywords to whole campaigns. **Nothing
-changes in the account until you approve a specific proposal, and every applied change can be
-undone.**
+reads the account with read-only tools and can propose changes, from negative keywords to whole Search,
+Performance Max, Display and YouTube campaigns. **Nothing changes in the account until you approve a specific
+proposal, and every applied change can be undone.**
 
 Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, unlimited changes; Pro $15/mo: up to 10 accounts).
 
@@ -27,27 +27,33 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, 
 | `search_console_opportunities` | no | queries on positions 4-20 with projected click gain, top-5 queries with weak CTR, question-shaped queries |
 | `search_console_inspect_urls` | no | URL Inspection for up to 20 pages: indexed or why not, last crawl, canonical chosen vs declared, structured-data errors |
 | `search_console_sitemaps` | no | submitted sitemaps: last downloaded, URL count, errors and warnings |
-
-The Search Console tools take either `days` or exact `start_date`/`end_date`, and `fresh: true` to include the last 2-3
-days Google is still filling in. Requesting indexing and submitting sitemaps aren't available: Camberstack only holds
-the read-only scope.
 | `paid_organic_overlap` | no | joins an Ads account's search terms with a site's organic queries: searches paid for that already rank near the top, and page-2+ searches with no ad |
 | `propose_changes` | no | resolves changes against the live account, dry-runs them with Google (`validateOnly`), stores a proposal with a plain-English summary |
 | `apply_changes` | **yes** | applies a stored proposal (the user's own, un-applied, under 24h old); records each change's inverse |
 | `undo_changes` | no | builds the reversing proposal for an applied one |
 | `billing` | no | plan, Google Ads accounts in use (last 30 days) vs. the plan's limit, and a personal upgrade or manage-billing link |
-| `discard_proposal`, `change_history`, `disconnect` | | |
+| `discard_proposal` | no | marks an open proposal discarded so it can't be applied |
+| `change_history` | no | every proposal, with what was applied, what failed and what was undone |
+| `disconnect` | no | revokes Camberstack's Google access and deletes the stored credentials (the user confirms) |
+
+The Search Console tools take either `days` or exact `start_date`/`end_date`, and `fresh: true` to include the last 2-3
+days Google is still filling in. Requesting indexing and submitting sitemaps aren't available: Camberstack only holds
+the read-only scope.
 
 What a proposal can do:
 
 - **Control:** add negative keywords; pause or enable a campaign, ad group, keyword or ad; set a campaign's
   daily budget (never a shared budget) or its end date.
-- **Build:** create a whole Search campaign (ad groups, keywords, responsive search ads, targeting, negatives,
-  sitelinks), a Display campaign (responsive display ads from image URLs or existing image assets) or a
-  Demand Gen campaign with YouTube video ads, or a Performance Max campaign (asset groups; business name and
-  logo linked to the campaign, as brand guidelines require; no shopping feed), always created **paused**. YouTube goes through Demand Gen
-  because the Ads API refuses to create Video campaigns (`MUTATE_NOT_ALLOWED`, v23). Image URLs are
-  fetched SSRF-safe (`src/fetch-safe.ts`); add an ad group, keywords, an ad or sitelinks to an existing campaign.
+- **Build**, always created **paused** (building and spending are two separate approvals):
+  - a **Search** campaign: ad groups, keywords, responsive search ads, targeting, negatives, sitelinks;
+  - a **Performance Max** campaign: asset groups of text, images and YouTube videos, with the business name and
+    logo on the campaign as Google's brand guidelines require (no shopping feed);
+  - a **Display** campaign: responsive display ads;
+  - a **Demand Gen** campaign with YouTube video ads, the API's only way onto YouTube (it refuses to create
+    Video campaigns: `MUTATE_NOT_ALLOWED`, v23).
+
+  Images are existing image assets or https URLs, which are downloaded SSRF-safe (`src/fetch-safe.ts`) and
+  uploaded. A proposal can also add an ad group, keywords, an ad or sitelinks to an existing campaign.
 - **Tune:** keyword and ad group bids, bid strategy, location and language targeting, presence-only location
   mode, final URL suffix.
 - **Measure:** create a conversion action, set its counting, scope a campaign to one conversion goal.
