@@ -7,7 +7,7 @@ const json = (p: string) => JSON.parse(readFileSync(new URL(`../${p}`, import.me
 
 describe("published metadata", () => {
   it("has one version everywhere it's published", () => {
-    for (const p of ["package.json", "server.json", "chatgpt-plugin/.codex-plugin/plugin.json"]) expect(json(p).version, p).toBe(SERVER_VERSION);
+    for (const p of ["package.json", "server.json"]) expect(json(p).version, p).toBe(SERVER_VERSION);
   });
 
   it("sets all three hints on every tool (ChatGPT's review rejects an unset one)", () => {

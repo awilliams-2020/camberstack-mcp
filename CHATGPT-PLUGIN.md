@@ -1,16 +1,38 @@
-# ChatGPT plugin submission: review details
+# ChatGPT plugin submission
 
-The package for OpenAI's plugin portal (Plugins → Upload new or existing plugin → **With MCP**) is
-`.codex-plugin/plugin.json`, `.mcp.json` and `assets/`. This file is the text the portal asks for
-outside the package. It isn't part of the ZIP.
+Text to paste into ChatGPT's plugin creator, which builds and zips the package itself. Server details:
+MCP URL `https://camberstack.io/mcp`, Streamable HTTP, **OAuth with dynamic client registration** (no client ID
+or secret to enter). Version: keep in step with `package.json`.
 
-Build the ZIP from this directory:
+## Listing
 
-```
-cd chatgpt-plugin && rm -f ../camberstack-chatgpt-plugin.zip && zip -r ../camberstack-chatgpt-plugin.zip .codex-plugin .mcp.json assets
-```
+| field | value |
+|---|---|
+| Display name (≤30) | Camberstack: Google Ads |
+| Short description (≤30) | Google Ads changes you approve |
+| Developer name | Camberstack |
+| Category | Business & Operations |
+| Website | https://camberstack.io |
+| Support | https://camberstack.io/docs |
+| Privacy policy | https://camberstack.io/privacy |
+| Terms | https://camberstack.io/terms |
+| Brand color (light / dark) | #1F5F4A / #6FC4A4 |
+| Logo | `brand/logo-512.png` (square, 512px) |
 
-Keep `version` in step with `package.json` and `server.json`.
+Starter prompts (≤3, ≤128 chars, no @-mentions):
+- Show me Camberstack's demo account and how each campaign did last month
+- Which search terms cost me money without converting in the last 30 days?
+- Find negative keywords for my worst campaign and show me the change first
+
+Long description (≤4000):
+
+> Camberstack connects your Google Ads account to ChatGPT with a Google sign-in: no developer token, API keys or Google Cloud project. Camberstack accesses the Google Ads API under its own developer-token access, with your Google OAuth consent.
+>
+> Ask anything about your account, from spend and conversions to the search terms you pay for, and research new keywords with Keyword Planner. When you want a change, ChatGPT proposes it first: negative keywords, budgets, pauses, bids and bid strategy, targeting, conversion goals, or a whole new Search, Performance Max, Display or YouTube campaign (always created paused). Each proposal is checked with Google before you see it. Nothing changes until you approve, and every applied change is logged and can be undone.
+>
+> Optional read-only Search Console shows your organic queries and the searches you pay for that already rank. Works with manager (MCC) accounts.
+>
+> Free on one Google Ads account, with every tool. A demo account with sample data lets you try everything first: ask for Camberstack's demo account.
 
 ## Domain verification
 
