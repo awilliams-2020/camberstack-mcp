@@ -1,5 +1,7 @@
 # Camberstack: a Google Ads MCP server
 
+[![Camberstack MCP server on Glama](https://glama.ai/mcp/servers/zwznco/camberstack-mcp/badges/score.svg)](https://glama.ai/mcp/servers/zwznco/camberstack-mcp)
+
 Connect Google Ads (and, optionally, Search Console) to Claude, ChatGPT, Cursor or any MCP client. Your AI
 reads the account with read-only tools and can propose changes, from negative keywords to whole Search,
 Performance Max, Display and YouTube campaigns. **Nothing changes in the account until you approve a specific
