@@ -599,6 +599,8 @@ describe("OAuth + MCP end to end", () => {
     expect(r.json.accounts.map((x: any) => x.customerId)).toEqual(["0000000001"]);
     expect(r.json.unreadable[0].error).toContain("ACTION_NOT_PERMITTED");
     expect(r.json.note).toContain("demo");
+    // Demo-only must not read as "signed out": the note names who is signed in.
+    expect(r.json.note).toMatch(/IS connected and signed in, as \S+@/);
   });
 
   it("gets Keyword Planner ideas and metrics without changing anything", async () => {

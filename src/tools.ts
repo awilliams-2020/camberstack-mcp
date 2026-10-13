@@ -104,8 +104,11 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     return {
       accounts,
       ...(s.lastUnreadable.length ? { unreadable: s.lastUnreadable } : {}),
-      ...(demo ? { note: "This Google login has no readable Google Ads account, so the demo account (sample data, a fictional business) is offered. "
-        + "Tell the user plainly that it is a demo, and if `unreadable` is present, explain why their real accounts are missing." } : {}),
+      // Without "signed in as", models read demo-only as "not signed in" and send the user to reconnect, which changes nothing.
+      ...(demo ? { note: `The user IS connected and signed in, as ${s.user.email}; there is nothing to reconnect. That Google login has no `
+        + "readable Google Ads account, so only the demo account (sample data, a fictional business) is offered. Tell the user plainly that "
+        + "it is a demo, and if `unreadable` is present, explain why their real accounts are missing. To use a real account: give "
+        + `${s.user.email} access in Google Ads (Admin, then Access and security), or disconnect and connect again with the Google login that has it.` } : {}),
     };
   });
 
