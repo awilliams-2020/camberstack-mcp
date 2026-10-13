@@ -264,16 +264,19 @@ const CAN_CHANGE = `<h2>What it can change</h2>
 <p>Negative keywords, budgets and end dates, pausing and re-enabling, bids, targeting and bid strategy, conversion goals, and whole new
 Search, Performance Max, Display and YouTube campaigns (always created paused). You approve each change, and each one can be undone. <a href="/#changes">The full list</a>, and <a href="/tools">every tool</a>.</p>`;
 
-/**
- * Problems users actually hit (tool_calls.error, 2026-10), with the wording they see, so a search for the message finds
- * the fix. `notUsed` and `reAdd` are the app-specific steps.
- */
-const troubleshooting = (app: string, notUsed: string, reAdd: string) => `<h2 id="troubleshooting">Troubleshooting</h2>
-<h3>${app} answers without using Camberstack</h3>
+/** The two troubleshooting entries that differ per app. `notUsed` and `reAdd` are the app-specific steps. */
+const appTroubleshooting = (app: string, notUsed: string, reAdd: string) => `<h3>${app} answers without using Camberstack</h3>
 <p>${notUsed}</p>
 <h3>A tool or feature mentioned here isn't available</h3>
 <p>${app} reads Camberstack's list of tools when you add it, and keeps that list. After Camberstack adds tools, ${reAdd}
-Your Camberstack plan, proposals and change history are kept.</p>
+Your Camberstack plan, proposals and change history are kept.</p>`;
+
+/**
+ * Problems users actually hit (tool_calls.error, 2026-10), with the wording they see, so a search for the message finds
+ * the fix. The full list lives on /docs only; the guides link to it (see guideTroubleshooting).
+ */
+const troubleshooting = (app: string, notUsed: string, reAdd: string) => `<h2 id="troubleshooting">Troubleshooting</h2>
+${appTroubleshooting(app, notUsed, reAdd)}
 <h3>"No Google Ads accounts" or only the demo account</h3>
 <p>The Google login you connected with has no access to a Google Ads account (Google's message is <code>NOT_ADS_USER</code>), so Camberstack
 offers the demo account instead. Check which Google login has access in Google Ads, under <strong>Admin</strong>, then
@@ -297,7 +300,16 @@ Connect again and leave the box ticked: ${reAdd}</p>
 <code>https://www.example.com/</code> are different properties. Ask <em>"List my Search Console sites"</em> first. If the site isn't
 listed, it's verified under a different Google login.</p>`;
 
-/** The questions every guide answers; `app` is the AI app's name. */
+/**
+ * The guides' troubleshooting: only the app-specific fixes, then a link to the full list on /docs. Repeating the full list
+ * made the Claude and ChatGPT guides 54% identical, and Google declined to index both (Crawled - currently not indexed, 2026-10-13).
+ */
+const guideTroubleshooting = (app: string, notUsed: string, reAdd: string) => `<h2 id="troubleshooting">Troubleshooting</h2>
+${appTroubleshooting(app, notUsed, reAdd)}
+<p>Error messages from Google Ads or Search Console, such as <code>NOT_ADS_USER</code>, 2-Step Verification, a plan limit or an
+expired proposal, are covered in <a href="/docs#troubleshooting">the documentation</a>.</p>`;
+
+/** Questions the Claude and Gemini guides share (ChatGPT's answers its own); `app` is the AI app's name. */
 const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer token?</h3>
 <p>No. Camberstack has its own Google Ads API access. You sign in with Google and choose what to share.</p>
 <h3>Does ${app} see my whole Google account?</h3>
@@ -317,7 +329,7 @@ export function claudeGuidePage(baseUrl: string): string {
     description: "Connect your Google Ads account to Claude with an MCP server. No developer token or Google Cloud project: sign in with Google, then ask Claude about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
-      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-12",
+      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-13",
       author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
       about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
     },
@@ -351,7 +363,7 @@ ${ASK_FIRST}
 
 ${CAN_CHANGE}
 
-${troubleshooting("Claude",
+${guideTroubleshooting("Claude",
   "Claude only uses a connector that's switched on for the chat. Click <strong>+</strong> at the bottom left, open <strong>Connectors</strong> and turn Camberstack on. Naming it helps too: <em>\"Use Camberstack to…\"</em>.",
   "disconnect Camberstack in <strong>Settings</strong>, under <strong>Connectors</strong>, and connect it again from <a href=\"https://claude.ai/directory/connectors/camberstack\">the directory</a>.")}
 
@@ -384,7 +396,7 @@ export function chatgptGuidePage(baseUrl: string): string {
     description: "Connect your Google Ads account to ChatGPT with a plugin. No developer token or Google Cloud project: turn on developer mode, add one URL, sign in with Google, then ask about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
-      headline: "Connect Google Ads to ChatGPT", url: `${baseUrl}/google-ads-chatgpt`, dateModified: "2026-10-10",
+      headline: "Connect Google Ads to ChatGPT", url: `${baseUrl}/google-ads-chatgpt`, dateModified: "2026-10-13",
       author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
       about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
     },
@@ -434,11 +446,21 @@ confirm tool calls that change things unless you've turned that off.</li>
 <li>New campaigns are created paused, and risky changes (turning a campaign on, a big budget or bid jump) carry a warning before you approve. Nothing you built can be deleted.</li>
 </ul>
 
-${ASK_FIRST}
+<h2>Using it in ChatGPT</h2>
+<p>Start each message with <strong>@Camberstack</strong>. Without the mention, ChatGPT answers from what it already knows
+and never looks at your account. Some first questions:</p>
+<ul>
+<li><em>"@Camberstack which campaign had the highest cost per conversion in the last 30 days?"</em></li>
+<li><em>"@Camberstack list the search terms that spent money without a conversion this month."</em></li>
+<li><em>"@Camberstack find keyword ideas for my landing page and tell me their monthly searches."</em></li>
+<li><em>"@Camberstack show me the demo account"</em>, to try it before using your real account.</li>
+</ul>
+<p>When you ask for a change, ChatGPT first shows what Camberstack proposes, then asks before it calls the tool that applies it.
+Approve in the chat and the change is made in Google Ads; ask <em>"@Camberstack undo that"</em> to reverse it.
+It can change negatives, budgets, bids, targeting and conversion goals, and build paused campaigns: <a href="/#changes">the full list</a>
+and <a href="/tools">every tool</a>. In the phone app, the same @-mention works once you've set it up on the web.</p>
 
-${CAN_CHANGE}
-
-${troubleshooting("ChatGPT",
+${guideTroubleshooting("ChatGPT",
   "ChatGPT uses a custom plugin only when you mention it. Start the message with <strong>@</strong> and its name: <em>\"@Camberstack how did my campaigns do last month?\"</em>",
   "delete Camberstack under <strong>Plugins</strong> and create it again with the same URL, as in the steps above.")}
 
@@ -449,7 +471,10 @@ If you use Claude too, setup there is shorter: see <a href="/google-ads-claude">
 <h3>How do I disconnect?</h3>
 <p>ChatGPT blocks disconnect requests from chat, so sign in at <a href="/account">camberstack.io/account</a> and choose
 <strong>Disconnect Google Ads</strong>, or remove Camberstack at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
-${commonQuestions("ChatGPT")}
+<h3>Does ChatGPT see my whole Google account?</h3>
+<p>No. The Google sign-in is Camberstack's, not ChatGPT's, and it shares only Google Ads, your email address and, if you leave it
+ticked, read-only Search Console. ChatGPT sees the answers Camberstack returns to the questions you ask, nothing else.
+It's free on one Google Ads account; see <a href="/#pricing">pricing</a>.</p>
 
 <p><a class="btn" href="/#setup">Connect Google Ads to ChatGPT</a></p>
 `,

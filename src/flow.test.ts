@@ -1312,10 +1312,16 @@ describe("OAuth + MCP end to end", () => {
     const dir = await (await fetch(`${base}/google-ads-claude`)).text();
     expect(dir).toContain('href="https://claude.ai/directory/connectors/camberstack"');
     expect(dir).not.toContain("paste the server URL");
-    // Each guide troubleshoots in the words users see, with its own app's fix.
+    // Error messages are troubleshot once, on /docs, in the words users see; each guide keeps its own app's fix and links there,
+    // so the two guides don't repeat each other (Google declined to index them while they were 54% identical).
     const cg = await (await fetch(`${base}/google-ads-claude`)).text(), gg = await (await fetch(`${base}/google-ads-chatgpt`)).text();
-    for (const g of [cg, gg]) for (const msg of ["NOT_ADS_USER", "TWO_STEP_VERIFICATION_NOT_ENROLLED", "Proposal is older than 24 hours", "Plan limit", "sufficient permission for site"])
-      expect(g).toContain(msg);
+    const docs = await (await fetch(`${base}/docs`)).text();
+    for (const msg of ["NOT_ADS_USER", "TWO_STEP_VERIFICATION_NOT_ENROLLED", "Proposal is older than 24 hours", "Plan limit", "sufficient permission for site"])
+      expect(docs).toContain(msg);
+    for (const g of [cg, gg]) {
+      expect(g).toContain('href="/docs#troubleshooting"');
+      expect(g).not.toContain("TWO_STEP_VERIFICATION_NOT_ENROLLED");
+    }
     expect(cg).toContain("turn Camberstack on");
     expect(gg).toContain("@Camberstack how did my campaigns");
     expect((await fetch(`${base}/shots/..%2Fserver.ts`)).status).toBe(404);
