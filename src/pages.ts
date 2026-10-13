@@ -406,7 +406,7 @@ export function chatgptGuidePage(baseUrl: string): string {
 and make the changes you approve. Setup takes a few menus in ChatGPT's settings and a Google sign-in. No developer token,
 no Google Cloud project.</p>
 
-<h2>Before you start</h2>
+<h2 id="before">Before you start</h2>
 <ul>
 <li><strong>A paid ChatGPT plan:</strong> Plus, Pro, Business, Enterprise or Edu. The free plan can't add plugins like this one.</li>
 <li><strong>ChatGPT on the web</strong> (chatgpt.com) for setup. Once it's added, it works in the ChatGPT phone app too.</li>
@@ -473,8 +473,10 @@ If you use Claude too, setup there is shorter: see <a href="/google-ads-claude">
 <strong>Disconnect Google Ads</strong>, or remove Camberstack at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
 <h3>Does ChatGPT see my whole Google account?</h3>
 <p>No. The Google sign-in is Camberstack's, not ChatGPT's, and it shares only Google Ads, your email address and, if you leave it
-ticked, read-only Search Console. ChatGPT sees the answers Camberstack returns to the questions you ask, nothing else.
-It's free on one Google Ads account; see <a href="/#pricing">pricing</a>.</p>
+ticked, read-only Search Console. ChatGPT sees the answers Camberstack returns to the questions you ask, nothing else.</p>
+<h3>Does it need a paid Camberstack plan?</h3>
+<p>No. One Google Ads account is free with every tool; <a href="/#pricing">Pro</a> is for managing up to 10. The paid ChatGPT plan
+in <a href="#before">Before you start</a> is OpenAI's requirement, not ours.</p>
 
 <p><a class="btn" href="/#setup">Connect Google Ads to ChatGPT</a></p>
 `,

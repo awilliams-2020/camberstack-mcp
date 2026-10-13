@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "camberstack": {
+      "type": "http",
+      "url": "https://camberstack.io/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": { "type": "oauth", "client": { "mode": "dcr" } }
+        }
+      }
+    }
+  }
+}

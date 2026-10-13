@@ -90,7 +90,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       inputSchema: config.inputSchema && z.object(config.inputSchema),
       annotations: { ...config.annotations, title: config.title },
     }, wrap(name, fn) as never));
-  // All three hints on every tool: ChatGPT's plugin review rejects a tool that leaves one unset.
+  // Every tool sets all three hints (publish.test.ts): ChatGPT's plugin review rejects an unset one.
   const read = { readOnlyHint: true, destructiveHint: false, openWorldHint: true } as const;
 
   tool("list_accounts", {
