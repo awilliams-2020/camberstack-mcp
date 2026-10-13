@@ -90,7 +90,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       inputSchema: config.inputSchema && z.object(config.inputSchema),
       annotations: { ...config.annotations, title: config.title },
     }, wrap(name, fn) as never));
-  const read = { readOnlyHint: true, openWorldHint: true } as const;
+  // All three hints on every tool: ChatGPT's plugin review rejects a tool that leaves one unset.
+  const read = { readOnlyHint: true, destructiveHint: false, openWorldHint: true } as const;
 
   tool("list_accounts", {
     title: "List Google Ads accounts",
@@ -283,13 +284,13 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     title: "Change history",
     description: "Every proposal made through Camberstack, with what was applied, what failed, and what was undone.",
     inputSchema: { customer_id: customerId.optional(), limit: z.number().int().min(1).max(100).default(20).describe("Most proposals to return, newest first") },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, ({ customer_id, limit }: { customer_id?: string; limit: number }) => session().history(customer_id, limit));
 
   tool("billing", {
     title: "Plan and billing",
     description: "Shows the user's Camberstack plan: the Google Ads accounts used in the last 30 days against the number the plan covers (Free 1, Pro 10). Returns a personal link to upgrade (Free) or to change card and cancel (Pro).",
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, () => session().plan());
 
   tool("disconnect", {
