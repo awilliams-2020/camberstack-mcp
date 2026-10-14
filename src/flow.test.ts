@@ -14,6 +14,7 @@ import { decrypt, encrypt } from "./crypto.js";
 import { createRelayKey } from "./relay.js";
 import { SearchConsoleNotGrantedError } from "./google.js";
 import { io } from "./changes.js";
+import { AnalyticsNotGrantedError } from "./ga4.js";
 
 const key = randomBytes(32);
 const idToken = (sub: string, email: string) =>
@@ -22,12 +23,15 @@ const idToken = (sub: string, email: string) =>
 /** Who "Google" signs in as; a test can switch it to connect a second, brand-new user. */
 const googleUser = { sub: "google-sub-1", email: "Owner@Example.com" };
 
+/** What Google's token endpoint grants; the Analytics test widens it. */
+const googleGrant = { scope: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/adwords", refresh: "g-refresh" };
+
 /** Google's token endpoint. */
 const googleFetch: typeof fetch = async (url) => {
   if (String(url).includes("oauth2.googleapis.com/token")) {
     return new Response(JSON.stringify({
-      access_token: "g-access", expires_in: 3600, refresh_token: "g-refresh",
-      scope: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/adwords",
+      access_token: "g-access", expires_in: 3600, refresh_token: googleGrant.refresh,
+      scope: googleGrant.scope,
       id_token: idToken(googleUser.sub, googleUser.email),
     }), { status: 200, headers: { "Content-Type": "application/json" } });
   }
@@ -225,6 +229,16 @@ const stripeFetch: typeof fetch = async (url, init) => {
   throw new Error(`unexpected stripe ${u}`);
 };
 
+/** A Google Analytics connection: not granted until the user's stored token is the one the grant returned. */
+const ga = {
+  async properties(userId: string) {
+    const enc = (db.prepare("SELECT enc_refresh FROM users WHERE id = ?").get(userId) as { enc_refresh: string }).enc_refresh;
+    if (decrypt(key, enc) !== "g-refresh-with-analytics") throw new AnalyticsNotGrantedError(gaGrant.link(userId));
+    return [{ property_id: "321", name: "Example", account: "Example Inc" }];
+  },
+  async runReport() { return { row_count: 0, rows: [] }; },
+};
+
 /** Our own Ads account's conversion upload endpoint, plus the operator's token refresh. */
 const conversionUploads: any[] = [];
 const adsConversionFetch: typeof fetch = async (url, init) => {
@@ -235,6 +249,7 @@ const adsConversionFetch: typeof fetch = async (url, init) => {
 
 let app: ReturnType<typeof createApp>["app"];
 let billing: ReturnType<typeof createApp>["billing"];
+let gaGrant: ReturnType<typeof createApp>["gaGrant"];
 let relay: ReturnType<typeof createApp>["relay"];
 let server: Server;
 let base = "";
@@ -253,8 +268,8 @@ beforeAll(async () => {
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    ({ app, billing, relay } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
-      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc }));
+    ({ app, billing, relay, gaGrant } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
+      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc, gaFactory: (u) => ({ ...ga, properties: () => ga.properties(u.id) }) }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
@@ -680,6 +695,53 @@ describe("OAuth + MCP end to end", () => {
     claim.run(t - 11 * 60, ad.json.proposal_id);
     expect((await call(token, "apply_changes", { proposal_id: ad.json.proposal_id })).text).toContain("interrupted while applying");
     await call(token, "apply_changes", { proposal_id: (await call(token, "undo_changes", { proposal_id: neg })).json.proposal_id });
+  });
+
+  it("adds Google Analytics to a connection through a personal link, for the same Google account only", async () => {
+    // Not granted: the demo property, and a personal link to add Analytics.
+    const before = (await call(token, "analytics_properties")).json;
+    expect(before.properties[0].property_id).toBe("000000001");
+    expect(before.not_granted).toContain("isn't part of this Google connection");
+    const link: string = before.grant_url;
+    expect(link).toContain("/connect/analytics?t=");
+    expect((await fetch(link.replace(/.$/, (c) => (c === "A" ? "B" : "A")), { redirect: "manual" })).status).toBe(400);
+
+    const start = async () => {
+      const go = await fetch(link, { redirect: "manual" });
+      const g = new URL(go.headers.get("location")!);
+      return { g, state: g.searchParams.get("state")!, cookie: go.headers.get("set-cookie")!.split(";")[0]! };
+    };
+    const back = (s: { state: string }, cookie?: string) =>
+      fetch(`${base}/oauth/google/callback?code=gcode&state=${s.state}`, { redirect: "manual", headers: cookie ? { cookie } : {} });
+    const first = await start();
+    // Only Analytics is asked for, added to what was granted before, for the account already connected.
+    expect(first.g.searchParams.get("scope")).toBe("openid email https://www.googleapis.com/auth/analytics.readonly");
+    expect(first.g.searchParams.get("include_granted_scopes")).toBe("true");
+    expect(first.g.searchParams.get("login_hint")).toBe("owner@example.com");
+
+    googleGrant.scope += " https://www.googleapis.com/auth/analytics.readonly";
+    googleGrant.refresh = "g-refresh-with-analytics";
+    try {
+      // From another browser (no cookie): refused, nothing stored.
+      expect((await back(first)).status).toBe(400);
+      // A different Google account: refused.
+      const other = await start();
+      googleUser.sub = "someone-else";
+      const wrong = await back(other, other.cookie);
+      googleUser.sub = "google-sub-1";
+      expect(wrong.status).toBe(400);
+      expect(await wrong.text()).toContain("different Google account");
+      expect((await call(token, "analytics_properties")).json.not_granted).toBeTruthy();
+
+      const ok = await start();
+      const done = await back(ok, ok.cookie);
+      expect(done.status).toBe(200);
+      expect(await done.text()).toContain("Google Analytics is now part of your Camberstack connection");
+      expect((await call(token, "analytics_properties")).json).toEqual({ properties: [{ property_id: "321", name: "Example", account: "Example Inc" }] });
+    } finally {
+      googleGrant.scope = googleGrant.scope.replace(" https://www.googleapis.com/auth/analytics.readonly", "");
+      googleGrant.refresh = "g-refresh";
+    }
   });
 
   it("undoes a change only once", async () => {

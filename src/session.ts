@@ -11,6 +11,7 @@ import {
   type GoogleCreds, type SearchAnalyticsRequest, type SearchAnalyticsRow, type UrlInspection,
 } from "./google.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError, accountsLabel } from "./plans.js";
+import { AnalyticsClient, DemoAnalytics, routedAnalytics, type Analytics } from "./ga4.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
 import {
   ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, pendingOf, resolveChange, summarize,
@@ -82,6 +83,9 @@ export interface SessionDeps {
   /** Tests inject a fake. */
   adsFactory?: (user: UserRow) => AdsClient;
   scFactory?: (user: UserRow) => SearchConsole;
+  gaFactory?: (user: UserRow) => Analytics;
+  /** The personal link that adds Google Analytics to this user's connection (ga4.ts AnalyticsGrant). */
+  analyticsLink?: (userId: string) => string | null;
 }
 
 class NotConnectedError extends Error {}
@@ -129,6 +133,7 @@ const publicResults = (outcomes: Outcome[]) => outcomes.map(({ describe, ok, err
 export class UserSession {
   readonly ads: Ads;
   readonly sc: SearchConsole;
+  readonly ga: Analytics;
   /** Accounts the login can see but Google refused to read, from the last accounts() call. */
   lastUnreadable: { customerId: string; error: string }[] = [];
 
@@ -136,6 +141,8 @@ export class UserSession {
     const google = deps.adsFactory?.(user) ?? new AdsClient(() => this.googleAccessToken(), deps.google.developerToken);
     this.ads = routed(google, new DemoAds(deps.db, user.id));
     this.sc = routedSc(deps.scFactory?.(user) ?? new SearchConsoleClient(() => this.googleAccessToken()), new DemoSearchConsole());
+    this.ga = routedAnalytics(deps.gaFactory?.(user)
+      ?? new AnalyticsClient(() => this.googleAccessToken(), () => deps.analyticsLink?.(user.id) ?? null), new DemoAnalytics());
   }
 
   static load(deps: SessionDeps, userId: string): UserSession {

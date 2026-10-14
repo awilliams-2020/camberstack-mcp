@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import { PublicChangeSchema } from "./changes.js";
+import { landingPages, listProperties, report } from "./ga4.js";
 import { ACCOUNT_WINDOW_DAYS, PlanLimitError } from "./plans.js";
 import { isDemo, type Account, type UserSession } from "./session.js";
 
@@ -36,6 +37,14 @@ const scWindowShape = (defaultDays: number, maxDays: number) => ({
   end_date: ymd.optional().describe("Exact last day, YYYY-MM-DD"),
   fresh: z.boolean().default(false).describe("Include the last 2-3 days, which Google is still filling in (they read low). Use to check something from the last few days"),
 });
+const propertyId = z.string().regex(/^\d+$/, "digits only").describe("GA4 property id, digits only (from analytics_properties)");
+/** Window options shared by the Google Analytics tools: a day count ending yesterday, or exact dates. */
+const gaWindowShape = {
+  days: z.number().int().min(1).max(540).default(28).describe("Look-back window in days, ending yesterday"),
+  start_date: ymd.optional().describe("Exact first day, YYYY-MM-DD. Pass with end_date to use exact dates instead of days"),
+  end_date: ymd.optional().describe("Exact last day, YYYY-MM-DD"),
+};
+type GaWindow = { days: number; start_date?: string; end_date?: string };
 const excludeQueryRegex = z.string().min(1).max(500).optional()
   .describe("Leave out queries matching this RE2 regex, typically the brand name, e.g. (?i)acme|ac me");
 
@@ -60,7 +69,8 @@ export interface ToolCall {
 /** What the /tools page and llms.txt show about each tool; filled as buildServer registers them. */
 export interface ToolDoc { name: string; title: string; description: string; inputSchema?: z.ZodRawShape; annotations: ToolAnnotations }
 
-export function buildServer(session: () => UserSession, log: (c: ToolCall) => void = () => {}, catalog: ToolDoc[] = []): McpServer {
+/** `ga4`: register the Google Analytics tools (config.ts ga4Public; until then, internal users only). */
+export function buildServer(session: () => UserSession, log: (c: ToolCall) => void = () => {}, catalog: ToolDoc[] = [], ga4 = false): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: INSTRUCTIONS });
   const wrap = <A>(name: string, fn: (a: A) => Promise<unknown> | unknown) => {
     return async (a: A) => {
@@ -269,6 +279,41 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   }, ({ customer_id, site_url, ...o }: { customer_id: string; site_url: string; days: number; max_position: number; min_impressions: number; limit: number }) =>
     session().paidOrganicOverlap(customer_id, site_url, o));
 
+  if (ga4) {
+    tool("analytics_properties", {
+      title: "List Google Analytics properties",
+      description: "Lists the Google Analytics 4 properties this Google login can read. Use a property_id from here in the other Google Analytics tools. "
+        + "If Google Analytics isn't part of the connection yet, says so and returns grant_url, a personal link the user opens to add it.",
+      annotations: read,
+    }, () => listProperties(session().ga));
+
+    tool("analytics_landing_pages", {
+      title: "Google Analytics landing pages",
+      description: "Where visitors land and whether it works: sessions, users, engagement rate, key events (GA4's conversions) and key event rate "
+        + "per landing page, most sessions first. Pass channel to see one source, e.g. \"Paid Search\" for Google Ads traffic or \"Organic Search\". Changes nothing.",
+      inputSchema: { property_id: propertyId, ...gaWindowShape,
+        channel: z.string().min(1).max(100).optional().describe("Only sessions whose default channel group contains this, e.g. Paid Search, Organic Search, Direct"),
+        limit: z.number().int().min(1).max(500).default(25).describe("Most landing pages to return") },
+      annotations: read,
+    }, ({ property_id, ...o }: GaWindow & { property_id: string; channel?: string; limit: number }) => landingPages(session().ga, property_id, o));
+
+    tool("analytics_report", {
+      title: "Run a Google Analytics report",
+      description: "Any GA4 report: dimensions and metrics by their GA4 API names, highest first. Common dimensions: date, landingPage, pagePath, "
+        + "sessionDefaultChannelGroup, sessionSourceMedium, sessionCampaignName, sessionGoogleAdsCampaignName, deviceCategory, country, eventName. "
+        + "Common metrics: sessions, totalUsers, engagedSessions, engagementRate, keyEvents, sessionKeyEventRate, screenPageViews, purchaseRevenue. Changes nothing.",
+      inputSchema: { property_id: propertyId, ...gaWindowShape,
+        dimensions: z.array(z.string().regex(/^[A-Za-z][\w:]*$/)).max(5).default([]).describe("GA4 dimension names; none gives totals"),
+        metrics: z.array(z.string().regex(/^[A-Za-z][\w:]*$/)).min(1).max(10).describe("GA4 metric names"),
+        filter: z.object({ dimension: z.string().regex(/^[A-Za-z][\w:]*$/), contains: z.string().min(1).max(200) }).optional()
+          .describe("Only rows whose dimension contains this text (case-insensitive)"),
+        order_by: z.string().optional().describe("Metric to sort by, highest first; defaults to the first metric"),
+        limit: z.number().int().min(1).max(1000).default(50).describe("Most rows to return") },
+      annotations: read,
+    }, ({ property_id, ...o }: GaWindow & { property_id: string; dimensions: string[]; metrics: string[];
+      filter?: { dimension: string; contains: string }; order_by?: string; limit: number }) => report(session().ga, property_id, o));
+  }
+
   tool("propose_changes", {
     title: "Propose changes (writes nothing)",
     description: "Checks a set of changes against the live account and dry-runs them with Google, then stores them as a proposal and returns a plain-English summary. Nothing is changed. Show the summary to the user and apply only after they approve. Supported: add_negative_keywords, pause_campaign, enable_campaign, pause_keyword, enable_keyword, pause_ad_group, enable_ad_group, set_daily_budget, set_end_date, and building: create_campaign (a whole Search campaign with ad groups, keywords, ads, targeting, negatives and sitelinks; always created paused, so turning it on is a separate enable_campaign), create_display_campaign (image ads on the Display Network: responsive display ads from image URLs or existing image assets), create_demand_gen_campaign (YouTube video ads; this is the way to advertise on YouTube, since Google doesn't let the API create Video campaigns), create_performance_max_campaign (asset groups of text, images and videos; business name and logo on the campaign; no shopping feed), add_ad_group, add_keywords, add_responsive_search_ad, add_sitelinks, set_conversion_goal; and tuning: set_keyword_bid, set_ad_group_bid, pause_ad, enable_ad (to replace an ad: add the new one and pause the old in one proposal), add_campaign_targeting, remove_campaign_targeting, set_location_mode, set_bidding_strategy, set_url_suffix, create_conversion_action, set_conversion_counting. Point out any ⚠ line in the summary to the user before they approve.",
@@ -321,8 +366,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 }
 
 /** Every tool in registration (workflow) order, without a session: nothing is ever called. */
-export function toolCatalog(): ToolDoc[] {
+export function toolCatalog(ga4 = true): ToolDoc[] {
   const catalog: ToolDoc[] = [];
-  buildServer(() => { throw new Error("catalog only"); }, undefined, catalog);
+  buildServer(() => { throw new Error("catalog only"); }, undefined, catalog, ga4);
   return catalog;
 }

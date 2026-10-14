@@ -30,6 +30,9 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account at a time wit
 | `search_console_inspect_urls` | no | URL Inspection for up to 20 pages: indexed or why not, last crawl, canonical chosen vs declared, structured-data errors |
 | `search_console_sitemaps` | no | submitted sitemaps: last downloaded, URL count, errors and warnings |
 | `paid_organic_overlap` | no | joins an Ads account's search terms with a site's organic queries: searches paid for that already rank near the top, and page-2+ searches with no ad |
+| `analytics_properties` | no | the Google Analytics 4 properties the login can read; if Analytics isn't granted yet, a personal link that adds it |
+| `analytics_landing_pages` | no | sessions, users, engagement rate, key events and key event rate per landing page, optionally for one channel (e.g. Paid Search) |
+| `analytics_report` | no | any GA4 Data API report by dimension and metric names, with a contains filter |
 | `propose_changes` | no | resolves changes against the live account, dry-runs them with Google (`validateOnly`), stores a proposal with a plain-English summary |
 | `apply_changes` | **yes** | applies a stored proposal (the user's own, un-applied, under 24h old); records each change's inverse |
 | `undo_changes` | no | builds the reversing proposal for an applied one |
@@ -41,6 +44,11 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account at a time wit
 The Search Console tools take either `days` or exact `start_date`/`end_date`, and `fresh: true` to include the last 2-3
 days Google is still filling in. Requesting indexing and submitting sitemaps aren't available: Camberstack only holds
 the read-only scope.
+
+The Google Analytics tools need `analytics.readonly`, a sensitive scope that isn't part of connecting: the first call
+without it returns a personal `/connect/analytics` link that adds it to the same Google account (incremental
+authorization). Until Google verifies that scope, they're listed only for `ADMIN_EMAILS`/`PRO_EMAILS`; `GA4_PUBLIC=1`
+lists them for everyone. The Cloud project needs the Google Analytics Data API and Admin API enabled.
 
 What a proposal can do:
 
@@ -96,6 +104,7 @@ BASE_URL=https://your.host npm run dev
 | `DATA_DIR` | SQLite location (default `./data`) |
 | `FREE_ACCOUNTS` / `PRO_ACCOUNTS` / `PRO_EMAILS` | Google Ads accounts each plan covers at a time, counted as distinct accounts used in the last 30 days plus one switch per 30 days, manager and demo accounts excluded (defaults 1 / 10) / emails treated as Pro |
 | `STRIPE_SECRET_KEY` / `STRIPE_PRO_PRICE_ID` | Pro subscription via Stripe Checkout; unset = no upgrade links |
+| `GA4_PUBLIC` | `1` lists the Google Analytics tools for everyone; unset = internal users only (while the scope awaits Google's verification) |
 
 The hosted HTTP server is `npm run start:http` (the Docker image runs `node dist/server.js`).
 `npm start` is a stdio mode that needs no env, database or Google login: it lists every tool for

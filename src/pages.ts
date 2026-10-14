@@ -8,7 +8,7 @@ import { ACCOUNT_WINDOW_DAYS, PRO_PRICE_LABEL } from "./plans.js";
 import type { ToolDoc } from "./tools.js";
 
 const CONTACT = "adam@camberstack.io";
-const UPDATED = "2026-10-02";
+const UPDATED = "2026-10-13";
 
 const CSS = `
 .linkish{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
@@ -780,6 +780,7 @@ change your Google Ads account. This policy explains what we access, why, and wh
 <li><strong>Your Google account email and a stable Google account ID</strong> (the <code>openid</code> and <code>email</code> scopes), so the same person gets the same account and change history each time.</li>
 <li><strong>Your Google Ads data</strong> (the <code>https://www.googleapis.com/auth/adwords</code> scope): account and campaign structure, performance metrics, search terms, keywords and conversion settings, read when your AI assistant calls a Camberstack tool.</li>
 <li><strong>Your Search Console data, read-only and optional</strong> (the <code>https://www.googleapis.com/auth/webmasters.readonly</code> scope): the websites you have verified, their Google Search clicks, impressions, queries and positions, Google's index status for pages you ask about, and the sitemaps you have submitted, read when your AI assistant calls a Search Console tool, for example to compare what you pay for with where you already rank. You can untick it on Google's consent screen; the Google Ads tools work without it. Camberstack cannot change anything in Search Console.</li>
+<li><strong>Your Google Analytics data, read-only and optional</strong> (the <code>https://www.googleapis.com/auth/analytics.readonly</code> scope): the names of the Google Analytics accounts and properties you can access, and reports on your properties' traffic, such as sessions, users, engagement, key events (conversions), landing pages and traffic sources, read when your AI assistant calls a Google Analytics tool, for example to see whether visitors from your ads convert. It is not part of connecting Camberstack: we ask for it separately, only if you use a Google Analytics tool, through a link that adds it to the Google account you already connected. Camberstack cannot change anything in Google Analytics.</li>
 </ul>
 <p>We request nothing else from your Google account: no Gmail, Drive, contacts or calendar.</p>
 
@@ -799,14 +800,15 @@ Humans at Camberstack do not read your Google Ads data unless you ask us to for 
 <table>
 <tr><th>Data</th><th>Why</th><th>Kept until</th></tr>
 <tr><td>Google email and account ID</td><td>Identify you across connections</td><td>You ask us to delete it</td></tr>
-<tr><td>Google refresh token, encrypted (AES-256-GCM)</td><td>Call the Google Ads API when you use a tool</td><td>You disconnect or revoke access</td></tr>
+<tr><td>Google refresh token, encrypted (AES-256-GCM)</td><td>Call Google's APIs (Google Ads, and Search Console or Google Analytics if you granted them) when you use a tool</td><td>You disconnect or revoke access</td></tr>
 <tr><td>A sign-in session for the account page (a cookie; we store only its hash)</td><td>Keep you signed in to camberstack.io/account</td><td>7 days, or until you sign out</td></tr>
 <tr><td>A random value in a cookie while you connect an AI app</td><td>Check that the browser finishing the Google sign-in is the one that approved the connection</td><td>The sign-in finishes, or 1 hour</td></tr>
+<tr><td>A random value in a cookie while you add Google Analytics</td><td>Check that the browser finishing Google's consent is the one that opened your link</td><td>The consent finishes, or 10 minutes</td></tr>
 <tr><td>Tokens we issue to your AI app (stored as hashes)</td><td>Authenticate your AI app</td><td>Expiry (1 hour access, 90 days refresh) or disconnect</td></tr>
 <tr><td>Proposals: the changes requested, their summary and results</td><td>Show what changed and let you undo it</td><td>You ask us to delete them</td></tr>
 <tr><td>A usage log: which tool ran, for which Google Ads account ID, when, how long it took and any error message. Never the tool's inputs or results</td><td>Find and fix failures, see which features are used, and count how many Google Ads accounts you use for your plan</td><td>You ask us to delete it</td></tr>
 </table>
-<p>Reports, search-term lists and query results are computed on request and returned to your AI assistant. We do not store them.
+<p>Reports, search-term lists, query results and Google Analytics reports are computed on request and returned to your AI assistant. We do not store them.
 When a proposed ad uses an image URL, we download that image only to upload it to your Google Ads account as an image asset; we do not keep the file.
 Standard web server logs (IP address, time, path) are kept for a limited period for security and then deleted.</p>
 

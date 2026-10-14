@@ -33,6 +33,8 @@ export interface Config {
   adminUrl?: string;
   /** Google accounts allowed into the admin site. */
   adminEmails: Set<string>;
+  /** Google Analytics tools for everyone (GA4_PUBLIC=1). Off: only ADMIN_EMAILS/PRO_EMAILS see them, until Google verifies the scope. */
+  ga4Public: boolean;
   /** Upload our own campaign's conversions (adconversions.ts); unset = clicks are kept but not uploaded. */
   conversions?: import("./adconversions.js").ConversionConfig;
   /** Lifecycle emails via Resend (lifecycle.ts); unset = none are sent. */
@@ -74,6 +76,7 @@ export function loadConfig(): Config {
     proEmails: emails(process.env.PRO_EMAILS),
     adminUrl: process.env.ADMIN_URL?.replace(/\/+$/, "") || undefined,
     adminEmails: emails(process.env.ADMIN_EMAILS),
+    ga4Public: process.env.GA4_PUBLIC === "1",
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
     openaiAppsChallenge: process.env.OPENAI_APPS_CHALLENGE || undefined,
     mail: process.env.RESEND_API_KEY

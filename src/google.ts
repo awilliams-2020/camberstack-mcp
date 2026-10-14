@@ -11,6 +11,8 @@ export const adsDateTime = (at: number) => new Date(at * 1000).toISOString().rep
 
 export const ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
 const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+/** Google Analytics (GA4), read-only. Not in the main consent: asked for separately, when a GA4 tool first needs it (ga4.ts). */
+export const ANALYTICS_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
 const GOOGLE_SCOPES = ["openid", "email", ADS_SCOPE, SEARCH_CONSOLE_SCOPE];
 export const ADS_API = "https://googleads.googleapis.com/v23";
 
@@ -36,8 +38,21 @@ export function googleAuthUrl(creds: GoogleCreds, redirectUri: string, state: st
     access_type: "offline",
     // Always show consent so Google always returns a refresh token, including on reconnect.
     prompt: "consent",
-    include_granted_scopes: "false",
+    // Keeps scopes granted separately (Google Analytics) on the new token when someone reconnects.
+    include_granted_scopes: "true",
     state,
+  })}`;
+}
+
+/**
+ * Add Google Analytics to an existing connection (incremental authorization): Google returns a refresh token covering
+ * everything granted before plus Analytics. openid email so the callback can check it's the same Google account.
+ */
+export function googleAnalyticsGrantUrl(creds: GoogleCreds, redirectUri: string, state: string, loginHint: string): string {
+  return `${GOOGLE_AUTH}?${new URLSearchParams({
+    client_id: creds.clientId, redirect_uri: redirectUri, response_type: "code",
+    scope: `openid email ${ANALYTICS_SCOPE}`, access_type: "offline", prompt: "consent", include_granted_scopes: "true",
+    login_hint: loginHint, state,
   })}`;
 }
 

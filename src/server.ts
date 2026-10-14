@@ -11,7 +11,8 @@ import { loadConfig, type Config } from "./config.js";
 import { now, openDb, sweep, type DB } from "./db.js";
 import { deriveKey } from "./crypto.js";
 import { CamberstackProvider, MCP_SCOPE, consentCookie } from "./provider.js";
-import { UserSession, type SessionDeps } from "./session.js";
+import { UserSession, clearGoogleCache, type SessionDeps } from "./session.js";
+import { AnalyticsGrant } from "./ga4.js";
 import { Relay } from "./relay.js";
 import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
 import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
@@ -48,6 +49,8 @@ export interface Service {
   startJobs(): void;
   /** The conversion relay, so tests can flush it. */
   relay: Relay;
+  /** Google Analytics grant links, so tests can follow one. */
+  gaGrant: AnalyticsGrant;
 }
 
 export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Service {
@@ -68,10 +71,13 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   const provider = new CamberstackProvider(db, {
     baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey, fetch: overrides.fetch,
   });
+  const gaGrant = new AnalyticsGrant({ db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
+    signingKey: deriveKey(cfg.encryptionKey, "analytics-links"), forgetToken: clearGoogleCache, fetch: overrides.fetch });
   const deps: SessionDeps = {
     db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
     freeAccounts: cfg.freeAccounts, proAccounts: cfg.proAccounts, proEmails: cfg.proEmails,
-    billingLink: (kind, userId) => billing.link(kind, userId), refreshPlan: (userId) => billing.refreshPlan(userId), ...overrides,
+    billingLink: (kind, userId) => billing.link(kind, userId), refreshPlan: (userId) => billing.refreshPlan(userId),
+    analyticsLink: (userId) => gaGrant.link(userId), ...overrides,
   };
   const relay = new Relay(deps);
   const mcpUrl = new URL(`${cfg.baseUrl}/mcp`);
@@ -180,6 +186,10 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
       return;
     }
     const state = typeof req.query.state === "string" ? req.query.state : undefined;
+    if (gaGrant.owns(state)) {
+      await gaGrant.finish(req, res, info).catch((e: Error) => res.status(400).type("html").send(errorPage(cfg.baseUrl, e.message)));
+      return;
+    }
     try {
       const done = await provider.completeGoogleCallback({
         code: typeof req.query.code === "string" ? req.query.code : undefined,
@@ -208,9 +218,10 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     const userId = String(auth?.extra?.userId ?? "");
     const clientId = auth?.clientId ?? null;
     let session: UserSession | undefined;
+    const email = (db.prepare("SELECT email FROM users WHERE id = ?").get(userId) as { email: string } | undefined)?.email.toLowerCase();
     return buildServer(() => (session ??= UserSession.load(deps, userId)), (c) => {
       logCall.run(now(), userId, clientId, c.tool, c.customerId, c.ok ? 1 : 0, c.error, c.ms, c.bytes);
-    });
+    }, undefined, cfg.ga4Public || (!!email && internalEmails.has(email)));
   };
   // 2026-07-28 traffic (server/discover, per-request _meta envelope). The SDK's own legacy leg would
   // answer 2025-era requests over SSE, so it is off and those keep the JSON-response wiring below.
@@ -252,7 +263,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     adConversions.captureClick(req, res);  // keeps an ad click id; makes the response private if it does
     res.type("html").send(html);
   };
-  const tools = toolCatalog();
+  const tools = toolCatalog(cfg.ga4Public);
   const pages: Record<string, string> = {
     "/": homePage(cfg.baseUrl),
     "/google-ads-claude": claudeGuidePage(cfg.baseUrl),
@@ -295,6 +306,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     brand(`shots/${q.params.file}`, "image/webp")(q, r);
   });
   billing.mount(app, info);
+  gaGrant.mount(app, info);
   lifecycle.mount(app, info);
 
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
@@ -334,7 +346,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
         .catch((e) => console.error(`IndexNow: ${(e as Error).message}`));
     }
   };
-  return { app, billing, startJobs, relay };
+  return { app, billing, startJobs, relay, gaGrant };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
