@@ -1150,6 +1150,12 @@ describe("OAuth + MCP end to end", () => {
     }
   });
 
+  it("serves the page beacon without a Google Analytics tag unless a measurement ID is configured", async () => {
+    const js = await (await fetch(`${base}/e.js`)).text();
+    expect(js).toContain("sendBeacon");
+    expect(js).not.toContain("googletagmanager");
+  });
+
   it("runs the whole flow on the demo account without touching Google or the free allowance", async () => {
     const before = ads.mutations.length;
     const left = (await call(token, "billing", {})).json;

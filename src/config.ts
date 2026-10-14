@@ -43,6 +43,8 @@ export interface Config {
   glamaClaim?: string;
   /** ChatGPT plugin domain-verification token for /.well-known/openai-apps-challenge (from the plugin portal); unset = 404. */
   openaiAppsChallenge?: string;
+  /** Google Analytics (GA4) measurement ID for our own public pages (G-…), loaded through /e.js; unset = no GA tag. */
+  ga4MeasurementId?: string;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
   matomo?: { url: string; siteId: string; token: string };
   gitSha: string;
@@ -79,6 +81,7 @@ export function loadConfig(): Config {
     ga4Public: process.env.GA4_PUBLIC === "1",
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
     openaiAppsChallenge: process.env.OPENAI_APPS_CHALLENGE || undefined,
+    ga4MeasurementId: /^G-[A-Z0-9]{4,20}$/.test(process.env.GA4_MEASUREMENT_ID ?? "") ? process.env.GA4_MEASUREMENT_ID : undefined,
     mail: process.env.RESEND_API_KEY
       ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" }
       : undefined,

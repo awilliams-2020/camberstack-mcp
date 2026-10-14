@@ -35,6 +35,14 @@ const AI_FETCHER = /(ChatGPT-User|MistralAI-User|Gemini-Deep-Research|Claude-Use
 export const BEACON_JS = `(()=>{var n=navigator;if(n.webdriver||!n.sendBeacon)return;
 n.sendBeacon('/e',new URLSearchParams({t:'pv',p:location.pathname,q:location.search,x:document.referrer}))})();`;
 
+/**
+ * Google Analytics (GA4) for our own public pages, appended to /e.js when GA4_MEASUREMENT_ID is set: the standard
+ * gtag snippet, built in script so the pages need no inline code. Like the beacon, it skips automated browsers.
+ */
+export const gtagJs = (id: string) => `(()=>{if(navigator.webdriver)return;window.dataLayer=window.dataLayer||[];
+window.gtag=function(){dataLayer.push(arguments)};gtag('js',new Date());gtag('config','${id}');
+var s=document.createElement('script');s.async=true;s.src='https://www.googletagmanager.com/gtag/js?id=${id}';document.head.appendChild(s)})();`;
+
 export interface Beacon { page: string; ref: string; campaign: string; keyword: string }
 
 const TAG = /^[\w .:-]{1,100}$/;

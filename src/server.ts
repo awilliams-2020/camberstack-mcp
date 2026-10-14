@@ -15,7 +15,7 @@ import { UserSession, clearGoogleCache, type SessionDeps } from "./session.js";
 import { Grants } from "./grant.js";
 import { Relay } from "./relay.js";
 import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
-import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
+import { Analytics, BEACON_JS, gtagJs, parseBeacon } from "./analytics.js";
 import { mountAdmin } from "./admin.js";
 import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
@@ -310,7 +310,8 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   lifecycle.mount(app, info);
 
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
-  app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(BEACON_JS); });
+  const beaconJs = BEACON_JS + (cfg.ga4MeasurementId ? gtagJs(cfg.ga4MeasurementId) : "");
+  app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(beaconJs); });
   // Conversion relay for the operator's own apps (relay.ts): key-authenticated, no cookies, no CORS.
   app.post("/v1/conversions", express.json({ limit: "10kb" }), relay.handle);
 

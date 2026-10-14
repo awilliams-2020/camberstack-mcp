@@ -8,7 +8,7 @@ import { ACCOUNT_WINDOW_DAYS, PRO_PRICE_LABEL } from "./plans.js";
 import type { ToolDoc } from "./tools.js";
 
 const CONTACT = "adam@camberstack.io";
-const UPDATED = "2026-10-13";
+const UPDATED = "2026-10-14";
 
 const CSS = `
 .linkish{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
@@ -829,7 +829,13 @@ this site for up to 90 days. If you then connect Camberstack for the first time,
 as a conversion, so we can tell which ads work. We send only the click identifier and the time: no email, account ID or Google Ads data of yours.</p>
 
 <h2>Website analytics</h2>
-<p>We count visits to this website's pages with Matomo, which we host ourselves on the same infrastructure. A small script served from this site sends the page you opened, the site that linked you here, and the name of the ad or campaign that brought you, if any (never the ad's click identifier); we also record that a Google Ads account was connected, with no account, email or ID attached. It sets no cookie and stores nothing in your browser. Matomo uses your IP address to estimate roughly where a visit came from and removes the last part of it before saving. Visits are grouped by a salted hash of your IP address and browser, with the salt changed daily and kept only in memory, so it cannot identify you or link visits across days. None of your Google data is sent to analytics, and we use no third-party analytics or advertising scripts.</p>
+<p>We count visits to this website's pages with Matomo, which we host ourselves on the same infrastructure. A small script served from this site sends the page you opened, the site that linked you here, and the name of the ad or campaign that brought you, if any (never the ad's click identifier); we also record that a Google Ads account was connected, with no account, email or ID attached. Matomo sets no cookie and stores nothing in your browser. Matomo uses your IP address to estimate roughly where a visit came from and removes the last part of it before saving. Visits are grouped by a salted hash of your IP address and browser, with the salt changed daily and kept only in memory, so it cannot identify you or link visits across days.</p>
+<p>We also use Google Analytics (GA4) on this website's pages, loaded by the same script. It records the pages you visit, how you arrived
+(for example from one of our Google ads or a search), and roughly where and on what kind of device, and it sets first-party cookies
+(<code>_ga</code> and <code>_ga_&lt;id&gt;</code>, kept up to 2 years) so repeat visits are counted once. Google processes this under
+<a href="https://policies.google.com/privacy">its privacy policy</a>; you can block it with your browser's cookie settings or
+<a href="https://tools.google.com/dlpage/gaoptout">Google's opt-out add-on</a>. This covers only visits to camberstack.io.
+None of your Google Ads, Search Console or Google Analytics data that Camberstack reads for you is ever sent to either analytics tool.</p>
 
 <h2>Your choices</h2>
 <ul>

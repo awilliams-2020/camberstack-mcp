@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
-import { Analytics, parseBeacon } from "./analytics.js";
+import { Analytics, gtagJs, parseBeacon } from "./analytics.js";
 
 const CHROME = "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/140 Safari/537.36";
 const req = (ua: string, method = "GET", path = "/") =>
@@ -61,5 +61,14 @@ describe("analytics", () => {
     expect(sent).toHaveLength(1);
     expect(Object.fromEntries(sent[0]!)).toMatchObject({ recMode: "1", url: "https://camberstack.io/privacy", http_status: "200", bw_bytes: "1234" });
     expect(sent[0]!.get("bots")).toBeNull();
+  });
+});
+
+describe("GA4 tag for our own pages", () => {
+  it("loads gtag for the configured measurement ID, skipping automated browsers", () => {
+    const js = gtagJs("G-ABC123");
+    expect(js).toContain("googletagmanager.com/gtag/js?id=G-ABC123");
+    expect(js).toContain("gtag('config','G-ABC123')");
+    expect(js).toContain("navigator.webdriver");
   });
 });
