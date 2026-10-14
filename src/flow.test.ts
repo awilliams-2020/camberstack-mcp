@@ -69,11 +69,14 @@ class FakeAds {
     if (q.includes("FROM conversion_action WHERE conversion_action.name")) return [];
     if (q.includes("FROM conversion_action WHERE conversion_action.id")) return [{ conversionAction: { name: "Signup", countingType: "MANY_PER_CLICK" } }];
     if (q.includes("campaign.name = ")) return q.includes("campaign.name = 'Search'") ? [{ campaign: { id: "10" } }] : [];
+    if (q.includes("FROM bidding_strategy WHERE bidding_strategy.name")) return q.includes("'Taken'") ? [{ biddingStrategy: { id: "5" } }] : [];
     if (q.includes("FROM bidding_strategy WHERE")) {
       return this.portfolio && q.includes(`bidding_strategy.id = ${this.portfolio.id}`)
         ? [{ biddingStrategy: { name: "Shared tCPA", type: "TARGET_CPA", targetCpa: { targetCpaMicros: this.portfolio.cpa } } }] : [];
     }
-    if (q.includes("WHERE campaign.bidding_strategy = ")) return [{ campaign: { name: "Search" } }, { campaign: { name: "Brand" } }];
+    if (q.includes("WHERE campaign.bidding_strategy = ")) {
+      return (this.strategyCampaigns ?? [{ id: "10", name: "Search" }, { id: "11", name: "Brand" }]).map((c) => ({ campaign: c }));
+    }
     if (q.includes("FROM campaign")) {
       return [{ campaign: { id: "10", name: "Search", status: this.campaignStatus, endDateTime: this.campaignEnd, advertisingChannelType: "SEARCH",
           ...(this.portfolio ? { biddingStrategyType: "TARGET_CPA", biddingStrategy: `customers/1112223333/biddingStrategies/${this.portfolio.id}` }
@@ -112,6 +115,8 @@ class FakeAds {
   goals: Record<string, boolean> = { PURCHASE: true, SIGNUP: true };
   /** When set, campaign 10 is on this shared (portfolio) Target CPA strategy, with campaign "Brand". */
   portfolio: { id: string; cpa: string } | undefined;
+  /** Campaigns a strategy-membership query returns; default: Search and Brand. */
+  strategyCampaigns: { id: string; name: string }[] | undefined;
   uploads: { cid: string; conversions: any[] }[] = [];
   agBid = "1000000";
   kwBid: string | undefined;
@@ -132,7 +137,7 @@ class FakeAds {
       return { results: operations.map((op, i) => {
         const key = Object.keys(op)[0]!, inner = op[key];
         if (inner.remove) { this.removed.push(inner.remove); return { resourceName: inner.remove }; }
-        const coll = key.replace(/Operation$/, "").replace(/Criterion$/, "Criteria").replace(/^(?!.*Criteria$)(.*)$/, "$1s");
+        const coll = key.replace(/Operation$/, "").replace(/Criterion$/, "Criteria").replace(/y$/, "ie").replace(/^(?!.*Criteria$)(.*)$/, "$1s");
         return { resourceName: `customers/1112223333/${coll}/${500 + i}` };
       }) };
     }
@@ -1634,6 +1639,28 @@ describe("OAuth + MCP end to end", () => {
     await expect(propose([{ type: "set_shared_bid_strategy", bidding_strategy_id: "88", target_roas: 4 }])).rejects.toThrow("TARGET_CPA, which has no target_roas. It takes: target_cpa, max_cpc_ceiling");
     await expect(propose([{ type: "set_shared_bid_strategy", bidding_strategy_id: "99", target_cpa: 4 }])).rejects.toThrow("not found");
     ads.portfolio = undefined;
+
+    // Creating a shared strategy and moving a campaign onto it is one atomic request; undo moves it back, then removes the strategy.
+    const mk = await propose([{ type: "create_shared_bid_strategy", name: "Solar tCPA", strategy: "TARGET_CPA", target_cpa: 25, campaign_ids: ["10"] }]);
+    expect(mk.summary).toContain('Create shared bid strategy "Solar tCPA" (target CPA 25.00) and move 1 campaign onto it: "Search" (from manual CPC) ⚠');
+    await call(token, "apply_changes", { proposal_id: mk.proposal_id });
+    expect(last()).toMatchObject({ service: "googleAds", operations: [
+      { biddingStrategyOperation: { create: { resourceName: "customers/1112223333/biddingStrategies/-1", name: "Solar tCPA", targetCpa: { targetCpaMicros: "25000000" } } } },
+      { campaignOperation: { update: { resourceName: "customers/1112223333/campaigns/10", biddingStrategy: "customers/1112223333/biddingStrategies/-1" }, updateMask: "bidding_strategy" } }] });
+    const created = "customers/1112223333/biddingStrategies/500";
+    ads.strategyCampaigns = [{ id: "10", name: "Search" }, { id: "12", name: "Other" }];
+    expect((await call(token, "undo_changes", { proposal_id: mk.proposal_id })).text).toContain('now also used by "Other"');  // someone else's campaign: refuse
+    ads.strategyCampaigns = [{ id: "10", name: "Search" }];
+    const mkUndo = (await call(token, "undo_changes", { proposal_id: mk.proposal_id })).json;
+    expect(mkUndo.summary).toContain('Remove shared bid strategy "Solar tCPA" that Camberstack created, moving "Search" back to manual CPC');
+    await call(token, "apply_changes", { proposal_id: mkUndo.proposal_id });
+    expect(last().operations).toEqual([
+      { campaignOperation: { update: { resourceName: "customers/1112223333/campaigns/10", manualCpc: { enhancedCpcEnabled: false } }, updateMask: "manual_cpc.enhanced_cpc_enabled" } },
+      { biddingStrategyOperation: { remove: created } }]);
+    ads.strategyCampaigns = undefined;
+    await expect(propose([{ type: "create_shared_bid_strategy", name: "Taken", strategy: "MAXIMIZE_CLICKS" }])).rejects.toThrow("already exists");
+    await expect(propose([{ type: "create_shared_bid_strategy", name: "X", strategy: "TARGET_ROAS" }])).rejects.toThrow("TARGET_ROAS needs target_roas");
+    await expect(propose([{ type: "create_shared_bid_strategy", name: "X", strategy: "MAXIMIZE_CLICKS", target_cpa: 5 }])).rejects.toThrow("MAXIMIZE_CLICKS has no target_cpa");
 
     const sfx = await propose([{ type: "set_url_suffix", campaign_id: "10", suffix: "?utm_source=google&utm_term={keyword}" }]);
     expect(sfx.summary).toContain('from none to "utm_source=google&utm_term={keyword}"');

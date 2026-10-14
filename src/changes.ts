@@ -10,7 +10,7 @@
  * building: a whole Search, Display, Demand Gen or Performance Max campaign (always created PAUSED, so
  * building and spending are two separate approvals), ad groups, keywords, responsive search ads,
  * sitelinks, which conversion category a campaign bids on, a campaign's bid strategy (including moving it off a shared one),
- * and a shared (portfolio) strategy's targets. YouTube is Demand Gen with video ads: the
+ * a shared (portfolio) strategy's targets, and creating a shared strategy (undo moves its campaigns back, then removes it). YouTube is Demand Gen with video ads: the
  * API refuses to create VIDEO campaigns (MUTATE_NOT_ALLOWED, checked against v23 on 2026-10-12). Nothing
  * a user built is ever deleted: the only removals are undos of things this service created.
  */
@@ -235,6 +235,14 @@ const PUBLIC_CHANGES = [
     max_cpc_ceiling: bid.optional().describe("The most Google may bid per click") })
     .describe("Change a shared (portfolio) bid strategy's targets. This changes EVERY campaign on it, which the proposal lists. "
       + "Its type can't be changed; to move one campaign to another strategy, use set_bidding_strategy"),
+  z.object({ type: z.literal("create_shared_bid_strategy"),
+    name: z.string().min(1).max(255).describe("Name for the shared strategy; must not match an existing one"),
+    strategy: z.enum(["MAXIMIZE_CLICKS", "MAXIMIZE_CONVERSIONS", "MAXIMIZE_CONVERSION_VALUE", "TARGET_CPA", "TARGET_ROAS"]),
+    target_cpa: bid.optional().describe("Target cost per conversion: required for TARGET_CPA, optional for MAXIMIZE_CONVERSIONS"),
+    target_roas: z.number().positive().max(1000).optional().describe("Target return on ad spend as a ratio, e.g. 4 = 400%: required for TARGET_ROAS, optional for MAXIMIZE_CONVERSION_VALUE"),
+    max_cpc_ceiling: bid.optional().describe("The most Google may bid per click"),
+    campaign_ids: z.array(id).max(50).default([]).describe("Campaigns to move onto it in the same step (each leaves its current strategy)") })
+    .describe("Create a shared (portfolio) bid strategy, optionally moving campaigns onto it. Undo moves those campaigns back and removes it"),
   z.object({ type: z.literal("set_url_suffix"), campaign_id: campaignId,
     suffix: z.string().max(1000).describe('Query string Google appends to every landing page in the campaign, e.g. "utm_source=google&utm_medium=cpc&utm_term={keyword}", or "none" to clear it') })
     .describe("Set or clear a campaign's final URL suffix (tracking parameters on every ad click)"),
@@ -266,6 +274,8 @@ export const ChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("remove_ad"), resource_name: z.string(), what: z.string() }),
   z.object({ type: z.literal("remove_campaign_assets"), resource_names: z.array(z.string()).min(1), what: z.string() }),
   z.object({ type: z.literal("restore_bidding"), campaign_id: id, bidding: z.record(z.string(), z.any()), mask: z.string(), label: z.string() }),
+  z.object({ type: z.literal("remove_shared_bid_strategy"), resource_name: z.string(), name: z.string(),
+    restore: z.array(z.object({ campaign_id: id, name: z.string(), bidding: z.record(z.string(), z.any()), mask: z.string(), label: z.string() })).default([]) }),
   z.object({ type: z.literal("restore_shared_bid_strategy"), bidding_strategy_id: id, fields: z.record(z.string(), z.any()), mask: z.string(), label: z.string() }),
   z.object({ type: z.literal("remove_campaign_criteria"), campaign_id: id, resource_names: z.array(z.string()).min(1), what: z.string() }),
   z.object({ type: z.literal("remove_conversion_action"), resource_name: z.string(), name: z.string() }),
@@ -831,6 +841,62 @@ export async function resolveChange(
           fields: { [field.key]: prevFields }, mask: masks.join(","), label: back.join(", ") },
       };
     }
+    case "create_shared_bid_strategy": {
+      const type = change.strategy === "MAXIMIZE_CLICKS" ? "TARGET_SPEND" : change.strategy;
+      const field = SHARED_FIELDS[type]!;
+      if (type === "TARGET_CPA" && change.target_cpa === undefined) throw new Error("TARGET_CPA needs target_cpa.");
+      if (type === "TARGET_ROAS" && change.target_roas === undefined) throw new Error("TARGET_ROAS needs target_roas.");
+      const given = SETTINGS.filter((k) => change[k] !== undefined);
+      for (const k of given) if (!field[k]) throw new Error(`${change.strategy} has no ${k}. It takes: ${SETTINGS.filter((x) => field[x]).join(", ")}.`);
+      const dup = await q(`SELECT bidding_strategy.id FROM bidding_strategy WHERE bidding_strategy.name = '${gaqlStr(change.name)}' AND bidding_strategy.status != 'REMOVED'`);
+      if (dup.length) throw new Error(`A shared bid strategy named "${change.name}" already exists (id ${dup[0].biddingStrategy.id}). Pick another name.`);
+      const settings = Object.fromEntries(given.map((k) => [field[k]!.camel, k === "target_roas" ? change[k] : String(toMicros(change[k]!))]));
+      const t = tempIds(customerId);
+      const strategyRn = t.next("biddingStrategies");
+      const ops: object[] = [{ biddingStrategyOperation: { create: { resourceName: strategyRn, name: change.name, [field.key]: settings } } }];
+      const moved: { campaign_id: string; name: string; bidding: Record<string, unknown>; mask: string; label: string }[] = [];
+      for (const cid of [...new Set(change.campaign_ids)]) {
+        const [c] = await q(`SELECT campaign.name, campaign.status, campaign.bidding_strategy_type, campaign.bidding_strategy,
+            campaign.target_spend.cpc_bid_ceiling_micros, campaign.maximize_conversions.target_cpa_micros FROM campaign WHERE campaign.id = ${cid}`);
+        if (!c) throw new Error(`Campaign ${cid} not found`);
+        if (c.campaign.status === "REMOVED") throw new Error(`Campaign "${c.campaign.name}" was removed in Google Ads and can't be changed.`);
+        const shared = c.campaign.biddingStrategy ? await sharedStrategy(q, c.campaign.biddingStrategy as string) : null;
+        const prev = shared
+          ? { bidding: { biddingStrategy: shared.resourceName }, mask: "bidding_strategy", label: `shared strategy "${shared.name}"` }
+          : biddingOf(c.campaign.biddingStrategyType as string, c.campaign);
+        if (!prev) throw new Error(`Campaign "${c.campaign.name}" uses ${c.campaign.biddingStrategyType}, which Camberstack can't restore on undo; move it in Google Ads.`);
+        moved.push({ campaign_id: cid, name: c.campaign.name, ...prev });
+        ops.push({ campaignOperation: { update: { resourceName: `customers/${customerId}/campaigns/${cid}`, biddingStrategy: strategyRn }, updateMask: "bidding_strategy" } });
+      }
+      const what = given.map((k) => `${settingLabel(k)} ${k === "target_roas" ? `${Math.round(change[k]! * 100)}%` : change[k]!.toFixed(2)}`);
+      return {
+        change, service: "googleAds", operations: ops,
+        // "target CPA 25.00", not "target CPA: target CPA 25.00", when the first setting already names the type.
+        describe: `Create shared bid strategy "${change.name}" (${what[0]?.startsWith(STRATEGY_LABEL[type]!) ? what.join(", ")
+          : `${STRATEGY_LABEL[type]}${what.length ? `: ${what.join(", ")}` : ""}`})`
+          + (moved.length ? ` and move ${moved.length} campaign${moved.length === 1 ? "" : "s"} onto it: ${moved.map((m) => `"${m.name}" (from ${m.label})`).join(", ")}`
+            + " ⚠ Google re-learns after a switch; expect a week or two of uneven results" : ""),
+        // The strategy's real resource name is filled in after apply (inverseAfterApply).
+        inverse: { type: "remove_shared_bid_strategy", resource_name: "", name: change.name, restore: moved },
+      };
+    }
+    case "remove_shared_bid_strategy": {
+      // Google won't remove a strategy campaigns are on: move them back first, in the same atomic request.
+      const on = await q(`SELECT campaign.id, campaign.name FROM campaign WHERE campaign.bidding_strategy = '${gaqlStr(change.resource_name)}' AND campaign.status != 'REMOVED'`);
+      const back = change.restore.filter((r) => on.some((c) => String(c.campaign.id) === r.campaign_id));
+      const strays = on.filter((c) => !change.restore.some((r) => r.campaign_id === String(c.campaign.id)));
+      if (strays.length) {
+        throw new Error(`Shared strategy "${change.name}" is now also used by ${strays.map((c) => `"${c.campaign.name}"`).join(", ")}, `
+          + "which Camberstack didn't move onto it. Move those off it first (set_bidding_strategy), then undo again.");
+      }
+      return {
+        change, service: "googleAds",
+        operations: [...back.map((r) => ({ campaignOperation: { update: { resourceName: `customers/${customerId}/campaigns/${r.campaign_id}`, ...r.bidding }, updateMask: r.mask } })),
+          { biddingStrategyOperation: { remove: change.resource_name } }],
+        describe: `Remove shared bid strategy "${change.name}" that Camberstack created`
+          + (back.length ? `, moving ${back.map((r) => `"${r.name}" back to ${r.label}`).join(", ")}` : ""),
+      };
+    }
     case "set_url_suffix": {
       const [c] = await q(`SELECT campaign.name, campaign.final_url_suffix FROM campaign WHERE campaign.id = ${change.campaign_id}`);
       if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
@@ -932,6 +998,8 @@ async function sharedStrategy(q: (query: string) => Promise<any[]>, resourceName
 }
 
 type SharedField = { camel: string; snake: string };
+const STRATEGY_LABEL: Record<string, string> = { TARGET_SPEND: "maximize clicks", MAXIMIZE_CONVERSIONS: "maximize conversions",
+  MAXIMIZE_CONVERSION_VALUE: "maximize conversion value", TARGET_CPA: "target CPA", TARGET_ROAS: "target ROAS" };
 /** "max_cpc_ceiling" → "max CPC ceiling", as the summary shows it. */
 const settingLabel = (k: string) => k.replace(/_/g, " ").replace(/\b(cpa|roas|cpc)\b/g, (m) => m.toUpperCase());
 type SharedSetting = "target_cpa" | "target_roas" | "max_cpc_ceiling";
@@ -1199,6 +1267,9 @@ export function inverseAfterApply(r: ResolvedChange, resourceNames: string[]): C
     return { type: "remove_campaign_criteria", campaign_id: c.campaign_id, resource_names: resourceNames, what: `${resourceNames.length} targeting criteria Camberstack added` };
   }
   if (c.type === "create_conversion_action" && resourceNames[0]) return { type: "remove_conversion_action", resource_name: resourceNames[0], name: c.name };
+  if (c.type === "create_shared_bid_strategy" && of("biddingStrategies")[0] && r.inverse?.type === "remove_shared_bid_strategy") {
+    return { ...r.inverse, resource_name: of("biddingStrategies")[0]! };
+  }
   if (c.type === "add_sitelinks" && of("campaignAssets").length) {
     return { type: "remove_campaign_assets", resource_names: of("campaignAssets"), what: `${c.sitelinks.length} sitelink(s) Camberstack added: ${c.sitelinks.map((x) => `"${x.text}"`).join(", ")}` };
   }
