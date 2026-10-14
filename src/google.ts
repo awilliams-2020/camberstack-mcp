@@ -178,9 +178,12 @@ function adsErrorFix(code: string, message: string, field: string): string | nul
     case "PROHIBITED_SEGMENT_IN_SELECT_OR_WHERE_CLAUSE":
       return "that resource or segment can't be combined with this FROM: query it directly, in its own query.";
     case "UNRECOGNIZED_FIELD":
-      return /campaign\.(start|end)_date'/.test(message)
-        ? "campaign dates are campaign.start_date_time and campaign.end_date_time."
-        : "check the name: fields are prefixed with their resource (campaign.name, ad_group.status, metrics.clicks).";
+      if (/campaign\.(start|end)_date'/.test(message)) return "campaign dates are campaign.start_date_time and campaign.end_date_time.";
+      if (/'recommendation\.impact\./.test(message)) {
+        return "recommendation.impact is selected whole: SELECT recommendation.impact (its base_metrics and potential_metrics come back inside it).";
+      }
+      return "check the name: fields are prefixed with their resource (campaign.name, ad_group.status, metrics.clicks). "
+        + "Some fields are objects that can only be selected whole, not by their subfields.";
     case "BAD_FIELD_NAME":
       return /'\('/.test(message)
         ? "GAQL has no parentheses or OR: WHERE conditions can only be joined with AND. Use field IN ('a', 'b') for alternatives, or separate queries."

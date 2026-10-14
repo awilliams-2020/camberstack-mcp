@@ -14,6 +14,7 @@ describe("AdsApiError fix hints", () => {
     [{ queryError: "INVALID_VALUE_WITH_DURING_OPERATOR" }, "Invalid date literal supplied for DURING operator: LAST_90_DAYS.", undefined, "BETWEEN"],
     [{ queryError: "PROHIBITED_METRIC_IN_SELECT_OR_WHERE_CLAUSE" }, "Cannot select or filter on the following metrics: 'search_budget_lost_impression_share'", undefined, "FROM campaign"],
     [{ queryError: "UNRECOGNIZED_FIELD" }, "Unrecognized field in the query: 'campaign.start_date'.", undefined, "campaign.start_date_time"],
+    [{ queryError: "UNRECOGNIZED_FIELD" }, "Unrecognized fields in the query: 'recommendation.impact.base_metrics.clicks', 'recommendation.impact.potential_metrics.clicks'.", undefined, "SELECT recommendation.impact"],
     [{ queryError: "BAD_FIELD_NAME" }, "Error in WHERE clause: invalid field name '('.", undefined, "no parentheses or OR"],
     [{ queryError: "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE" }, "The following field must be present in SELECT clause: 'campaign.id'.", undefined, "add that field to SELECT"],
     [{ queryError: "EXPECTED_FILTERS_ON_DATE_RANGE" }, "Expects filters on the following field to limit a finite date range: 'segments.date'.", undefined, "finite range"],
