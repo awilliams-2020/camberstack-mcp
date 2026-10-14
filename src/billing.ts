@@ -4,7 +4,7 @@
  * The user is in a chat, not on our site, so every billing link we hand out is a signed, expiring,
  * per-user URL (the AI shows it; the user clicks it). Paying lands on /upgraded, which verifies the
  * Checkout Session server-side and flips the plan. Two things that page can't see are covered by an
- * hourly sweep against Stripe (same approach as the GEO app's fix-pack orders): a buyer who pays
+ * hourly sweep against Stripe: a buyer who pays
  * and closes the tab, and a subscription that later ends (cancelled at period end, unpaid).
  * past_due stays Pro while Stripe retries the card.
  */
@@ -58,7 +58,7 @@ export class Billing {
       signal: AbortSignal.timeout(15_000),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(`Stripe ${path}: ${data?.error?.message ?? res.status}`);
+    if (!res.ok) throw Object.assign(new Error(`Stripe ${path}: ${data?.error?.message ?? res.status}`), { status: res.status });
     return data;
   }
 
@@ -108,14 +108,20 @@ export class Billing {
   /** Hourly backstop: settle missed checkouts; drop Pro whose subscription has ended. */
   async sweep(): Promise<void> {
     if (!this.enabled) return;
-    await this.settleCompleted();
+    // One bad answer from Stripe must not stop the rest: each step and each user fails on its own.
+    try { await this.settleCompleted(); } catch (e) { console.error(`billing sweep: settle: ${(e as Error).message}`); }
     const pros = this.d.db.prepare("SELECT id, stripe_sub FROM users WHERE plan = 'pro' AND stripe_sub IS NOT NULL AND stripe_sub != ''").all() as
       { id: string; stripe_sub: string }[];
     for (const p of pros) {
-      const sub = await this.stripe(`subscriptions/${p.stripe_sub}`);
-      if (!LIVE.has(sub.status)) {
-        this.d.db.prepare("UPDATE users SET plan = 'free' WHERE id = ?").run(p.id);
+      let status: string;
+      try {
+        status = (await this.stripe(`subscriptions/${p.stripe_sub}`)).status;
+      } catch (e) {
+        // A subscription Stripe no longer has (deleted, or from test mode) has ended; anything else, retry next hour.
+        if ((e as { status?: number }).status !== 404) { console.error(`billing sweep: ${p.id}: ${(e as Error).message}`); continue; }
+        status = "missing";
       }
+      if (!LIVE.has(status)) this.d.db.prepare("UPDATE users SET plan = 'free' WHERE id = ?").run(p.id);
     }
   }
 
@@ -165,7 +171,10 @@ export class Billing {
       const id = String(req.query.session_id ?? "");
       if (!/^cs_[A-Za-z0-9_]+$/.test(id) || !this.enabled) return expired(res);
       try {
-        const ok = this.settle(await this.stripe(`checkout/sessions/${id}`));
+        const session = await this.stripe(`checkout/sessions/${id}`);
+        // The link stays valid after a cancellation, so reloading it must not bring Pro back.
+        const live = session?.subscription && LIVE.has((await this.stripe(`subscriptions/${session.subscription}`)).status);
+        const ok = live && this.settle(session);
         if (!ok) return send(res, 400, "Payment not complete", `<p>We could not confirm this payment. If you were charged, email us and we will sort it out.</p>`);
         send(res, 200, "You're on Pro", `<p><strong>Thanks, you're on Camberstack Pro.</strong></p>
 <p>Go back to your AI assistant and ask it to try again. Pro covers up to 10 Google Ads accounts.</p>

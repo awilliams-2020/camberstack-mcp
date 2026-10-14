@@ -715,13 +715,16 @@ export async function resolveChange(
           describe: `Add targeting to campaign "${c.campaign.name}": ${places.join(", ")}`,
         };
       }
-      const rns = consts.map(rnOf).filter((x): x is string => !!x);
+      const gone = consts.filter((x) => rnOf(x));   // only these are removed, so only these come back on undo
+      const rns = gone.map((x) => rnOf(x)!);
       const stillLoc = have.filter((r) => r.campaignCriterion.type === "LOCATION" && !rns.includes(r.campaignCriterion.resourceName)).length;
       return {
         change, service: "campaignCriteria", operations: rns.map((r) => ({ remove: r })),
         describe: `Stop targeting ${places.join(", ")} in campaign "${c.campaign.name}"` +
           (have.some((r) => r.campaignCriterion.type === "LOCATION") && !stillLoc ? " ⚠ no locations left: the campaign would show worldwide" : ""),
-        inverse: rns.length ? { type: "add_campaign_targeting", campaign_id: change.campaign_id, location_ids: change.location_ids, language_ids: change.language_ids } : undefined,
+        inverse: rns.length ? { type: "add_campaign_targeting", campaign_id: change.campaign_id,
+          location_ids: gone.filter((x) => x.startsWith("geo")).map((x) => x.split("/")[1]!),
+          language_ids: gone.filter((x) => x.startsWith("lang")).map((x) => x.split("/")[1]!) } : undefined,
       };
     }
     case "set_location_mode": {

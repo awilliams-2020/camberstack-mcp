@@ -104,6 +104,8 @@ const SEASON = [1.25, 1.2, 1.0, 0.92, 0.88, 0.86, 0.9, 0.92, 0.95, 1.0, 1.08, 1.
 
 /** Searches Google hides below its privacy threshold: campaign totals run this much above their terms. */
 const HIDDEN_SHARE = 1.12;
+/** Every demo ad group's default max CPC until changed: $2.00. */
+const DEFAULT_BID = "2000000";
 
 // ---------------------------------------------------------------- per-user mutable state
 
@@ -114,6 +116,9 @@ interface State {
   endDateTime?: Record<string, string>;
   adGroupStatus: Record<string, string>;
   keywordStatus: Record<string, string>;
+  /** Optional, like endDateTime: max CPCs set through the tools, in micros. A keyword with none uses its ad group's. */
+  adGroupBid?: Record<string, string>;
+  keywordBid?: Record<string, string>;
   negatives: { resourceName: string; campaign: string; text: string; match: string }[];
   nextId: number;
 }
@@ -134,7 +139,12 @@ export class DemoAds {
 
   private load(): State {
     const row = this.db.prepare("SELECT state FROM demo_state WHERE user_id = ?").get(this.userId) as { state: string } | undefined;
-    return row ? JSON.parse(row.state) as State : fresh();
+    if (!row) return fresh();
+    // Before 2026-10-13 a bid or URL-suffix change saved its entity's status as undefined, which JSON drops;
+    // fill any missing status back in from the base data.
+    const s = JSON.parse(row.state) as State, f = fresh();
+    for (const k of ["campaignStatus", "adGroupStatus", "keywordStatus"] as const) s[k] = { ...f[k], ...s[k] };
+    return s;
   }
   private save(s: State): void {
     this.db.prepare(`INSERT INTO demo_state (user_id, state, updated_at) VALUES (?, ?, ?)
@@ -155,10 +165,10 @@ export class DemoAds {
     };
     const group = (id: string) => {
       const g = AD_GROUPS.find((x) => x.id === id)!;
-      return { id: g.id, name: g.name, status: s.adGroupStatus[g.id], resourceName: `customers/${DEMO_CID}/adGroups/${g.id}` };
+      return { id: g.id, name: g.name, status: s.adGroupStatus[g.id], cpcBidMicros: s.adGroupBid?.[g.id] ?? DEFAULT_BID, resourceName: `customers/${DEMO_CID}/adGroups/${g.id}` };
     };
     const kwOf = (k: typeof KEYWORDS[number]) => ({
-      criterionId: k.id, status: s.keywordStatus[k.id], type: "KEYWORD", keyword: { text: k.text, matchType: k.match },
+      criterionId: k.id, status: s.keywordStatus[k.id], cpcBidMicros: s.keywordBid?.[k.id], type: "KEYWORD", keyword: { text: k.text, matchType: k.match },
       resourceName: `customers/${DEMO_CID}/adGroupCriteria/${k.adGroup}~${k.id}`,
     });
     const termsOfKw = (kid: string) => TERMS.filter((t) => t[0] === kid);
@@ -265,7 +275,7 @@ export class DemoAds {
       return { results: opts.validateOnly ? [] : results };
     }
     const results = operations.map((op) => {
-      if (service === "campaignCriteria" && op.create) {
+      if (service === "campaignCriteria" && op.create?.keyword) {
         const camp = id(op.create.campaign);
         if (!CAMPAIGNS.some((c) => c.id === camp)) throw new Error(`Campaign ${camp} not found in the demo account`);
         const resourceName = `customers/${DEMO_CID}/campaignCriteria/${camp}~${s.nextId++}`;
@@ -276,14 +286,24 @@ export class DemoAds {
         s.negatives = s.negatives.filter((n) => n.resourceName !== op.remove);
         return { resourceName: op.remove };
       }
+      // Targeting, conversion settings, bids, URL suffixes and bid strategies are simulated like builds:
+      // accepted, but the sample reports don't change. Only status, budget and end date are tracked.
+      if (op.create) return { resourceName: `customers/${DEMO_CID}/${service}/${s.nextId++}` };
+      if (op.remove) return { resourceName: op.remove as string };
       const u = op.update;
       if (!u) throw new Error(`Unsupported demo operation on ${service}`);
       if (service === "campaigns" && u.endDateTime) (s.endDateTime ??= {})[id(u.resourceName)] = u.endDateTime;
-      else if (service === "campaigns") s.campaignStatus[id(u.resourceName)] = u.status;
-      else if (service === "adGroups") s.adGroupStatus[id(u.resourceName)] = u.status;
-      else if (service === "adGroupCriteria") s.keywordStatus[id(u.resourceName).split("~")[1]!] = u.status;
-      else if (service === "campaignBudgets") s.budget[id(u.resourceName)] = Number(u.amountMicros) / 1e6;
-      else throw new Error(`Unsupported demo operation on ${service}`);
+      if (op.updateMask === "cpc_bid_micros" && service === "adGroups") (s.adGroupBid ??= {})[id(u.resourceName)] = u.cpcBidMicros;
+      if (op.updateMask === "cpc_bid_micros" && service === "adGroupCriteria") {
+        const kw = id(u.resourceName).split("~")[1]!;
+        if (u.cpcBidMicros === undefined) delete s.keywordBid?.[kw]; else (s.keywordBid ??= {})[kw] = u.cpcBidMicros;
+      }
+      if (u.status !== undefined) {
+        if (service === "campaigns") s.campaignStatus[id(u.resourceName)] = u.status;
+        else if (service === "adGroups") s.adGroupStatus[id(u.resourceName)] = u.status;
+        else if (service === "adGroupCriteria") s.keywordStatus[id(u.resourceName).split("~")[1]!] = u.status;
+      }
+      if (service === "campaignBudgets") s.budget[id(u.resourceName)] = Number(u.amountMicros) / 1e6;
       return { resourceName: u.resourceName };
     });
     if (!opts.validateOnly) this.save(s);

@@ -657,6 +657,17 @@ export class UserSession {
     const p = this.proposal(proposalId);
     if (p.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${p.status}.`);
     if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
+    // Claim it before any write: a client retrying after a timeout would otherwise apply it twice. applied_at
+    // marks the claim, and an undo also claims the change it reverses, so two undos of one change can't both run.
+    const claimed = this.deps.db.prepare(`UPDATE proposals SET applied_at = ? WHERE id = ? AND status = 'proposed' AND applied_at IS NULL
+        AND (undo_of IS NULL OR NOT EXISTS (SELECT 1 FROM proposals o WHERE o.undo_of = proposals.undo_of AND o.id <> proposals.id
+          AND o.applied_at IS NOT NULL AND o.status <> 'failed'))`).run(now(), p.id).changes;
+    if (!claimed) {
+      const cur = this.proposal(proposalId);
+      if (cur.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${cur.status}.`);
+      if (cur.applied_at) throw new Error(`Proposal ${proposalId} is already being applied.`);
+      throw new Error(`Proposal ${p.undo_of} has already been undone.`);
+    }
     const changes = JSON.parse(p.changes) as Change[];
     const pending = pendingOf(changes);
     // Re-resolve: the account may have moved since the proposal was made. Reads only, so all at once (as propose
@@ -695,6 +706,9 @@ export class UserSession {
   async undo(proposalId: string) {
     const p = this.proposal(proposalId);
     if (p.status !== "applied") throw new Error(`Only applied proposals can be undone (${proposalId} is ${p.status}).`);
+    if (this.deps.db.prepare("SELECT 1 FROM proposals WHERE undo_of = ? AND status = 'applied'").get(p.id)) {
+      throw new Error(`Proposal ${proposalId} has already been undone.`);
+    }
     const outcomes = JSON.parse(p.result ?? "[]") as Outcome[];
     const inverses = outcomes.map((o) => o.inverse).filter((x): x is Change => !!x).reverse();
     if (!inverses.length) throw new Error("Nothing to undo: none of the changes in that proposal altered the account.");

@@ -209,6 +209,8 @@ const stripeFetch: typeof fetch = async (url, init) => {
       client_reference_id: f.get("client_reference_id"), customer: "cus_1", subscription: "sub_1" }] : [] });
   }
   if (u === "subscriptions/sub_1") return j({ id: "sub_1", status: stripe.subStatus });
+  if (u === "subscriptions/sub_gone") return new Response(JSON.stringify({ error: { message: "No such subscription" } }), { status: 404 });
+  if (u === "subscriptions/sub_flaky") return new Response(JSON.stringify({ error: { message: "try again" } }), { status: 500 });
   if (u.startsWith("billing_portal/configurations")) return j({ data: [{ id: "bpc_1", is_default: false, active: true }] });
   if (u === "billing_portal/sessions") {
     expect((init?.body as URLSearchParams).get("configuration")).toBe("bpc_1");
@@ -571,17 +573,102 @@ describe("OAuth + MCP end to end", () => {
     stripe.subStatus = "canceled";
     await billing.sweep();
     expect((await call(token, "billing", {})).json.plan).toBe("free");
+    // Reloading the old /upgraded link doesn't bring Pro back.
+    expect((await fetch(`${base}/upgraded?session_id=cs_test_1`)).status).toBe(400);
+    expect((await call(token, "billing", {})).json.plan).toBe("free");
     // A completed checkout for a cancelled subscription never makes anyone Pro again, sweep after sweep.
     db.prepare("UPDATE users SET stripe_sub = NULL").run();
     await billing.sweep();
     expect((await call(token, "billing", {})).json.plan).toBe("free");
     // Not re-linked at all (the old sweep re-linked, then downgraded in the same pass: right result, wrong path).
     expect(db.prepare("SELECT count(*) n FROM users WHERE stripe_sub IS NOT NULL").get()).toEqual({ n: 0 });
+
+    // One subscription Stripe has lost and one it fails to answer for: neither stops the sweep. The lost one ends Pro;
+    // the failed one keeps Pro until Stripe answers.
+    const add = db.prepare("INSERT INTO users (id, google_sub, email, plan, created_at, stripe_sub) VALUES (?, ?, ?, 'pro', 0, ?)");
+    add.run("u_flaky", "sub-flaky", "flaky@example.com", "sub_flaky");
+    add.run("u_gone", "sub-gone", "gone@example.com", "sub_gone");
+    await billing.sweep();
+    const plans = db.prepare("SELECT id, plan FROM users WHERE id IN ('u_flaky', 'u_gone') ORDER BY id").all();
+    expect(plans).toEqual([{ id: "u_flaky", plan: "pro" }, { id: "u_gone", plan: "free" }]);
+    db.prepare("DELETE FROM users WHERE id IN ('u_flaky', 'u_gone')").run();
   });
 
   it("refuses to apply a proposal that doesn't exist or isn't the user's", async () => {
     const r = await call(token, "apply_changes", { proposal_id: "p_nope" });
     expect(r.isError).toBe(true);
+  });
+
+  it("applies a proposal once when the client sends apply twice at the same time", async () => {
+    const p = await call(token, "propose_changes", { customer_id: "1112223333", changes: [
+      { type: "add_negative_keywords", campaign_id: "10", keywords: [{ text: "twice", match_type: "PHRASE" }] }] });
+    const writes = () => ads.mutations.filter((m) => !m.validateOnly).length;
+    const before = writes();
+    // A slow Google, so the second call arrives while the first is still re-reading the account.
+    const realSearch = ads.search.bind(ads);
+    ads.search = async (cid: string, q: string) => { await new Promise((r) => setTimeout(r, 50)); return realSearch(cid, q); };
+    const [a, b] = await Promise.all([1, 2].map(() => call(token, "apply_changes", { proposal_id: p.json.proposal_id })))
+      .finally(() => { ads.search = realSearch; });
+    expect([a, b].filter((r) => !r.isError).map((r) => r.json.status)).toEqual(["applied"]);
+    expect([a, b].find((r) => r.isError)!.text).toMatch(/already (being )?applied/);
+    expect(writes()).toBe(before + 1);
+    expect(ads.negatives.filter((n) => n.text === "twice")).toHaveLength(1);
+    // The undo still knows what to remove: the losing call didn't overwrite the result.
+    const u = await call(token, "undo_changes", { proposal_id: p.json.proposal_id });
+    expect(u.json.summary).toContain("Remove 1 negative keyword(s)");
+    await call(token, "apply_changes", { proposal_id: u.json.proposal_id });
+    expect(ads.negatives.filter((n) => n.text === "twice")).toHaveLength(0);
+  });
+
+  it("undoes a change only once", async () => {
+    const p = await call(token, "propose_changes", { customer_id: "1112223333", changes: [{ type: "pause_campaign", campaign_id: "10" }] });
+    await call(token, "apply_changes", { proposal_id: p.json.proposal_id });
+    // Two undo proposals made before either is applied: the second can't run once the first has.
+    const u1 = await call(token, "undo_changes", { proposal_id: p.json.proposal_id });
+    const u2 = await call(token, "undo_changes", { proposal_id: p.json.proposal_id });
+    expect((await call(token, "apply_changes", { proposal_id: u1.json.proposal_id })).json.status).toBe("applied");
+    const again = await call(token, "apply_changes", { proposal_id: u2.json.proposal_id });
+    expect(again.isError).toBe(true);
+    expect(again.text).toContain("already been undone");
+    const third = await call(token, "undo_changes", { proposal_id: p.json.proposal_id });
+    expect(third.isError).toBe(true);
+    expect(third.text).toContain("already been undone");
+    expect(ads.campaignStatus).toBe("ENABLED");
+  });
+
+  it("keeps the demo's statuses through bid, suffix and location-mode changes", async () => {
+    const p = await call(token, "propose_changes", { customer_id: "0000000001", changes: [
+      { type: "set_keyword_bid", ad_group_id: "3005", criterion_id: "4009", max_cpc: 3.5 },
+      { type: "set_ad_group_bid", ad_group_id: "3005", max_cpc: 2.5 },
+      { type: "set_url_suffix", campaign_id: "2003", suffix: "utm_source=google" },
+      { type: "set_location_mode", campaign_id: "2003", presence_only: true },
+      { type: "add_campaign_targeting", campaign_id: "2003", location_ids: ["2826"] },
+    ] });
+    if (p.isError) throw new Error(p.text);
+    const a = (await call(token, "apply_changes", { proposal_id: p.json.proposal_id })).json;
+    expect(a.status).toBe("applied");
+    const q = (query: string) => call(token, "run_gaql", { customer_id: "0000000001", query });
+    const camp = (await q("SELECT campaign.status FROM campaign WHERE campaign.id = 2003")).json.rows[0].campaign;
+    const ag = (await q("SELECT ad_group.status FROM ad_group WHERE ad_group.id = 3005")).json.rows[0].adGroup;
+    const kw = (await q("SELECT ad_group_criterion.status FROM ad_group_criterion WHERE ad_group_criterion.criterion_id = 4009")).json.rows[0].adGroupCriterion;
+    expect([camp.status, ag.status, kw.status]).toEqual(["ENABLED", "ENABLED", "ENABLED"]);
+    const bids = async () => (await q("SELECT ad_group.cpc_bid_micros, ad_group_criterion.cpc_bid_micros FROM ad_group_criterion WHERE ad_group_criterion.criterion_id = 4009")).json.rows[0];
+    expect(await bids()).toMatchObject({ adGroup: { cpcBidMicros: "2500000" }, adGroupCriterion: { cpcBidMicros: "3500000" } });
+    const u = await call(token, "undo_changes", { proposal_id: p.json.proposal_id });
+    if (u.isError) throw new Error(u.text);
+    expect((await call(token, "apply_changes", { proposal_id: u.json.proposal_id })).json.status).toBe("applied");
+    const back = await bids();
+    expect(back.adGroup.cpcBidMicros).toBe("2000000");
+    expect(back.adGroupCriterion.cpcBidMicros).toBeUndefined();
+  });
+
+  it("heals demo state saved with a status wiped by an old bid change", async () => {
+    const row = db.prepare("SELECT user_id, state FROM demo_state LIMIT 1").get() as { user_id: string; state: string };
+    const s = JSON.parse(row.state);
+    delete s.campaignStatus["2002"];
+    db.prepare("UPDATE demo_state SET state = ? WHERE user_id = ?").run(JSON.stringify(s), row.user_id);
+    const r = (await call(token, "run_gaql", { customer_id: "0000000001", query: "SELECT campaign.status FROM campaign WHERE campaign.id = 2002" })).json;
+    expect(r.rows[0].campaign.status).toBe("ENABLED");
   });
 
   it("surfaces Google's refusal instead of reporting no accounts", async () => {
