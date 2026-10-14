@@ -338,6 +338,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     every(10 * 60_000, "db sweep", () => sweep(db));
     void every(HOUR, "billing sweep", () => billing.sweep())();  // also at boot: a restart mustn't delay a downgrade an hour
     every(HOUR, "lifecycle", () => lifecycle.run());
+    every(60_000, "transactional mail", () => lifecycle.transactional());
     every(HOUR, "ad conversions", () => adConversions.flush());
     every(HOUR, "relay conversions", () => relay.flush());
     // Pages new or changed since the last boot. Production only: a dev or test origin isn't ours to submit.

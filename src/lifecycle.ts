@@ -1,9 +1,11 @@
 /**
- * Three lifecycle emails, each sent at most once per user, through Resend:
+ * Lifecycle emails, each sent at most once per user, through Resend:
  *   first_steps    connected 2–14 days ago and never asked anything real → the first question to ask, and the demo
  *   limit_reached  a tool refused a second Google Ads account (the Free plan's limit), still free 3+ days later → one note: what Pro covers, the upgrade link
  *   check_in       first applied a change to a real account 2–14 days ago → a personal note from Adam asking how it went (replies go to him)
- * Each goes out in the user's morning (SEND_HOURS in the time zone of their Google Ads account, or FALLBACK_TZ),
+ *   pro_welcome    on Pro with a Stripe subscription → what Pro adds, where billing lives. Transactional: sent within a
+ *                  minute (transactional(), every minute), not held for the morning
+ * The first three go out in the user's morning (SEND_HOURS in the time zone of their Google Ads account, or FALLBACK_TZ),
  * so being due only holds it until the next hourly run inside that window.
  * Never sent to internal accounts (ADMIN_EMAILS, PRO_EMAILS) or anyone who unsubscribed; first_steps and limit_reached
  * also skip Pro users and the disconnected.
@@ -49,7 +51,7 @@ function localHour(at: Date, tz: string | null | undefined): number {
   const fmt = (zone: string) => Number(new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", hourCycle: "h23" }).format(at));
   try { return fmt(tz || FALLBACK_TZ); } catch { return fmt(FALLBACK_TZ); }
 }
-type Kind = "first_steps" | "limit_reached" | "check_in";
+type Kind = "first_steps" | "limit_reached" | "check_in" | "pro_welcome";
 /** Tools that mean someone has asked Camberstack something real (not just listed accounts or sites). */
 const USED_TOOLS = "('account_overview','run_gaql','keyword_ideas','keyword_metrics','propose_changes','paid_organic_overlap',"
   + "'search_console_summary','search_console_performance','search_console_trend','search_console_opportunities',"
@@ -99,17 +101,36 @@ export class Lifecycle {
     ];
   }
 
-  /** Hourly. Logs before sending (at most once, even if a send is retried by a crash); a failed send is unlogged to retry. */
+  /** Hourly. */
   async run(): Promise<number> {
     if (!this.d.mail) return 0;
+    return this.deliver(this.due(), (u) => u.kind === "first_steps" ? firstSteps(u.days)
+      : u.kind === "limit_reached" ? limitReached(this.d.baseUrl, this.d.upgradeLink(u.id)) : checkInEmail());
+  }
+
+  /**
+   * Every minute: pro_welcome to anyone on Pro through Stripe who hasn't had it. Polling the plan, not hooking the
+   * upgrade, covers every way someone becomes Pro (/upgraded, the paywall's refreshPlan, the hourly sweep).
+   * PRO_EMAILS users have no stripe_sub, so they never get it.
+   */
+  async transactional(): Promise<number> {
+    if (!this.d.mail) return 0;
+    const pros = (this.d.db.prepare(`SELECT u.id, u.email FROM users u WHERE u.plan = 'pro' AND u.stripe_sub IS NOT NULL AND u.stripe_sub != ''
+      AND u.email_opt_out = 0 AND NOT EXISTS (SELECT 1 FROM email_log e WHERE e.user_id = u.id AND e.kind = 'pro_welcome')`)
+      .all() as { id: string; email: string }[])
+      .filter((u) => !this.d.internalEmails.has(u.email.toLowerCase()));
+    return this.deliver(pros.map((u) => ({ ...u, kind: "pro_welcome" as const, days: 0 })), () => proWelcome(this.d.baseUrl));
+  }
+
+  /** Logs before sending (at most once, even if a send is retried by a crash); a failed send is unlogged to retry. */
+  private async deliver<U extends { kind: Kind; id: string; email: string; days: number }>(
+    due: U[], render: (u: U) => { subject: string; text: string; html: string }): Promise<number> {
     let sent = 0;
-    for (const u of this.due()) {
+    for (const u of due) {
       const claim = this.d.db.prepare("INSERT OR IGNORE INTO email_log (user_id, kind, sent_at) VALUES (?, ?, ?)").run(u.id, u.kind, now());
       if (!claim.changes) continue;
       try {
-        const m = u.kind === "first_steps" ? firstSteps(u.days)
-          : u.kind === "limit_reached" ? limitReached(this.d.baseUrl, this.d.upgradeLink(u.id)) : checkInEmail();
-        await this.send(u.email, m, u.id, `${u.id}:${u.kind}`);
+        await this.send(u.email, render(u), u.id, `${u.id}:${u.kind}`);
         sent++;
       } catch (e) {
         this.d.db.prepare("DELETE FROM email_log WHERE user_id = ? AND kind = ?").run(u.id, u.kind);
@@ -143,6 +164,7 @@ export class Lifecycle {
     await this.send(to, firstSteps(3), "preview");
     await this.send(to, limitReached(this.d.baseUrl, `${this.d.baseUrl}/account?upgrade=1`), "preview");
     await this.send(to, checkInEmail(), "preview");
+    await this.send(to, proWelcome(this.d.baseUrl), "preview");
   }
 
   mount(app: Express, page: (title: string, body: string) => string): void {
@@ -236,5 +258,33 @@ camberstack.io`,
       + p("Two quick questions, if you have a minute:")
       + `<ol style="margin:0 0 14px;padding-left:22px">${qs.map((q) => `<li>${q}</li>`).join("")}</ol>`
       + p("I read every reply and fix things quickly, so even one line helps.") + p("Thanks,<br>Adam<br>camberstack.io")),
+  };
+}
+
+/** Transactional: confirms the upgrade. Billing changes and cancelling live on /account (Stripe's portal), receipts come from Stripe. */
+function proWelcome(base: string) {
+  const ask = "List my Google Ads accounts";
+  return {
+    subject: "You're on Camberstack Pro",
+    text: `Hi,
+
+Thanks for subscribing to Camberstack Pro. It's active now.
+
+What Pro adds: up to 10 Google Ads accounts instead of 1. To use another one, ask in Claude or ChatGPT, e.g. "${ask}", then name the one you want.
+
+What stays the same: every tool, unlimited changes, nothing applied until you approve it, and every change can be undone.
+
+Billing: ${PRO_PRICE_LABEL}, renewing monthly. You can see invoices, change your card or cancel any time from your account page:
+${base}/account
+
+If anything doesn't work the way you expected, just reply. I read every email.
+
+Adam
+Camberstack`,
+    html: wrap(p("Hi,") + p("Thanks for subscribing to Camberstack Pro. It's active now.")
+      + p(`<strong>What Pro adds:</strong> up to 10 Google Ads accounts instead of 1. To use another one, ask in Claude or ChatGPT, e.g. <em>“${ask}”</em>, then name the one you want.`)
+      + p("<strong>What stays the same:</strong> every tool, unlimited changes, nothing applied until you approve it, and every change can be undone.")
+      + p(`<strong>Billing:</strong> ${PRO_PRICE_LABEL}, renewing monthly. You can see invoices, change your card or cancel any time from <a href="${base}/account">your account page</a>.`)
+      + p("If anything doesn't work the way you expected, just reply. I read every email.") + p("Adam<br>Camberstack")),
   };
 }

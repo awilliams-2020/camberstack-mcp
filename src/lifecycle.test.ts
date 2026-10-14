@@ -140,3 +140,40 @@ describe("lifecycle emails", () => {
     expect(await lc.run()).toBe(1);
   });
 });
+
+describe("pro_welcome (transactional)", () => {
+  const pro = (db: any, id: string, email: string, sub: string | null, optOut = 0) =>
+    db.prepare("INSERT INTO users (id, google_sub, email, enc_refresh, created_at, plan, stripe_sub, email_opt_out) VALUES (?, ?, ?, 'x', ?, 'pro', ?, ?)")
+      .run(id, `sub-${id}`, email, now(), sub, optOut);
+
+  it("goes once to each Stripe Pro user, at any hour, never to internal, PRO_EMAILS-only or opted-out users", async () => {
+    const { db, lc, sent, user } = setup(() => new Date("2026-10-14T03:00:00Z"));  // 10pm in Chicago: no morning wait
+    pro(db, "paid", "paid@example.com", "sub_1");
+    pro(db, "comp", "comp@example.com", null);          // Pro through PRO_EMAILS, no subscription
+    pro(db, "me", "me@example.com", "sub_2");           // internal
+    pro(db, "quiet", "quiet@example.com", "sub_3", 1);  // unsubscribed
+    user("free", "free@example.com", 0);
+    expect(await lc.transactional()).toBe(1);
+    expect(sent.map((m) => m.to[0])).toEqual(["paid@example.com"]);
+    const m = sent[0];
+    expect(m.subject).toBe("You're on Camberstack Pro");
+    expect(m.text).toContain("up to 10 Google Ads accounts");
+    expect(m.text).toContain("$15/month");
+    expect(m.text).toContain("https://camberstack.io/account");
+    expect(m.reply_to).toBe("adam@camberstack.io");
+    expect(await lc.transactional()).toBe(0);  // never twice
+    expect(await lc.run()).toBe(0);            // and the hourly run doesn't send it
+  });
+
+  it("retries a failed send on the next run", async () => {
+    const { db, lc, sent } = setup();
+    pro(db, "paid", "paid@example.com", "sub_1");
+    const real = (lc as any).d.fetch;
+    (lc as any).d.fetch = async () => new Response("down", { status: 500 });
+    const err = console.error; console.error = () => {};
+    try { expect(await lc.transactional()).toBe(0); } finally { console.error = err; }
+    (lc as any).d.fetch = real;
+    expect(await lc.transactional()).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+});
