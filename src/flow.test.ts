@@ -517,15 +517,20 @@ describe("OAuth + MCP end to end", () => {
     for (const t of ["jobs", "login", "how to"]) expect((await call(token, "apply_changes", { proposal_id: await negative(t) })).json.status).toBe("applied");
     const third = (await call(token, "change_history", {})).json[0].proposal_id as string;
 
-    // A second account is refused before any Google call, with a personal upgrade link.
+    // This month's switch is already used (2223334444, five days ago), so a third account is refused before
+    // any Google call, with a personal upgrade link.
+    const uid = (db.prepare("SELECT id FROM users WHERE email = 'owner@example.com'").get() as { id: string }).id;
+    const switched = db.prepare("INSERT INTO tool_calls (at, user_id, tool, customer_id, ok, ms, bytes) VALUES (?, ?, 'account_overview', '2223334444', 1, 1, 1)")
+      .run(Math.floor(Date.now() / 1000) - 5 * 86400, uid).lastInsertRowid;
     const blocked = await call(token, "account_overview", { customer_id: "999-888-7777", days: 30 });
     expect(blocked.isError).toBe(true);
     expect(blocked.text).toContain("Plan limit:");
-    expect(blocked.text).toContain("1 Google Ads account in the last 30 days (1112223333)");
+    expect(blocked.text).toContain("2 Google Ads accounts in the last 30 days (1112223333, 2223334444)");
+    expect(blocked.text).toContain("1 at a time (active: 1112223333), with one switch per 30 days, already used");
     const link = blocked.text.match(/https?:\/\/\S+\/upgrade\?t=[\w.-]+/)![0];
     // The refusal is structured: facts as fields, no instructions to the assistant.
     const limit = JSON.parse(blocked.text.slice(blocked.text.indexOf("\n") + 1));
-    expect(limit).toMatchObject({ error: "plan_limit", plan: "free", accounts_in_use: ["1112223333"], accounts_included: 1,
+    expect(limit).toMatchObject({ error: "plan_limit", plan: "free", accounts_in_use: ["1112223333", "2223334444"], active_accounts: ["1112223333"], accounts_included: 1,
       refused_account: "9998887777", upgrade: { plan: "pro", accounts_included: 10 } });
     expect(limit.upgrade.upgrade_url).toBe(link);
     expect(blocked.text).not.toMatch(/word for word|Show the user/i);
@@ -537,7 +542,7 @@ describe("OAuth + MCP end to end", () => {
     expect((await call(token, "apply_changes", { proposal_id: u.json.proposal_id })).json.status).toBe("applied");
 
     const plan = await call(token, "billing", {});
-    expect(plan.json).toMatchObject({ plan: "free", accounts_in_use: ["1112223333"], accounts_included: 1, window_days: 30 });
+    expect(plan.json).toMatchObject({ plan: "free", accounts_in_use: ["1112223333", "2223334444"], accounts_included: 1, window_days: 30 });
     expect(plan.json.upgrade_url).toContain("/upgrade?t=");
 
     // A tampered link is refused; the real one goes to Stripe Checkout as a subscription for this user.
@@ -554,6 +559,7 @@ describe("OAuth + MCP end to end", () => {
     const paidNoTab = await call(token, "account_overview", { customer_id: "999-888-7777", days: 30 });
     expect(paidNoTab.text).not.toContain("Plan limit:");  // past the gate; this login just can't read that account
     expect(db.prepare("SELECT plan FROM users WHERE email = 'owner@example.com'").get()).toEqual({ plan: "pro" });
+    db.prepare("DELETE FROM tool_calls WHERE id = ?").run(switched);
 
     // /upgraded is still fine afterwards (settling is idempotent).
     const done = await fetch(`${base}/upgraded?session_id=cs_test_1`);
@@ -669,6 +675,62 @@ describe("OAuth + MCP end to end", () => {
     db.prepare("UPDATE demo_state SET state = ? WHERE user_id = ?").run(JSON.stringify(s), row.user_id);
     const r = (await call(token, "run_gaql", { customer_id: "0000000001", query: "SELECT campaign.status FROM campaign WHERE campaign.id = 2002" })).json;
     expect(r.rows[0].campaign.status).toBe("ENABLED");
+  });
+
+  it("lets no more new accounts through than the plan allows when the AI calls them in parallel", async () => {
+    const uid = (db.prepare("SELECT id FROM users WHERE email = 'owner@example.com'").get() as { id: string }).id;
+    const saved = db.prepare("SELECT * FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL").all(uid);
+    db.prepare("DELETE FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL").run(uid);
+    const realSearch = ads.search.bind(ads);
+    ads.search = async (cid: string, q: string) => { await new Promise((r) => setTimeout(r, 50)); return realSearch(cid, q); };
+    try {
+      // Free takes one account plus one switch, so of three new accounts at once exactly one is refused.
+      const all = await Promise.all(["111-222-3333", "999-888-7777", "888-777-6666"].map((c) => call(token, "account_overview", { customer_id: c, days: 30 })));
+      expect(all.filter((r) => r.text.includes("Plan limit:"))).toHaveLength(1);
+    } finally {
+      ads.search = realSearch;
+      db.prepare("DELETE FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL").run(uid);
+      const put = db.prepare("INSERT INTO tool_calls (id, at, user_id, client_id, tool, customer_id, ok, error, ms, bytes) VALUES (@id, @at, @user_id, @client_id, @tool, @customer_id, @ok, @error, @ms, @bytes)");
+      for (const r of saved) put.run(r);
+    }
+  });
+
+  it("lets Free switch accounts once a month, and keeps the most recent after a downgrade", async () => {
+    const uid = (db.prepare("SELECT id FROM users WHERE email = 'owner@example.com'").get() as { id: string }).id;
+    // One account in use: a new one is the switch, so it gets past the gate (this login just can't read it).
+    const sw = await call(token, "account_overview", { customer_id: "222-333-4444", days: 30 });
+    expect(sw.text).not.toContain("Plan limit:");
+
+    // As if they'd been on Pro: three accounts used, 2223334444 most recently. Free covers one, the switch is spent.
+    const saved = db.prepare("SELECT * FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL").all(uid);
+    db.prepare("DELETE FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL").run(uid);
+    const t = Math.floor(Date.now() / 1000);
+    const use = db.prepare("INSERT INTO tool_calls (at, user_id, tool, customer_id, ok, ms, bytes) VALUES (?, ?, 'account_overview', ?, 1, 1, 1)");
+    use.run(t - 10 * 86400, uid, "1112223333");
+    use.run(t - 3 * 86400, uid, "3334445555");
+    use.run(t - 86400, uid, "2223334444");
+    try {
+      const blocked = await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 });
+      expect(blocked.text).toContain("Plan limit:");
+      const limit = JSON.parse(blocked.text.slice(blocked.text.indexOf("\n") + 1));
+      // The switch comes back when the second most recent account ages out of the window.
+      const opens = new Date((t - 3 * 86400 + 30 * 86400) * 1000).toISOString().slice(0, 10);
+      expect(limit).toMatchObject({ active_accounts: ["2223334444"], accounts_in_use: ["2223334444", "3334445555", "1112223333"] });
+      expect(limit.switching).toContain(opens);
+
+      const list = (await call(token, "list_accounts")).json;
+      expect(list.accounts.find((a: any) => a.customerId === "1112223333").plan_status).toBe("locked");
+      expect(list.plan).toMatchObject({ plan: "free", accounts_included: 1, active_accounts: ["2223334444"] });
+      expect(list.plan.switching).toContain(opens);
+    } finally {
+      db.prepare("DELETE FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL").run(uid);
+      const put = db.prepare("INSERT INTO tool_calls (id, at, user_id, client_id, tool, customer_id, ok, error, ms, bytes) VALUES (@id, @at, @user_id, @client_id, @tool, @customer_id, @ok, @error, @ms, @bytes)");
+      for (const r of saved) put.run(r);
+    }
+    // Back to normal: the one account in use is active, and a plan with nothing locked says nothing.
+    const list = (await call(token, "list_accounts")).json;
+    expect(list.plan).toBeUndefined();
+    expect(list.accounts.find((a: any) => a.customerId === "1112223333").plan_status).toBe("active");
   });
 
   it("surfaces Google's refusal instead of reporting no accounts", async () => {

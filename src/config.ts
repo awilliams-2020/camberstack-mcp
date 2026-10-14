@@ -22,7 +22,7 @@ export interface Config {
     /** Sent when set. Google moved access decisions to the Cloud project on 2026-09-10. */
     developerToken?: string;
   };
-  /** Google Ads accounts a plan covers, counted as distinct accounts used in the last 30 days (plans.ts). */
+  /** Google Ads accounts a plan covers at a time: distinct accounts used in the last 30 days, plus one switch (session.ts planState). */
   freeAccounts: number;
   proAccounts: number;
   /** Pro subscription; unset = no upgrade links (free users stop at the limit with no way to pay). */

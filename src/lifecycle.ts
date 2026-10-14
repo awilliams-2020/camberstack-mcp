@@ -195,8 +195,8 @@ function limitReached(base: string, upgrade: string | null) {
     subject: "Using Camberstack on more than one Google Ads account",
     text: `Hi,
 
-Camberstack stopped when you tried it on a second Google Ads account. The Free plan covers one account at a time (an account
-drops out ${ACCOUNT_WINDOW_DAYS} days after you last used it), with every tool and unlimited changes. Undo and history always work: ${base}/account
+Camberstack stopped when you tried it on another Google Ads account. The Free plan covers one account at a time, with one
+switch every ${ACCOUNT_WINDOW_DAYS} days, and every tool and unlimited changes. Undo and history always work: ${base}/account
 
 Camberstack Pro covers up to 10 accounts, for ${PRO_PRICE_LABEL}, cancel any time${upgrade ? `:\n${upgrade}\n(personal link, valid for 7 days)` : ` from ${base}/account`}.
 
@@ -204,7 +204,7 @@ This is the only email about it. Questions? Just reply.
 
 Adam
 Camberstack`,
-    html: wrap(p("Hi,") + p(`Camberstack stopped when you tried it on a second Google Ads account. The Free plan covers one account at a time (an account drops out ${ACCOUNT_WINDOW_DAYS} days after you last used it), with every tool and unlimited changes. Undo and history always work, on <a href="${base}/account">your account page</a>.`)
+    html: wrap(p("Hi,") + p(`Camberstack stopped when you tried it on another Google Ads account. The Free plan covers one account at a time, with one switch every ${ACCOUNT_WINDOW_DAYS} days, and every tool and unlimited changes. Undo and history always work, on <a href="${base}/account">your account page</a>.`)
       + p(`Camberstack Pro covers up to 10 accounts, for ${PRO_PRICE_LABEL}, cancel any time.`)
       + `<p style="margin:0 0 18px"><a href="${upgrade ?? `${base}/account?upgrade=1`}" style="display:inline-block;background:#1f5f4a;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:600">Upgrade to Pro</a></p>`
       + p("This is the only email about it. Questions? Just reply.") + p("Adam<br>Camberstack")),

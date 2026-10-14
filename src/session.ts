@@ -35,6 +35,9 @@ const tokenCache = new Map<string, { token: string; exp: number }>();
  */
 const accountsCache = new Map<string, { at: number; list: Account[]; unreadable: { customerId: string; error: string }[] }>();
 const ACCOUNTS_TTL_MS = 10 * 60_000;
+/** Per user: the tail of their plan-gate checks (run one at a time), and the accounts with a call running. */
+const gateQueue = new Map<string, Promise<void>>();
+const inFlight = new Map<string, Map<string, number>>();
 
 /**
  * `fn` over `items`, at most `limit` at a time, results in input order. If any fail, throws the error of the
@@ -165,43 +168,104 @@ export class UserSession {
    * counts, and nor do failed calls (a call the gate refused is logged as failed).
    */
   accountsInUse(): string[] {
-    return (this.deps.db.prepare(`SELECT DISTINCT customer_id c FROM tool_calls
-        WHERE user_id = ? AND ok = 1 AND customer_id IS NOT NULL AND customer_id != ? AND at >= ?`)
-      .all(this.user.id, DEMO_CID, now() - ACCOUNT_WINDOW_DAYS * 86400) as { c: string }[]).map((r) => r.c);
+    return this.usage().map((u) => u.c);
+  }
+
+  /** accountsInUse, most recently used first, with when each was last used. */
+  private usage(): { c: string; last: number }[] {
+    return this.deps.db.prepare(`SELECT customer_id c, max(at) last FROM tool_calls
+        WHERE user_id = ? AND ok = 1 AND customer_id IS NOT NULL AND customer_id != ? AND at >= ?
+        GROUP BY customer_id ORDER BY last DESC, c`)
+      .all(this.user.id, DEMO_CID, now() - ACCOUNT_WINDOW_DAYS * 86400) as { c: string; last: number }[];
   }
 
   /**
-   * The plan gate, run before every tool that reads or proposes on a Google Ads account. An account already
-   * in use always passes, so the gate only ever stops a NEW account. Manager accounts don't count: they are
+   * Which accounts the plan covers right now: the most recently used, up to the plan's limit. Calls still
+   * running count as used now. On top of the limit, a plan gets ONE switch per window: a new account is let
+   * in, becomes active, and the least recent active one locks. So someone who connected the wrong account,
+   * or moved on, isn't stuck, while rotating through clients still needs Pro. Switching back counts as
+   * another switch. Over limit + 1 (a Pro who cancelled), the rest stay locked until they age out;
+   * `switchOpens` is when the next switch (or a locked account) opens up.
+   */
+  planState(managers: Set<string>) {
+    const running = [...(inFlight.get(this.user.id)?.keys() ?? [])];
+    const seen = new Set<string>();
+    const ranked = [...running.map((c) => ({ c, last: now() })), ...this.usage()]
+      .filter((u) => !managers.has(u.c) && !seen.has(u.c) && seen.add(u.c));
+    const limit = this.accountLimit;
+    const used = ranked.map((u) => u.c), active = used.slice(0, limit);
+    const canSwitch = ranked.length < limit + 1;
+    const oldest = ranked[limit];  // aging out of the window is what frees the switch again
+    return {
+      used, active, canSwitch,
+      /** At the limit: a new account now is (or would need) the switch. */
+      full: ranked.length >= limit,
+      allows: (cid: string) => active.includes(cid) || (canSwitch && !used.includes(cid)),
+      switchOpens: oldest ? new Date((oldest.last + ACCOUNT_WINDOW_DAYS * 86400) * 1000).toISOString().slice(0, 10) : null,
+    };
+  }
+
+  /**
+   * The plan gate, run before every tool that reads or proposes on a Google Ads account. An active account
+   * always passes, so the gate only ever stops a NEW (or locked) account. Manager accounts don't count: they are
    * how a login reaches its clients, not an account anyone advertises from. Undo, history and billing take
    * no account and are never gated: nothing may stand between a user and reversing a change.
+   *
+   * One user's checks run one at a time, and a passed account counts as in use until its call ends (call the
+   * returned release): AI clients call tools in parallel, which otherwise let several new accounts through at once.
    */
-  async checkAccount(customerId: string): Promise<void> {
-    const cid = bareCid(customerId);
-    if (isDemo(cid)) return;
-    const used = this.accountsInUse();
-    if (used.includes(cid) || used.length < this.accountLimit) return;
-    const managers = new Set((await this.accounts().catch(() => [] as Account[])).filter((a) => a.manager).map((a) => a.customerId));
-    if (managers.has(cid)) return;
-    const counted = used.filter((c) => !managers.has(c));
-    if (counted.length < this.accountLimit) return;
-    // Someone who paid and closed the tab before /upgraded must not be blocked for an hour: ask Stripe first.
-    if (!this.isPro && await this.deps.refreshPlan?.(this.user.id)) {
-      this.user.plan = "pro";
-      if (counted.length < this.accountLimit) return;
+  checkAccount(customerId: string): Promise<() => void> {
+    const prev = gateQueue.get(this.user.id) ?? Promise.resolve();
+    const run = prev.then(() => this.admit(bareCid(customerId)));
+    const tail = run.then(() => {}, () => {});
+    gateQueue.set(this.user.id, tail);
+    void tail.then(() => { if (gateQueue.get(this.user.id) === tail) gateQueue.delete(this.user.id); });
+    return run;
+  }
+
+  private async admit(cid: string): Promise<() => void> {
+    if (isDemo(cid)) return () => {};
+    let st = this.planState(new Set());
+    if (!st.allows(cid)) {
+      const managers = new Set((await this.accounts().catch(() => [] as Account[])).filter((a) => a.manager).map((a) => a.customerId));
+      if (!managers.has(cid)) {
+        st = this.planState(managers);
+        // Someone who paid and closed the tab before /upgraded must not be blocked for an hour: ask Stripe first.
+        if (!st.allows(cid) && !this.isPro && await this.deps.refreshPlan?.(this.user.id)) {
+          this.user.plan = "pro";
+          st = this.planState(managers);
+        }
+        if (!st.allows(cid)) this.refuse(cid, st);
+      }
     }
+    const mine = inFlight.get(this.user.id) ?? new Map<string, number>();
+    inFlight.set(this.user.id, mine);
+    mine.set(cid, (mine.get(cid) ?? 0) + 1);
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const n = (mine.get(cid) ?? 1) - 1;
+      if (n > 0) mine.set(cid, n); else mine.delete(cid);
+      if (!mine.size && inFlight.get(this.user.id) === mine) inFlight.delete(this.user.id);
+    };
+  }
+
+  private refuse(cid: string, st: ReturnType<UserSession["planState"]>): never {
     const window = `in the last ${ACCOUNT_WINDOW_DAYS} days`;
-    const common = { plan: this.isPro ? "pro" : "free", accounts_in_use: counted, accounts_included: this.accountLimit,
-      window_days: ACCOUNT_WINDOW_DAYS, refused_account: cid,
-      still_available: ["the accounts already in use", "undo_changes", "change_history", "billing"] };
+    const common = { plan: this.isPro ? "pro" : "free", accounts_in_use: st.used, active_accounts: st.active,
+      accounts_included: this.accountLimit, window_days: ACCOUNT_WINDOW_DAYS, refused_account: cid,
+      switching: `one switch per ${ACCOUNT_WINDOW_DAYS} days, already used; the next opens ${st.switchOpens}`,
+      still_available: ["the active accounts", "undo_changes", "change_history", "billing"] };
     if (this.isPro) {
-      throw new PlanLimitError(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(counted.length)} ${window}; Pro covers ${this.deps.proAccounts}.`,
-        { error: "plan_limit", ...common, account_frees_up: `${ACCOUNT_WINDOW_DAYS} days after its last use`, contact: "adam@camberstack.io" });
+      throw new PlanLimitError(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(st.used.length)} ${window}; Pro covers ${this.deps.proAccounts}.`,
+        { error: "plan_limit", ...common, contact: "adam@camberstack.io" });
     }
     const url = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
-    throw new PlanLimitError(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(counted.length)} ${window} (${counted.join(", ")}); `
-      + `the Free plan covers ${this.deps.freeAccounts}.`,
-      { error: "plan_limit", ...common, account_frees_up: `${ACCOUNT_WINDOW_DAYS} days after its last use`,
+    throw new PlanLimitError(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(st.used.length)} ${window} (${st.used.join(", ")}); `
+      + `the Free plan covers ${this.deps.freeAccounts} at a time (active: ${st.active.join(", ")}), with one switch per ${ACCOUNT_WINDOW_DAYS} days, `
+      + `already used; the next opens ${st.switchOpens}.`,
+      { error: "plan_limit", ...common,
         upgrade: { plan: "pro", price: PRO_PRICE_LABEL, accounts_included: this.deps.proAccounts, cancel: "any time",
           upgrade_url: url, upgrade_url_expires: url ? "7 days; personal to this user" : null,
           pricing_page: url ? null : `${this.deps.baseUrl}/#pricing` } });

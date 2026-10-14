@@ -7,7 +7,7 @@ reads the account with read-only tools and can propose changes, from negative ke
 Performance Max, Display and YouTube campaigns. **Nothing changes in the account until you approve a specific
 proposal, and every applied change can be undone.**
 
-Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account, every tool, unlimited changes; Pro $15/mo: up to 10 accounts).
+Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account at a time with one switch a month, every tool, unlimited changes; Pro $15/mo: up to 10 accounts).
 
 **Setup guides, with screenshots and troubleshooting:** [Connect Google Ads to Claude](https://camberstack.io/google-ads-claude) ·
 [Connect Google Ads to ChatGPT](https://camberstack.io/google-ads-chatgpt) · [every tool](https://camberstack.io/tools) ·
@@ -94,7 +94,7 @@ BASE_URL=https://your.host npm run dev
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | sent when set |
 | `BASE_URL` | public origin, the OAuth issuer (default `https://camberstack.io`) |
 | `DATA_DIR` | SQLite location (default `./data`) |
-| `FREE_ACCOUNTS` / `PRO_ACCOUNTS` / `PRO_EMAILS` | Google Ads accounts each plan covers, counted as distinct accounts used in the last 30 days, manager and demo accounts excluded (defaults 1 / 10) / emails treated as Pro |
+| `FREE_ACCOUNTS` / `PRO_ACCOUNTS` / `PRO_EMAILS` | Google Ads accounts each plan covers at a time, counted as distinct accounts used in the last 30 days plus one switch per 30 days, manager and demo accounts excluded (defaults 1 / 10) / emails treated as Pro |
 | `STRIPE_SECRET_KEY` / `STRIPE_PRO_PRICE_ID` | Pro subscription via Stripe Checkout; unset = no upgrade links |
 
 The hosted HTTP server is `npm run start:http` (the Docker image runs `node dist/server.js`).

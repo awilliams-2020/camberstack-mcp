@@ -252,8 +252,9 @@ Reports and query results are not stored. Details in the <a href="/privacy">priv
 tool, though some apps (ChatGPT, for one) block disconnect requests from chat.</p>
 <h3>What counts as an account?</h3>
 <p>Each Google Ads account you actually use Camberstack on in the last ${ACCOUNT_WINDOW_DAYS} days, not every account your login can see.
-A manager (MCC) account and the demo account don't count. On Free, using a second account returns a plan-limit error with a personal
-checkout link. An account stops counting ${ACCOUNT_WINDOW_DAYS} days after you last used it, so you can switch. Undo and change history always work.</p>
+A manager (MCC) account and the demo account don't count. Free covers one account at a time, and you can switch to another once
+every ${ACCOUNT_WINDOW_DAYS} days: the new one becomes active and the old one is locked. Past that, a plan-limit error comes with a personal
+checkout link. Undo and change history always work.</p>
 <h3>Does it work with a manager (MCC) account?</h3>
 <p>Yes. It lists the client accounts under any manager your login can reach.</p>
 `,
@@ -303,8 +304,8 @@ With Read only access, ask an account admin to raise it in Google Ads, under <st
 <h3>"Proposal is older than 24 hours"</h3>
 <p>Proposals expire after a day, because the account may have changed since. Ask ${app} to propose the change again.</p>
 <h3>"Plan limit"</h3>
-<p>The Free plan covers one Google Ads account at a time, so a second one asks you to upgrade, with a personal checkout link.
-An account stops counting ${ACCOUNT_WINDOW_DAYS} days after you last used it. Undo and change history always work. <a href="/#pricing">Plans</a>.</p>
+<p>The Free plan covers one Google Ads account at a time, with one switch to another account every ${ACCOUNT_WINDOW_DAYS} days. Past that, it asks you
+to upgrade, with a personal checkout link, and says when your next switch opens. Undo and change history always work. <a href="/#pricing">Plans</a>.</p>
 <h3>"Search Console access isn't part of this Google connection"</h3>
 <p>The Search Console box was unticked on Google's sign-in screen, or you connected before the Search Console tools existed.
 Connect again and leave the box ticked: ${reAdd}</p>
@@ -740,6 +741,7 @@ changes there never reach Google, and it doesn't count toward your plan. Ask <em
 <tr><td>Free</td><td>Every tool, unlimited applied changes, on 1 Google Ads account. No card.</td></tr>
 <tr><td>Pro, ${PRO_PRICE_LABEL}</td><td>The same, on up to 10 Google Ads accounts. Cancel any time.</td></tr></table>
 <p>An account counts when you use Camberstack on it; it stops counting ${ACCOUNT_WINDOW_DAYS} days after its last use. Manager (MCC) accounts and the demo don't count.
+Each plan also gets one switch every ${ACCOUNT_WINDOW_DAYS} days: a new account becomes active and the least recently used one is locked.
 Using one more account than your plan covers returns a <code>plan_limit</code> error listing the accounts in use, when one frees up, and, on Free,
 a personal upgrade link valid for 7 days. Undo, change history and billing are never limited. Ask <em>"What plan am I on?"</em> to see your usage.</p>
 
@@ -1020,7 +1022,7 @@ export function llmsTxt(baseUrl: string, tools: ToolDoc[]): string {
 - Writes (each one proposed, approved, then applied; every applied change can be undone): negative keywords; pause/enable campaign, ad group, keyword or ad; daily budget; end date; build a Search, Display, Demand Gen (YouTube video) or Performance Max campaign (created paused); add ad groups, keywords, ads, sitelinks; bids; bid strategy; location/language targeting; URL suffix; conversion actions and goals.
 - Search Console (optional, read-only scope): site totals, query/page performance, period-over-period trends, ranking opportunities, URL Inspection (index status), sitemap status, and paid vs organic overlap with the Ads account.
 - Demo: account 000-000-0001 is a sample business (sample data) anyone can try every tool on; changes there never touch Google. Logins with no Google Ads access get it automatically.
-- Pricing: Free plan covers 1 Google Ads account (every tool, unlimited applied changes); Pro ${PRO_PRICE_LABEL} covers up to 10. Accounts are counted as those used in the last ${ACCOUNT_WINDOW_DAYS} days; manager (MCC) and demo accounts don't count. Undo is always free.
+- Pricing: Free plan covers 1 Google Ads account (every tool, unlimited applied changes); Pro ${PRO_PRICE_LABEL} covers up to 10. Accounts are counted as those used in the last ${ACCOUNT_WINDOW_DAYS} days, with one switch to another account every ${ACCOUNT_WINDOW_DAYS} days; manager (MCC) and demo accounts don't count. Undo is always free.
 - [Documentation](${baseUrl}/docs)
 - [Setup](${baseUrl}/#setup)
 - [Pricing](${baseUrl}/#pricing)

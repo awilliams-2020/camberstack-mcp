@@ -2,8 +2,8 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import { PublicChangeSchema } from "./changes.js";
-import { PlanLimitError } from "./plans.js";
-import { isDemo, type UserSession } from "./session.js";
+import { ACCOUNT_WINDOW_DAYS, PlanLimitError } from "./plans.js";
+import { isDemo, type Account, type UserSession } from "./session.js";
 
 export const SERVER_NAME = "camberstack";
 export const SERVER_VERSION = "0.10.1";
@@ -11,7 +11,7 @@ export const SERVER_VERSION = "0.10.1";
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
-The Free plan covers 1 Google Ads account (Pro covers 10), counted as accounts used in the last 30 days; undo and change history always work.
+The Free plan covers 1 Google Ads account at a time (Pro covers 10), counted as accounts used in the last 30 days, with one switch to another account every 30 days; undo and change history always work.
 To grow an account, keyword_ideas finds what people search for around a seed or a landing page; keyword_metrics checks volume and bids for a given list. Pass the account's own market: location_ids default to the United States.
 Search Console (read-only): search_console_sites lists the user's websites; search_console_summary gives site totals against the previous period (lead with these: per-query rows leave out rare queries); search_console_performance shows their organic queries and pages; search_console_trend shows what is rising, falling, new and lost between two periods; search_console_opportunities finds near-page-1 queries and weak snippets; search_console_inspect_urls says whether Google has indexed given pages and why not; search_console_sitemaps shows when Google last read each sitemap; paid_organic_overlap joins one site with one Ads account to find searches paid for that already rank organically, and organic searches with no ads. Camberstack can't request indexing or submit sitemaps: the user does that in Search Console.
 Account 000-000-0001 is a demo with sample data: anyone can try every tool on it, and changes there never touch Google. Always say when you are using it.`;
@@ -67,8 +67,9 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       const t0 = Date.now();
       const cid = (a as { customer_id?: unknown } | undefined)?.customer_id;
       let out: ReturnType<typeof ok> | ReturnType<typeof fail>;
+      let release = () => {};
       try {
-        if (GATED.has(name) && typeof cid === "string") await session().checkAccount(cid);
+        if (GATED.has(name) && typeof cid === "string") release = await session().checkAccount(cid);
         out = ok(await fn(a));
       } catch (e) { out = fail(e); }
       try {
@@ -78,6 +79,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
           ms: Date.now() - t0, bytes: out.content[0]!.text.length,
         });
       } catch { /* logging must never break a tool */ }
+      release();  // after the log: the account now counts as used from tool_calls instead
       return out;
     };
   };
@@ -95,14 +97,26 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   tool("list_accounts", {
     title: "List Google Ads accounts",
-    description: "Lists every Google Ads account this login can reach, including client accounts under a manager (MCC). Start here.",
+    description: "Lists every Google Ads account this login can reach, including client accounts under a manager (MCC). Start here. "
+      + "When the user's plan is at its limit, each account also says whether the plan covers it (plan_status: active, switch or locked).",
     annotations: read,
   }, async () => {
     const s = session();
     const accounts = await s.accounts({ fresh: true });
     const demo = accounts.some((a) => isDemo(a.customerId));
+    // Only a plan at its limit says anything: until then every account is open, and there's nothing to explain.
+    const st = s.planState(new Set(accounts.filter((a) => a.manager).map((a) => a.customerId)));
+    const counted = (a: Account) => !a.manager && !isDemo(a.customerId);
+    const status = (c: string) => (st.active.includes(c) ? "active" : st.allows(c) ? "switch" : "locked");
     return {
-      accounts,
+      accounts: st.full ? accounts.map((a) => counted(a) ? { ...a, plan_status: status(a.customerId) } : a) : accounts,
+      ...(st.full && accounts.some((a) => counted(a) && !st.active.includes(a.customerId)) ? { plan: {
+        plan: s.isPro ? "pro" : "free", accounts_included: s.accountLimit, active_accounts: st.active,
+        switching: st.canSwitch
+          ? `One switch per ${ACCOUNT_WINDOW_DAYS} days: using a "switch" account makes it active and locks ${st.active.at(-1)}.`
+          : `This ${ACCOUNT_WINDOW_DAYS}-day switch is used; locked accounts open up from ${st.switchOpens}`
+            + (s.isPro ? "." : ", or on Pro, which covers more (the billing tool has the upgrade link)."),
+      } } : {}),
       ...(s.lastUnreadable.length ? { unreadable: s.lastUnreadable } : {}),
       // Without "signed in as", models read demo-only as "not signed in" and send the user to reconnect, which changes nothing.
       ...(demo ? { note: `The user IS connected and signed in, as ${s.user.email}; there is nothing to reconnect. That Google login has no `
