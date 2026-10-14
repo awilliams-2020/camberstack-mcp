@@ -78,7 +78,9 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
     if (!u) { res.status(404).send("No such user."); return; }
     if (req.query.format === "json") { res.json(u); return; }
     const v = view(req);
-    res.type("html").send(shell("/users", who, v, userPage(u, v, d.internalEmails.has(u.user.email.toLowerCase()))));
+    const heading = `<a class="muted" href="/users${qs(v)}">Users</a> <span class="dim">/</span> ${esc(u.user.email)} ${planBadge(u.user.plan, Boolean(u.user.stripe_sub))}${
+      d.internalEmails.has(u.user.email.toLowerCase()) ? ` <span class="chip">internal</span>` : ""}`;
+    res.type("html").send(shell("/users", who, v, userPage(u, v), heading));
   });
   site.use((_req, res) => { res.status(404).send("Not found."); });
 
@@ -124,10 +126,10 @@ function perms(scopes: string | null, connected: number | boolean, o: { short?: 
 const planBadge = (plan: string, paying: number | boolean) =>
   plan === "free" ? `<span class="chip">free</span>` : `<span class="chip pro">${esc(plan)}${paying ? "" : " · comp"}</span>`;
 
-function table(cols: (string | [string, "r"])[], rows: unknown[][], empty = "Nothing yet."): string {
+function table(cols: (string | [string, "r"])[], rows: unknown[][], empty = "Nothing yet.", cls = ""): string {
   if (!rows.length) return `<p class="empty">${empty}</p>`;
   const right = cols.map((c) => Array.isArray(c));
-  return `<div class="tbl"><table><thead><tr>${cols.map((c) => `<th${Array.isArray(c) ? ' class="r"' : ""}>${Array.isArray(c) ? c[0] : c}</th>`).join("")}</tr></thead><tbody>${
+  return `<div class="tbl"><table${cls ? ` class="${cls}"` : ""}><thead><tr>${cols.map((c) => `<th${Array.isArray(c) ? ' class="r"' : ""}>${Array.isArray(c) ? c[0] : c}</th>`).join("")}</tr></thead><tbody>${
     rows.map((r) => `<tr>${r.map((v, i) => `<td${right[i] ? ' class="r"' : ""}>${v}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 const card = (title: string, body: string, extra = "") => `<section class="card"><header><h2>${title}</h2>${extra}</header>${body}</section>`;
@@ -143,16 +145,18 @@ const EXTERNAL: [string, string][] = [
   ["GitHub", "https://github.com/zwznco/camberstack-mcp"],
 ];
 
-function shell(path: string, who: string, v: View, body: string): string {
+function shell(path: string, who: string, v: View, body: string, heading?: string): string {
+  // Counts as of page load (no live polling): users all time, tool errors in the window (red), Pro users.
+  const errs = v.report.errors.reduce((a, e) => a + e.n, 0);
   const nav: [string, string, string][] = [
     ["/", "Overview", ""],
     ["/users", "Users", String(v.report.funnel.all.connected)],
-    ["/activity", "Activity", v.report.errors.length ? `<i class="dot bad"></i>` : ""],
-    ["/revenue", "Revenue & email", String(v.report.funnel.all.paid)],
+    ["/activity", "Activity", errs ? `<b class="bad" title="${errs} tool errors in this range">${errs}</b>` : ""],
+    ["/revenue", "Revenue", String(v.report.funnel.all.paid || "")],
   ];
   const title = nav.find(([p]) => p === path)?.[1] ?? "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex"><title>${title} · Camberstack admin</title><style>
+<meta name="robots" content="noindex"><title>${heading ? "User" : title} · Camberstack admin</title><style>
 :root{--bg:#fafafa;--panel:#fff;--fg:#0a0a0a;--muted:#6b6b6b;--dim:#a3a3a3;--line:#e8e8e8;--hover:#f4f4f5;--accent:#2563eb;--ok:#16a34a;--bad:#dc2626;--chip:#f4f4f5;--pro:#7c3aed;--bar:#2563eb}
 @media (prefers-color-scheme:dark){:root{--bg:#0a0a0a;--panel:#111;--fg:#ededed;--muted:#8f8f8f;--dim:#5c5c5c;--line:#222;--hover:#181818;--accent:#60a5fa;--ok:#4ade80;--bad:#f87171;--chip:#1c1c1c;--pro:#a78bfa;--bar:#3b82f6}}
 *{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--fg);font:13px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
@@ -160,25 +164,26 @@ code,.n,.mono{font-family:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,mon
 a{color:inherit;text-decoration:none}a:hover{color:var(--accent)}td a{border-bottom:1px dotted var(--dim)}
 .app{display:grid;grid-template-columns:216px 1fr;min-height:100vh}
 aside{border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
-.brand{font:600 13px/1 ui-monospace,Menlo,monospace;padding:4px 8px 16px;letter-spacing:-.2px}.brand span{color:var(--dim)}
+.brand{font:600 13px/1 ui-monospace,Menlo,monospace;padding:4px 8px 18px;letter-spacing:-.2px;white-space:nowrap}.brand span{color:var(--dim);font-weight:400}
 aside nav a{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:6px;color:var(--muted)}
 aside nav a:hover{background:var(--hover);color:var(--fg)}aside nav a.on{background:var(--hover);color:var(--fg);font-weight:500}
-aside nav a em{font:normal 11px ui-monospace,Menlo,monospace;color:var(--dim)}
-.ext{margin-top:24px;display:flex;flex-direction:column;gap:1px}.ext span{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:0 8px 4px}
+aside nav a em{font:normal 11px ui-monospace,Menlo,monospace;color:var(--dim)}aside nav a em b{font-weight:400}
+.ext{margin-top:20px;padding-top:12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:1px}.ext span{display:none}
 .ext a{padding:4px 8px;border-radius:6px;color:var(--muted);font-size:12px}.ext a:hover{background:var(--hover);color:var(--fg)}.ext i{font-style:normal;color:var(--dim)}
-.who{margin-top:auto;padding:8px;color:var(--muted);font-size:12px;border-top:1px solid var(--line)}.who form{margin:6px 0 0}
+.who{margin-top:auto;padding:8px;color:var(--dim);font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.who form{margin:0}.who button{border:0;padding:0;color:var(--dim)}
 main{min-width:0;padding:20px 28px 48px;max-width:1240px}
 .top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:20px}
 h1{font-size:18px;font-weight:600;margin:0;letter-spacing:-.2px}h2{font-size:13px;font-weight:600;margin:0}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--panel)}
 .seg a{padding:4px 10px;color:var(--muted);font:12px ui-monospace,Menlo,monospace;border-left:1px solid var(--line)}.seg a:first-child{border-left:0}
 .seg a.on{background:var(--fg);color:var(--bg)}.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.toggle{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 10px;background:var(--panel)}.toggle.on{color:var(--fg);border-color:var(--fg)}
+.toggle{font-size:12px;color:var(--dim)}.toggle:hover{color:var(--fg)}.toggle.on{color:var(--fg)}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border:1px solid var(--line);border-radius:8px;background:var(--panel);margin-bottom:16px;overflow:hidden}
 .stat{padding:14px 16px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);margin:0 -1px -1px 0}
 .stat span{display:block;color:var(--muted);font-size:12px}.stat b{display:block;font:500 22px/1.3 ui-monospace,Menlo,monospace;letter-spacing:-.5px;margin-top:4px}
 .stat b .n{font-size:inherit}.stat small{color:var(--dim);font-size:11px}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;margin-bottom:16px}.grid2>.card{margin-bottom:0}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:16px;min-width:0}
 .card>header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
 .card>header small{color:var(--dim);font-size:12px}.card>.pad{padding:14px}
@@ -195,19 +200,22 @@ td{padding:7px 14px;border-bottom:1px solid var(--line);white-space:nowrap;verti
 .chart div:hover{opacity:1}.axis{display:flex;justify-content:space-between;padding:6px 14px 10px;color:var(--dim);font:11px ui-monospace,Menlo,monospace}
 .bar{height:6px;background:var(--chip);border-radius:3px;min-width:80px}.bar i{display:block;height:100%;background:var(--bar);border-radius:3px}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 20px;margin:0;padding:14px}dt{color:var(--muted)}dd{margin:0;min-width:0;overflow-wrap:anywhere}
-.crumb{color:var(--muted);font-size:12px;margin-bottom:4px}.crumb a:hover{color:var(--accent)}
 button{font:inherit;font-size:12px;background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:3px 10px;cursor:pointer}button:hover{color:var(--fg)}
-@media (max-width:760px){.app{grid-template-columns:1fr}aside{position:static;height:auto;flex-direction:row;align-items:center;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px 12px}
-.brand{padding:4px 8px}aside nav{display:flex;gap:2px}aside nav a{white-space:nowrap}.who,.ext{display:none}main{padding:16px}.grid2{grid-template-columns:1fr}}
+@media (max-width:760px){.app{display:block}aside{position:sticky;top:0;z-index:2;height:auto;flex-direction:row;align-items:center;gap:8px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px 12px;background:var(--bg)}
+.brand{padding:4px 4px}.brand span{display:none}aside nav{display:flex;gap:2px}aside nav a{white-space:nowrap;gap:6px}.who,.ext{display:none}main{padding:16px}.grid2{grid-template-columns:1fr}
+.top{margin-bottom:14px}h1{font-size:16px}
+table.users thead{display:none}table.users tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+table.users tr:last-child{border-bottom:0}table.users td{padding:0;border:0}table.users td:first-child{flex-basis:100%}
+table.users td:nth-child(4),table.users td:nth-child(6),table.users td:nth-child(7),table.users td:nth-child(8),table.users td:nth-child(9){display:none}
+table.users td:nth-child(5){margin-left:auto;color:var(--dim);font-size:12px}}
 </style></head><body><div class="app">
-<aside><div class="brand">camberstack <span>/ admin</span></div><nav>${nav.map(([p, l, c]) =>
+<aside><div class="brand">camberstack<span>/admin</span></div><nav>${nav.map(([p, l, c]) =>
   `<a class="${p === path ? "on" : ""}" href="${p}${qs(v)}">${l}<em>${c}</em></a>`).join("")}</nav>
 <div class="ext"><span>Links</span>${EXTERNAL.map(([l, href]) => `<a href="${href}" target="_blank" rel="noopener">${l} <i>↗</i></a>`).join("")}</div>
-<div class="who">${esc(who)}<form method="post" action="/logout"><button>Sign out</button></form></div></aside>
-<main><div class="top"><h1>${title}</h1><div class="tools">
+<div class="who"><span title="${esc(who)}">${esc(who)}</span><form method="post" action="/logout"><button>Sign out</button></form></div></aside>
+<main><div class="top"><h1>${heading ?? title}</h1><div class="tools">
 <span class="seg">${[1, 7, 30, 90].map((d) => `<a class="${d === v.days ? "on" : ""}" href="?${qs(v, { days: d }).slice(1)}">${d === 1 ? "24h" : `${d}d`}</a>`).join("")}</span>
-<a class="toggle ${v.all ? "on" : ""}" href="${qs(v, { all: !v.all })}" title="The operator's and testers' accounts (ADMIN_EMAILS, PRO_EMAILS)">${v.all ? "✓ " : ""}internal (${v.internal})</a>
-<a class="toggle" href="${qs(v)}&format=json">JSON</a></div></div>
+<a class="toggle ${v.all ? "on" : ""}" href="${qs(v, { all: !v.all })}" title="Include the operator's and testers' accounts (ADMIN_EMAILS, PRO_EMAILS)">${v.all ? "showing" : "hiding"} internal</a></div></div>
 ${body}
 </main></div></body></html>`;
 }
@@ -258,16 +266,14 @@ function usersPage(v: View): string {
   const r = v.report;
   return card(`${r.users.length} users`, table(["user", "plan", "Google permissions", "signed up", "last seen", ["calls", "r"], ["errors", "r"], ["applied", "r"], "app"],
     r.users.map((u) => [userLink(v, u.id, u.email), planBadge(u.plan, u.paying), perms(u.google_scopes, u.connected, { short: true }),
-      when(u.created_at), when(u.last_seen_at), num(u.calls), bad(u.errors), num(u.applied), `<span class="muted">${esc(u.client ?? "—")}</span>`])),
-    `<small>sorted by last seen${v.all ? "" : " · internal hidden"}</small>`);
+      when(u.created_at), when(u.last_seen_at), num(u.calls), bad(u.errors), num(u.applied), `<span class="muted">${esc(u.client ?? "—")}</span>`]), "No users.", "users"),
+    `<small>by last seen</small>`);
 }
 
-function userPage(x: UserDetail, v: View, internal: boolean): string {
+function userPage(x: UserDetail, v: View): string {
   const u = x.user;
   const stripe = u.stripe_customer ? `<a href="https://dashboard.stripe.com/customers/${encodeURIComponent(u.stripe_customer)}" target="_blank" rel="noopener"><code>${esc(u.stripe_customer)}</code> ↗</a>` : `<span class="dim">—</span>`;
-  return `<div class="crumb"><a href="/users${qs(v)}">Users</a> /</div>
-<h1 style="margin:0 0 16px">${esc(u.email)} ${planBadge(u.plan, Boolean(u.stripe_sub))} ${internal ? `<span class="chip">internal</span>` : ""}</h1>
-<div class="stats">
+  return `<div class="stats">
 ${stat("Calls", num(x.totals.calls), `avg ${x.totals.avg_ms} ms`)}
 ${stat("Errors", x.totals.errors ? `<span class="n bad">${x.totals.errors}</span>` : num(0), x.totals.calls ? `${((100 * x.totals.errors) / x.totals.calls).toFixed(1)}%` : "")}
 ${stat("Proposals", num(x.proposals.length), `${x.proposals.filter((p) => p.status === "applied").length} applied`)}

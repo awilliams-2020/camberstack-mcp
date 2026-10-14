@@ -1292,7 +1292,7 @@ describe("OAuth + MCP end to end", () => {
     expect((await fetch(`${admin}/revenue`, { headers: { cookie } })).status).toBe(200);
     expect((await fetch(`${admin}/users`, { redirect: "manual" })).status).toBe(302);  // every page is behind sign-in
     // The operator's own account is internal: hidden unless asked for.
-    const json = await (await fetch(`${admin}/?format=json`, { headers: { cookie } })).json();
+    const json = await (await fetch(`${admin}/?format=json`, { headers: { cookie } })).json();  // still served, just not linked
     expect(json.funnel.all.connected).toBe(0);
     // The admin host serves nothing else from the public site.
     expect((await fetch(`${admin}/privacy`)).status).toBe(404);
