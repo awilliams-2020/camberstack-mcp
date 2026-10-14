@@ -241,7 +241,10 @@ const ga = {
   keyEvents: [] as { name: string; eventName: string; countingMethod: string }[],
   links: [] as { name: string; customerId: string }[],
   failOn: "",
+  /** Writes of this method that answer 503 once before working, like a brief Google outage. */
+  flaky: { method: "", times: 0 },
   async admin(method: string, path: string, body?: any): Promise<any> {
+    if (this.flaky.times && method === this.flaky.method) { this.flaky.times--; throw new Error("Google Analytics API 503: The service is currently unavailable."); }
     if (this.failOn && path.includes(this.failOn) && method !== "GET") throw new Error(`Google Analytics API 400: refused ${this.failOn}`);
     if (method === "GET" && path === "properties/321") return { displayName: "Example", timeZone: "America/New_York", currencyCode: "USD" };
     if (method === "GET" && path.startsWith("properties/321/keyEvents")) return { keyEvents: this.keyEvents };
@@ -791,15 +794,30 @@ describe("OAuth + MCP end to end", () => {
     expect((await call(token, "apply_changes", { proposal_id: u.json.proposal_id })).json.status).toBe("applied");
     expect([ga.keyEvents.length, ga.links.length]).toEqual([0, 0]);
 
+    // An Ads account this login can't reach is refused when proposing, since GA4 has no dry run.
+    const unreachable = await call(token, "propose_analytics_changes", { changes: [{ type: "link_google_ads", property_id: "321", customer_id: "123-456-7890" }] });
+    expect(unreachable.text).toContain("isn't one this login can reach");
+
     // The link fails at write: the key event marked before it is rolled back.
     const p2 = await call(token, "propose_analytics_changes", { changes: [
       { type: "mark_key_event", property_id: "321", event_name: "sign_up" },
-      { type: "link_google_ads", property_id: "321", customer_id: "222-333-4444" }] });
+      { type: "link_google_ads", property_id: "321", customer_id: "111-222-3333" }] });
     ga.failOn = "googleAdsLinks";
     const a2 = (await call(token, "apply_changes", { proposal_id: p2.json.proposal_id })).json;
     ga.failOn = "";
     expect(a2.status).toBe("failed");
     expect(a2.results.map((r: any) => r.error)).toEqual(["rolled back", expect.stringContaining("refused googleAdsLinks")]);
+    expect(ga.keyEvents).toHaveLength(0);
+
+    // A brief outage on a delete is retried; on a create it isn't (Google may have made it), so that apply fails cleanly.
+    const p3 = await call(token, "propose_analytics_changes", { changes: [{ type: "mark_key_event", property_id: "321", event_name: "purchase" }] });
+    ga.flaky = { method: "POST", times: 1 };
+    expect((await call(token, "apply_changes", { proposal_id: p3.json.proposal_id })).json.status).toBe("failed");
+    const p4 = await call(token, "propose_analytics_changes", { changes: [{ type: "mark_key_event", property_id: "321", event_name: "purchase" }] });
+    await call(token, "apply_changes", { proposal_id: p4.json.proposal_id });
+    const u4 = await call(token, "undo_changes", { proposal_id: p4.json.proposal_id });
+    ga.flaky = { method: "DELETE", times: 1 };
+    expect((await call(token, "apply_changes", { proposal_id: u4.json.proposal_id })).json.status).toBe("applied");
     expect(ga.keyEvents).toHaveLength(0);
 
     const h = (await call(token, "change_history", { customer_id: "ga4" })).json;

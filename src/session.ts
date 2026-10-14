@@ -12,7 +12,7 @@ import {
 } from "./google.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError, accountsLabel } from "./plans.js";
 import { AnalyticsClient, DemoAnalytics, routedAnalytics, type Analytics } from "./ga4.js";
-import { GA_TARGET, GaChangeSchema, gaInverseAfterApply, gaNoteAfterApply, resolveGaChange, writeGa, type GaChange, type GaResolved } from "./ga4-changes.js";
+import { GA_TARGET, GaChangeSchema, gaInverseAfterApply, gaNoteAfterApply, resolveGaChange, writeGa, type GaChange, type GaOp, type GaResolved } from "./ga4-changes.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
 import {
   ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, pendingOf, resolveChange, summarize,
@@ -718,6 +718,13 @@ export class UserSession {
     const ga = customerId === GA_TARGET;
     const a = ga ? { customerId: GA_TARGET, loginCustomerId: null } : await this.account(customerId);
     const changes: AnyChange[] = rawChanges.map((c) => (ga ? GaChangeSchema : ChangeSchema).parse(c));
+    // GA4 has no dry run, so a Google Ads id this login can't reach would only fail at apply: check it now.
+    for (const c of changes) {
+      if (c.type !== "link_google_ads") continue;
+      if (!(await this.accounts()).some((x) => x.customerId === c.customer_id && !isDemo(x.customerId))) {
+        throw new Error(`Google Ads account ${c.customer_id} isn't one this login can reach (list_accounts shows them), so it can't be linked.`);
+      }
+    }
     const count = changes.reduce((n, c) => n + (c.type === "add_negative_keywords" || c.type === "add_keywords" ? c.keywords.length : 1), 0);
     if (count > MAX_CHANGES) throw new Error(`At most ${MAX_CHANGES} changes per proposal (got ${count}). Split it.`);
     const pending = pendingOf(changes as Change[]);
@@ -826,17 +833,23 @@ export class UserSession {
 
   /** Read what a change would do against the live account (Google Ads) or property (Google Analytics). */
   private resolve(target: string, login: string | null, c: AnyChange, pending: ReturnType<typeof pendingOf>): Promise<AnyResolved> {
-    return target === GA_TARGET ? resolveGaChange(this.ga, c as GaChange) : resolveChange(this.ads, target, login, c as Change, pending);
+    // Only reads, so a brief Google outage is retried once.
+    return retryTransient<AnyResolved>(() => (target === GA_TARGET ? resolveGaChange(this.ga, c as GaChange)
+      : resolveChange(this.ads, target, login, c as Change, pending)), true);
   }
 
   /** Write a resolved change; `validateOnly` is Google Ads' dry run (GA4 has none: re-resolving is its check). */
   private async write(target: string, login: string | null, r: AnyResolved, validateOnly = false): Promise<{ inverse?: AnyChange; note?: string }> {
+    // A write that creates nothing (a status change, a delete) is safe to repeat after a brief outage; a create isn't,
+    // since Google may have made it before failing to answer.
+    const repeatable = !JSON.stringify(r.operations).includes('"create"') && !(r.service === "ga4" && r.operations.some((o) => o.method === "POST"));
     if (r.service === "ga4") {
       if (validateOnly) return {};
-      const res = await writeGa(this.ga, r.operations);
+      const res = await retryTransient(() => writeGa(this.ga, r.operations as GaOp[]), repeatable);
       return { inverse: gaInverseAfterApply(r, res), note: gaNoteAfterApply(res) };
     }
-    const res = await this.ads.mutate(target, r.service, r.operations, { loginCustomerId: login, ...(validateOnly ? { validateOnly: true } : {}) });
+    const res = await retryTransient(() => this.ads.mutate(target, (r as ResolvedChange).service, r.operations,
+      { loginCustomerId: login, ...(validateOnly ? { validateOnly: true } : {}) }), validateOnly || repeatable);
     if (validateOnly) return {};
     return { inverse: inverseAfterApply(r, (res.results ?? []).map((n) => n.resourceName).filter((n): n is string => !!n)) };
   }
@@ -1054,6 +1067,17 @@ export function expandDuring(query: string): { query: string; rewrote: string[] 
     return r;
   });
   return { query: q, rewrote };
+}
+
+/** Google's "try again" answers (503 UNAVAILABLE): retried once, after a second, when `safe` says repeating can't duplicate anything. */
+async function retryTransient<T>(fn: () => Promise<T>, safe: boolean): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!safe || !/\b503\b|UNAVAILABLE/.test((e as Error).message)) throw e;
+    await new Promise((r) => setTimeout(r, 1000));
+    return fn();
+  }
 }
 
 /** Two decimals, for money and fractional conversions. */
