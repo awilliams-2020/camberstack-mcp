@@ -69,9 +69,15 @@ class FakeAds {
     if (q.includes("FROM conversion_action WHERE conversion_action.name")) return [];
     if (q.includes("FROM conversion_action WHERE conversion_action.id")) return [{ conversionAction: { name: "Signup", countingType: "MANY_PER_CLICK" } }];
     if (q.includes("campaign.name = ")) return q.includes("campaign.name = 'Search'") ? [{ campaign: { id: "10" } }] : [];
+    if (q.includes("FROM bidding_strategy WHERE")) {
+      return this.portfolio && q.includes(`bidding_strategy.id = ${this.portfolio.id}`)
+        ? [{ biddingStrategy: { name: "Shared tCPA", type: "TARGET_CPA", targetCpa: { targetCpaMicros: this.portfolio.cpa } } }] : [];
+    }
+    if (q.includes("WHERE campaign.bidding_strategy = ")) return [{ campaign: { name: "Search" } }, { campaign: { name: "Brand" } }];
     if (q.includes("FROM campaign")) {
       return [{ campaign: { id: "10", name: "Search", status: this.campaignStatus, endDateTime: this.campaignEnd, advertisingChannelType: "SEARCH",
-          biddingStrategyType: "MANUAL_CPC", manualCpc: { enhancedCpcEnabled: false }, finalUrlSuffix: "" },
+          ...(this.portfolio ? { biddingStrategyType: "TARGET_CPA", biddingStrategy: `customers/1112223333/biddingStrategies/${this.portfolio.id}` }
+            : { biddingStrategyType: "MANUAL_CPC", manualCpc: { enhancedCpcEnabled: false } }), finalUrlSuffix: "" },
         campaignBudget: { resourceName: "customers/1112223333/campaignBudgets/99", amountMicros: "20000000", explicitlyShared: false },
         metrics: { costMicros: "200000000", clicks: "80", impressions: "900", conversions: 4, conversionsValue: 400 } }];
     }
@@ -104,6 +110,8 @@ class FakeAds {
     } }] };
   }
   goals: Record<string, boolean> = { PURCHASE: true, SIGNUP: true };
+  /** When set, campaign 10 is on this shared (portfolio) Target CPA strategy, with campaign "Brand". */
+  portfolio: { id: string; cpa: string } | undefined;
   uploads: { cid: string; conversions: any[] }[] = [];
   agBid = "1000000";
   kwBid: string | undefined;
@@ -1603,6 +1611,29 @@ describe("OAuth + MCP end to end", () => {
     expect(stratUndo.summary).toContain("back to manual CPC");
     await call(token, "apply_changes", { proposal_id: stratUndo.proposal_id });
     expect(last().operations[0]).toMatchObject({ update: { manualCpc: { enhancedCpcEnabled: false } }, updateMask: "manual_cpc.enhanced_cpc_enabled" });
+
+    // On a shared (portfolio) strategy: one campaign moves off it, and undo puts it back on.
+    ads.portfolio = { id: "88", cpa: "30000000" };
+    const off = await propose([{ type: "set_bidding_strategy", campaign_id: "10", strategy: "MAXIMIZE_CLICKS" }]);
+    expect(off.summary).toContain('from shared strategy "Shared tCPA" to maximize clicks (this campaign only; 1 other campaign stays on "Shared tCPA")');
+    const offUndo = await applyUndo(off.proposal_id);
+    expect(offUndo.summary).toContain('back to shared strategy "Shared tCPA"');
+    await call(token, "apply_changes", { proposal_id: offUndo.proposal_id });
+    expect(last().operations[0]).toEqual({ update: { resourceName: "customers/1112223333/campaigns/10", biddingStrategy: "customers/1112223333/biddingStrategies/88" }, updateMask: "bidding_strategy" });
+    // The shared strategy itself: every campaign on it is named, and undo restores the old target.
+    const sh = await propose([{ type: "set_shared_bid_strategy", bidding_strategy_id: "88", target_cpa: 40 }]);
+    expect(sh.summary).toContain('Change shared bid strategy "Shared tCPA": target CPA 30.00 → 40.00 ⚠ applies to every campaign on it (2): "Search", "Brand"');
+    await call(token, "apply_changes", { proposal_id: sh.proposal_id });
+    expect(last()).toMatchObject({ service: "biddingStrategies", operations: [{ update: { resourceName: "customers/1112223333/biddingStrategies/88",
+      targetCpa: { targetCpaMicros: "40000000" } }, updateMask: "target_cpa.target_cpa_micros" }] });
+    const shUndo = (await call(token, "undo_changes", { proposal_id: sh.proposal_id })).json;
+    expect(shUndo.summary).toContain('Set shared bid strategy "Shared tCPA" back to target CPA 30.00');
+    await call(token, "apply_changes", { proposal_id: shUndo.proposal_id });
+    expect(last().operations[0]).toEqual({ update: { resourceName: "customers/1112223333/biddingStrategies/88", targetCpa: { targetCpaMicros: "30000000" } },
+      updateMask: "target_cpa.target_cpa_micros" });
+    await expect(propose([{ type: "set_shared_bid_strategy", bidding_strategy_id: "88", target_roas: 4 }])).rejects.toThrow("TARGET_CPA, which has no target_roas. It takes: target_cpa, max_cpc_ceiling");
+    await expect(propose([{ type: "set_shared_bid_strategy", bidding_strategy_id: "99", target_cpa: 4 }])).rejects.toThrow("not found");
+    ads.portfolio = undefined;
 
     const sfx = await propose([{ type: "set_url_suffix", campaign_id: "10", suffix: "?utm_source=google&utm_term={keyword}" }]);
     expect(sfx.summary).toContain('from none to "utm_source=google&utm_term={keyword}"');

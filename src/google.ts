@@ -177,6 +177,9 @@ function adsErrorFix(code: string, message: string, field: string): string | nul
         + "(or FROM campaign if it's a campaign-level resource).";
     case "PROHIBITED_SEGMENT_IN_SELECT_OR_WHERE_CLAUSE":
       return "that resource or segment can't be combined with this FROM: query it directly, in its own query.";
+    case "MUTATE_NOT_ALLOWED":
+      return "Google doesn't allow this change through the API (some legacy or system-managed items are locked, and some campaign types "
+        + "can't be created). Do it in Google Ads. For a locked shared bid strategy, set_bidding_strategy can still move campaigns off it.";
     case "UNRECOGNIZED_FIELD":
       if (/campaign\.(start|end)_date'/.test(message)) return "campaign dates are campaign.start_date_time and campaign.end_date_time.";
       if (/'recommendation\.impact\./.test(message)) {
