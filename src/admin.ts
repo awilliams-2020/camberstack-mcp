@@ -11,6 +11,7 @@ import { buildReport, permissionLabels, SCOPE_LABELS, userDetail, type Report, t
 import { now } from "./db.js";
 import { esc } from "./pages.js";
 import { PRO_PRICE_LABEL } from "./plans.js";
+import { AUDIENCES, render as renderAnnouncement, type Announcement, type Announcements, type Audience } from "./announce.js";
 
 export interface AdminDeps {
   db: DB;
@@ -21,6 +22,8 @@ export interface AdminDeps {
   adminEmails: Set<string>;
   /** Hidden from the numbers by default (operator + testers); the page can include them. */
   internalEmails: Set<string>;
+  /** Announcement emails (announce.ts); unset = no Announcements page. */
+  announcements?: Announcements;
   fetch?: typeof fetch;
 }
 
@@ -82,6 +85,61 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
       d.internalEmails.has(u.user.email.toLowerCase()) ? ` <span class="chip">internal</span>` : ""}`;
     res.type("html").send(shell("/users", who, v, userPage(u, v), heading));
   });
+  const ann = d.announcements;
+  if (ann) {
+    const form = express.urlencoded({ extended: false, limit: "64kb" });
+    // POSTs must come from this site's own pages: the cookie is SameSite=Lax, and this checks the Origin as well.
+    const post = (path: string, h: (req: Request, res: express.Response, who: string) => unknown) =>
+      site.post(path, form, async (req, res) => {
+        const who = email(req);
+        if (!who) { res.redirect(303, "/login"); return; }
+        if (req.get("origin") !== new URL(d.adminUrl!).origin) { res.status(403).send("Cross-site request refused."); return; }
+        try { await h(req, res, who); } catch (e) { res.status(400).send(esc((e as Error).message)); }
+      });
+    const fields = (req: Request) => {
+      const b = req.body as Record<string, string>;
+      const audience = (Object.keys(AUDIENCES).includes(b.audience ?? "") ? b.audience : "all") as Audience;
+      if (!b.subject?.trim() || !b.body?.trim()) throw new Error("Subject and message are both required.");
+      return { subject: b.subject, body: b.body, audience };
+    };
+    site.get("/announcements", (req, res) => {
+      const who = email(req);
+      if (!who) { res.redirect(302, "/login"); return; }
+      const v = view(req);
+      res.type("html").send(shell("/announcements", who, v, announcementsPage(ann.list(), ann.blocker())));
+    });
+    site.get("/announcements/:id", (req, res) => {
+      const who = email(req);
+      if (!who) { res.redirect(302, "/login"); return; }
+      const a = ann.get(req.params.id);
+      if (!a) { res.status(404).send("No such announcement."); return; }
+      const v = view(req);
+      const heading = `<a class="muted" href="/announcements">Announcements</a> <span class="dim">/</span> ${esc(a.subject)}`;
+      res.type("html").send(shell("/announcements", who, v, announcementPage(a, ann.recipients(a), ann.list().find((x) => x.id === a.id)?.sent ?? 0,
+        ann.blocker(), who, String(req.query.note ?? "")), heading));
+    });
+    post("/announcements", (req, res, who) => res.redirect(303, `/announcements/${ann.create({ ...fields(req), by: who })}`));
+    post("/announcements/:id", (req, res) => {
+      if (!ann.update(String(req.params.id), fields(req))) throw new Error("Only a draft can be edited.");
+      res.redirect(303, `/announcements/${req.params.id}?note=saved`);
+    });
+    post("/announcements/:id/test", async (req, res, who) => {
+      await ann.sendTest(String(req.params.id), who);
+      res.redirect(303, `/announcements/${req.params.id}?note=test`);
+    });
+    post("/announcements/:id/send", (req, res) => {
+      const a = ann.get(String(req.params.id));
+      // The count the page showed must still hold: a stale tab can't send to a different list than the one confirmed.
+      if (!a || String(ann.recipients(a).length) !== (req.body as Record<string, string>).count) throw new Error("The recipient list changed; reload the page and check it again.");
+      if (!ann.start(a.id)) throw new Error(ann.blocker() ?? "Only a draft can be sent.");
+      void ann.process();
+      res.redirect(303, `/announcements/${a.id}?note=sending`);
+    });
+    post("/announcements/:id/delete", (req, res) => {
+      if (!ann.delete(String(req.params.id))) throw new Error("Only a draft can be deleted.");
+      res.redirect(303, "/announcements");
+    });
+  }
   site.use((_req, res) => { res.status(404).send("Not found."); });
 
   app.use((req, res, next) => (req.get("host") === host ? site(req, res, next) : next()));
@@ -153,6 +211,7 @@ function shell(path: string, who: string, v: View, body: string, heading?: strin
     ["/users", "Users", String(v.report.funnel.all.connected)],
     ["/activity", "Activity", errs ? `<b class="bad" title="${errs} tool errors in this range">${errs}</b>` : ""],
     ["/revenue", "Revenue", String(v.report.funnel.all.paid || "")],
+    ["/announcements", "Announcements", ""],
   ];
   const title = nav.find(([p]) => p === path)?.[1] ?? "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -182,7 +241,7 @@ h1{font-size:18px;font-weight:600;margin:0;letter-spacing:-.2px}h2{font-size:13p
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border:1px solid var(--line);border-radius:8px;background:var(--panel);margin-bottom:16px;overflow:hidden}
 .stat{padding:14px 16px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);margin:0 -1px -1px 0}
 .stat span{display:block;color:var(--muted);font-size:12px}.stat b{display:block;font:500 22px/1.3 ui-monospace,Menlo,monospace;letter-spacing:-.5px;margin-top:4px}
-.stat b .n{font-size:inherit}.stat small{color:var(--dim);font-size:11px}
+.stat b .n{font-size:inherit}.stat b span.chip{display:inline-block;font-size:13px;margin-top:6px}.stat small{color:var(--dim);font-size:11px}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;margin-bottom:16px}.grid2>.card{margin-bottom:0}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:16px;min-width:0}
 .card>header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
@@ -215,7 +274,7 @@ table.users td:nth-child(5){margin-left:auto;color:var(--dim);font-size:12px}}
   `<a class="${p === path ? "on" : ""}" href="${p}${qs(v)}">${l}<em>${c}</em></a>`).join("")}</nav>
 <div class="ext"><span>Links</span>${EXTERNAL.map(([l, href]) => `<a href="${href}" target="_blank" rel="noopener">${l} <i>↗</i></a>`).join("")}</div>
 <div class="who"><span title="${esc(who)}">${esc(who)}</span><form method="post" action="/logout"><button>Sign out</button></form></div></aside>
-<main><div class="top"><h1>${heading ?? title}</h1><div class="tools">
+<main><div class="top"><h1>${heading ?? title}</h1><div class="tools"${path === "/announcements" ? ' style="display:none"' : ""}>
 <span class="seg">${[1, 7, 30, 90].map((d) => `<a class="${d === v.days ? "on" : ""}" href="?${qs(v, { days: d }).slice(1)}">${d === 1 ? "24h" : `${d}d`}</a>`).join("")}</span>
 <a class="toggle ${v.all ? "on" : ""}" href="${qs(v, { all: !v.all })}" title="Include the operator's and testers' accounts (ADMIN_EMAILS, PRO_EMAILS)">${v.all ? "showing" : "hiding"} internal</a></div></div>
 ${body}
@@ -347,3 +406,61 @@ ${card("Ad conversions", `<dl><dt>Recorded</dt><dd>${num(r.adConversions?.record
 </div>
 <p class="dim">Usage comes from our own database; page visits are in Matomo (site 7).</p>`;
 }
+
+// ---------------------------------------------------------------- announcements
+
+const statusChip = (s: Announcement["status"]) => `<span class="chip ${s === "sent" ? "okc" : s === "sending" ? "pro" : ""}">${s}</span>`;
+
+function composeForm(action: string, a?: Pick<Announcement, "subject" | "body" | "audience">, submit = "Save draft"): string {
+  return `<form method="post" action="${action}" class="compose">
+<label>Subject<input name="subject" required maxlength="150" value="${esc(a?.subject ?? "")}"></label>
+<label>Send to<select name="audience">${Object.entries(AUDIENCES).map(([k, l]) => `<option value="${k}"${a?.audience === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+<label>Message<textarea name="body" required rows="12" placeholder="Hi,&#10;&#10;Blank line between paragraphs. Lines starting &quot;- &quot; are bullets. **bold**, [link text](https://…).">${esc(a?.body ?? "")}</textarea></label>
+<p class="dim" style="margin:0">Every email ends with an unsubscribe link and footer. Nobody who unsubscribed, and no internal account, gets it.</p>
+<button class="primary">${submit}</button></form>`;
+}
+
+function announcementsPage(list: (Announcement & { sent: number })[], blocker: string | null): string {
+  return `${blocker ? `<p class="warn">${esc(blocker)}</p>` : ""}
+${card("Announcements", table(["subject", "to", "status", ["sent", "r"], "created"], list.map((a) => [
+    `<a href="/announcements/${a.id}">${esc(a.subject)}</a>`, AUDIENCES[a.audience], statusChip(a.status), `<span class="n">${a.sent}</span>`, when(a.created_at)]),
+    "None yet."))}
+${card("New announcement", `<div class="pad">${composeForm("/announcements")}</div>`)}
+${COMPOSE_CSS}`;
+}
+
+function announcementPage(a: Announcement, to: { email: string; plan: string }[], sent: number, blocker: string | null, who: string, note: string): string {
+  const m = renderAnnouncement(a, false);
+  const notes: Record<string, string> = { saved: "Saved.", test: `Test sent to ${esc(who)}.`, sending: "Sending: about one email a second. Reload to follow along." };
+  const actions = a.status !== "draft" ? "" : `<div class="actions">
+<form method="post" action="/announcements/${a.id}/test"><button>Send a test to ${esc(who)}</button></form>
+<form method="post" action="/announcements/${a.id}/send" data-confirm="${esc(`Send “${a.subject}” to ${to.length} ${to.length === 1 ? "person" : "people"}? This can't be undone.`)}" onsubmit="return confirm(this.dataset.confirm)">
+<input type="hidden" name="count" value="${to.length}"><button class="primary"${blocker || !to.length ? " disabled" : ""}>Send to ${to.length} ${to.length === 1 ? "person" : "people"}</button></form>
+<form method="post" action="/announcements/${a.id}/delete" data-confirm="Delete this draft?" onsubmit="return confirm(this.dataset.confirm)"><button>Delete draft</button></form></div>
+${blocker ? `<p class="warn">${esc(blocker)}</p>` : ""}`;
+  return `${note && notes[note] ? `<p class="okmsg">${notes[note]}</p>` : ""}
+<div class="stats">
+${stat("Status", statusChip(a.status))}
+${stat("Audience", esc(AUDIENCES[a.audience]))}
+${stat(a.status === "draft" ? "Would go to" : "Still to send", `<span class="n">${to.length}</span>`)}
+${stat("Sent", `<span class="n">${sent}</span>`, a.sent_at ? `finished ${ago(a.sent_at)}` : a.started_at ? `started ${ago(a.started_at)}` : "")}
+</div>
+${actions}
+<div class="grid2">
+${card("Preview", `<div class="pad"><p class="dim" style="margin:0 0 4px">Subject</p><p style="margin:0 0 16px;font-weight:600">${esc(m.subject)}</p>
+<div class="mail">${m.html}<hr><p class="dim" style="font-size:12px">You're getting this because you connected Camberstack (camberstack.io) to Google Ads. … Unsubscribe</p></div></div>`)}
+${a.status === "draft" ? card("Edit", `<div class="pad">${composeForm(`/announcements/${a.id}`, a)}</div>`) : card("Recipients still to send", table(["email", "plan"], to.map((u) => [esc(u.email), esc(u.plan)]), "Everyone has it."))}
+</div>
+${a.status === "draft" ? card(`Recipients (${to.length})`, table(["email", "plan"], to.map((u) => [esc(u.email), esc(u.plan)]), "Nobody matches this audience.")) : ""}
+${COMPOSE_CSS}`;
+}
+
+const COMPOSE_CSS = `<style>
+.compose{display:flex;flex-direction:column;gap:12px}.compose label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}
+.compose input,.compose select,.compose textarea{font:13px/1.5 inherit;font-family:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.compose textarea{font-family:ui-monospace,Menlo,monospace;font-size:12px;resize:vertical}
+button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg);padding:6px 14px;align-self:flex-start}button[disabled]{opacity:.4;cursor:not-allowed}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}.actions form{margin:0}
+.warn{border:1px solid var(--bad);color:var(--bad);border-radius:6px;padding:8px 12px}.okmsg{border:1px solid var(--ok);color:var(--ok);border-radius:6px;padding:8px 12px}
+.mail{background:#fff;color:#1c1b19;border-radius:6px;padding:16px;font-size:14px}.mail a{color:#1f5f4a;text-decoration:underline}.mail hr{border:0;border-top:1px solid #ddd}
+</style>`;

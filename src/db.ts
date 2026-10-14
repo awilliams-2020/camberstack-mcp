@@ -143,6 +143,20 @@ CREATE TABLE IF NOT EXISTS email_log (
   PRIMARY KEY (user_id, kind)
 );
 
+-- Announcement emails the operator writes and sends from the admin (announce.ts). Who got one is in
+-- email_log, kind 'announce:<id>', so a send that stops halfway resumes without sending anyone twice.
+CREATE TABLE IF NOT EXISTS announcements (
+  id          TEXT PRIMARY KEY,
+  subject     TEXT NOT NULL,
+  body        TEXT NOT NULL,     -- plain text: paragraphs, "- " bullets, **bold**, [text](https://…) links
+  audience    TEXT NOT NULL,     -- all | free | pro
+  status      TEXT NOT NULL,     -- draft | sending | sent
+  created_by  TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  started_at  INTEGER,
+  sent_at     INTEGER
+);
+
 -- Each user's copy of the demo account (demo.ts): only what their changes altered, as JSON.
 CREATE TABLE IF NOT EXISTS demo_state (
   user_id     TEXT PRIMARY KEY,

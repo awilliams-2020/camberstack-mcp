@@ -86,7 +86,8 @@ export function loadConfig(): Config {
     openaiAppsChallenge: process.env.OPENAI_APPS_CHALLENGE || undefined,
     ga4MeasurementId: /^G-[A-Z0-9]{4,20}$/.test(process.env.GA4_MEASUREMENT_ID ?? "") ? process.env.GA4_MEASUREMENT_ID : undefined,
     mail: process.env.RESEND_API_KEY
-      ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" }
+      ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io",
+        postalAddress: process.env.MAIL_POSTAL_ADDRESS || undefined }
       : undefined,
     conversions: ["CONV_ADS_CUSTOMER_ID", "CONV_ADS_ACTION_ID", "CONV_ADS_CLIENT_ID", "CONV_ADS_CLIENT_SECRET", "CONV_ADS_REFRESH_TOKEN", "CONV_ADS_DEVELOPER_TOKEN"]
       .every((k) => process.env[k])

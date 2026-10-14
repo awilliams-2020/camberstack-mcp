@@ -23,7 +23,11 @@ import { deriveKey, safeEqual, sign } from "./crypto.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL } from "./plans.js";
 import { DEMO_CID } from "./demo.js";
 
-export interface MailConfig { apiKey: string; from: string; replyTo: string }
+export interface MailConfig {
+  apiKey: string; from: string; replyTo: string;
+  /** MAIL_POSTAL_ADDRESS: a mailing address for the footer of announcements (marketing mail; US CAN-SPAM wants one). */
+  postalAddress?: string;
+}
 
 export interface LifecycleDeps {
   db: DB;
@@ -152,9 +156,14 @@ export class Lifecycle {
   }
 
   /** `once`: Resend's idempotency key (kept 24h), so a send that timed out after Resend took it isn't sent again an hour later. */
-  private async send(to: string, m: { subject: string; text: string; html: string }, userId: string, once?: string): Promise<void> {
+  /** An announcement (announce.ts): the same footer and unsubscribe link, plus the postal address. */
+  sendAnnouncement(to: string, m: { subject: string; text: string; html: string }, userId: string, once?: string): Promise<void> {
+    return this.send(to, m, userId, once, this.d.mail?.postalAddress);
+  }
+
+  private async send(to: string, m: { subject: string; text: string; html: string }, userId: string, once?: string, address?: string): Promise<void> {
     const unsub = this.unsubscribeUrl(userId);
-    const footer = `You're getting this because you connected Camberstack (camberstack.io) to Google Ads.`;
+    const footer = `You're getting this because you connected Camberstack (camberstack.io) to Google Ads.${address ? ` Camberstack, ${address}.` : ""}`;
     const res = await (this.d.fetch ?? fetch)("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${this.d.mail!.apiKey}`, "Content-Type": "application/json", ...(once ? { "Idempotency-Key": once } : {}) },

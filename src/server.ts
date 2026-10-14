@@ -21,6 +21,7 @@ import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
+import { Announcements } from "./announce.js";
 import { CHANGELOG } from "./changelog.js";
 import { aboutPage, changelogPage, docsPage, errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, searchConsolePage, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
 import { indexNowKey, pageDates, pingIndexNow } from "./lastmod.js";
@@ -67,6 +68,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     signingKey: lifecycleSigningKey(cfg.encryptionKey),
     upgradeLink: (userId) => billing.link("upgrade", userId),
   });
+  const announcements = new Announcements({ db, lifecycle, internalEmails, canSend: !!cfg.mail, postalAddress: cfg.mail?.postalAddress });
   const info = (title: string, body: string) => infoPage(cfg.baseUrl, title, body);
 
   const provider = new CamberstackProvider(db, {
@@ -98,7 +100,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   // Before every public route: the admin host serves only the admin site.
   const admin = mountAdmin(app, {
     db, google: cfg.google, baseUrl: cfg.baseUrl, adminUrl: cfg.adminUrl, adminEmails: cfg.adminEmails,
-    internalEmails, fetch: overrides.fetch,
+    internalEmails, announcements, fetch: overrides.fetch,
   });
 
   // Gemini (Spark custom apps) registers asking for client_secret_post, takes the secret, then its
@@ -341,6 +343,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     void every(HOUR, "billing sweep", () => billing.sweep())();  // also at boot: a restart mustn't delay a downgrade an hour
     every(HOUR, "lifecycle", () => lifecycle.run());
     every(60_000, "transactional mail", () => lifecycle.transactional());
+    every(60_000, "announcements", () => announcements.process());
     every(HOUR, "ad conversions", () => adConversions.flush());
     every(HOUR, "relay conversions", () => relay.flush());
     // Pages new or changed since the last boot. Production only: a dev or test origin isn't ours to submit.
