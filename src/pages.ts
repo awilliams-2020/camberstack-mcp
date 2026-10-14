@@ -929,7 +929,8 @@ export function changelogPage(baseUrl: string, releases: Release[]): string {
     title: "Camberstack changelog: what's new in the Google Ads connector",
     description: "Every Camberstack release, newest first: new tools, campaign types and fixes in the Google Ads and Search Console connector for Claude and ChatGPT.",
     body: `<h1>Changelog</h1>
-<p class="muted">What's new in Camberstack, newest first. Fixes apply on your next request, with nothing to install. New tools appear once your AI app reloads Camberstack's tool list; in some apps that means reconnecting it.</p>
+<p class="muted">What's new in Camberstack, newest first. Fixes and improvements apply on your next request, with nothing to install.</p>
+<p class="muted"><strong>Seeing a new tool</strong> needs your AI app to reload Camberstack's tool list. In <strong>ChatGPT</strong>: Settings → Connectors → Camberstack → Refresh. In <strong>Claude</strong>: start a new chat; if a new tool still isn't there, it should show up within a day (on Claude's phone and desktop apps, removing and re-adding the connector is quicker).</p>
 ${releases.map((r) => `<section id="v${r.version}">
 <h2>${r.version} <span class="muted" style="font-size:15px;font-weight:400">${r.date}</span></h2>
 <p>${md(r.summary)}</p>${r.items?.length ? `<ul>${r.items.map((i) => `<li>${md(i)}</li>`).join("")}</ul>` : ""}
