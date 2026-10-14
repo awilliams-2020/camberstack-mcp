@@ -116,7 +116,7 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
       const v = view(req);
       const heading = `<a class="muted" href="/announcements">Announcements</a> <span class="dim">/</span> ${esc(a.subject)}`;
       res.type("html").send(shell("/announcements", who, v, announcementPage(a, ann.recipients(a), ann.list().find((x) => x.id === a.id)?.sent ?? 0,
-        ann.blocker(), who, String(req.query.note ?? "")), heading));
+        ann.blocker(), who, String(req.query.note ?? ""), ann.salesPitch(a)), heading));
     });
     post("/announcements", (req, res, who) => res.redirect(303, `/announcements/${ann.create({ ...fields(req), by: who })}`));
     post("/announcements/:id", (req, res) => {
@@ -416,7 +416,7 @@ function composeForm(action: string, a?: Pick<Announcement, "subject" | "body" |
 <label>Subject<input name="subject" required maxlength="150" value="${esc(a?.subject ?? "")}"></label>
 <label>Send to<select name="audience">${Object.entries(AUDIENCES).map(([k, l]) => `<option value="${k}"${a?.audience === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>
 <label>Message<textarea name="body" required rows="12" placeholder="Hi,&#10;&#10;Blank line between paragraphs. Lines starting &quot;- &quot; are bullets. **bold**, [link text](https://…).">${esc(a?.body ?? "")}</textarea></label>
-<p class="dim" style="margin:0">Every email ends with an unsubscribe link and footer. Nobody who unsubscribed, and no internal account, gets it.</p>
+<p class="dim" style="margin:0">Write it as an update about their account: what changed, at the top. No upgrade pitch, offers or prices: those make it promotional email, which needs a postal address (MAIL_POSTAL_ADDRESS). Every email ends with an unsubscribe link; nobody who unsubscribed, and no internal account, gets it.</p>
 <button class="primary">${submit}</button></form>`;
 }
 
@@ -429,7 +429,7 @@ ${card("New announcement", `<div class="pad">${composeForm("/announcements")}</d
 ${COMPOSE_CSS}`;
 }
 
-function announcementPage(a: Announcement, to: { email: string; plan: string }[], sent: number, blocker: string | null, who: string, note: string): string {
+function announcementPage(a: Announcement, to: { email: string; plan: string }[], sent: number, blocker: string | null, who: string, note: string, pitch: string[]): string {
   const m = renderAnnouncement(a, false);
   const notes: Record<string, string> = { saved: "Saved.", test: `Test sent to ${esc(who)}.`, sending: "Sending: about one email a second. Reload to follow along." };
   const actions = a.status !== "draft" ? "" : `<div class="actions">
@@ -437,7 +437,8 @@ function announcementPage(a: Announcement, to: { email: string; plan: string }[]
 <form method="post" action="/announcements/${a.id}/send" data-confirm="${esc(`Send “${a.subject}” to ${to.length} ${to.length === 1 ? "person" : "people"}? This can't be undone.`)}" onsubmit="return confirm(this.dataset.confirm)">
 <input type="hidden" name="count" value="${to.length}"><button class="primary"${blocker || !to.length ? " disabled" : ""}>Send to ${to.length} ${to.length === 1 ? "person" : "people"}</button></form>
 <form method="post" action="/announcements/${a.id}/delete" data-confirm="Delete this draft?" onsubmit="return confirm(this.dataset.confirm)"><button>Delete draft</button></form></div>
-${blocker ? `<p class="warn">${esc(blocker)}</p>` : ""}`;
+${blocker ? `<p class="warn">${esc(blocker)}</p>` : ""}
+${pitch.length ? `<p class="caution">This reads like a promotion (${pitch.map((w) => `“${esc(w)}”`).join(", ")} in the subject or opening). Announcements are account updates; reword it, or set MAIL_POSTAL_ADDRESS so the footer carries a postal address.</p>` : ""}`;
   return `${note && notes[note] ? `<p class="okmsg">${notes[note]}</p>` : ""}
 <div class="stats">
 ${stat("Status", statusChip(a.status))}
@@ -461,6 +462,6 @@ const COMPOSE_CSS = `<style>
 .compose textarea{font-family:ui-monospace,Menlo,monospace;font-size:12px;resize:vertical}
 button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg);padding:6px 14px;align-self:flex-start}button[disabled]{opacity:.4;cursor:not-allowed}
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}.actions form{margin:0}
-.warn{border:1px solid var(--bad);color:var(--bad);border-radius:6px;padding:8px 12px}.okmsg{border:1px solid var(--ok);color:var(--ok);border-radius:6px;padding:8px 12px}
+.warn{border:1px solid var(--bad);color:var(--bad);border-radius:6px;padding:8px 12px}.caution{border:1px solid #d97706;color:#d97706;border-radius:6px;padding:8px 12px}.okmsg{border:1px solid var(--ok);color:var(--ok);border-radius:6px;padding:8px 12px}
 .mail{background:#fff;color:#1c1b19;border-radius:6px;padding:16px;font-size:14px}.mail a{color:#1f5f4a;text-decoration:underline}.mail hr{border:0;border-top:1px solid #ddd}
 </style>`;

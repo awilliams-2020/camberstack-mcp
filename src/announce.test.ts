@@ -42,16 +42,18 @@ describe("announcements", () => {
     expect(ann.delete(all)).toBe(false);
   });
 
-  it("won't send to users without a postal address, but a test still works", async () => {
+  it("sends without a postal address (updates, not promotions), and flags a draft that reads like a sales pitch", async () => {
     const { ann, sent, user } = setup();
     user("a", "a@example.com");
-    const id = ann.create({ subject: "News", body: "Hi", audience: "all", by: "me@example.com" });
-    expect(ann.blocker()).toContain("MAIL_POSTAL_ADDRESS");
-    expect(ann.start(id)).toBe(false);
+    const id = ann.create({ subject: "Google Analytics now works in your account", body: "Hi,\n\nAsk about traffic and landing pages.", audience: "all", by: "me@example.com" });
+    expect(ann.blocker()).toBeNull();
+    expect(ann.salesPitch(ann.get(id)!)).toEqual([]);
+    expect(ann.salesPitch({ subject: "Upgrade today", body: "Pro is $15 a month." })).toEqual(["upgrade", "$15"]);
     await ann.sendTest(id, "me@example.com");
-    expect(sent).toHaveLength(1);
-    expect(sent[0].subject).toBe("[TEST] News");
-    expect(ann.get(id)!.status).toBe("draft");
+    expect(sent[0].subject).toBe("[TEST] Google Analytics now works in your account");
+    expect(ann.start(id)).toBe(true);
+    expect(await ann.process()).toBe(1);
+    expect(sent[1].text).not.toContain("Camberstack, ");   // no address configured, none in the footer
   });
 
   it("resumes after a failed send without resending to anyone", async () => {

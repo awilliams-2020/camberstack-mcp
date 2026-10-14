@@ -3,6 +3,11 @@
  * now open to everyone". The users table is the subscriber list, so there's one list and one opt-out: nobody who
  * unsubscribed (email_opt_out) and no internal account (ADMIN_EMAILS, PRO_EMAILS) ever gets one.
  *
+ * They are account and feature updates, not promotions (operator's rule, 2026-10-14): under CAN-SPAM, a message whose
+ * primary purpose is "a change in the terms or features of" an account is a relationship message and needs no postal
+ * address, while a promotion does. So the page warns when a draft reads like a sales pitch (salesPitch), and the
+ * footer carries MAIL_POSTAL_ADDRESS whenever it's set.
+ *
  *   draft    written and previewed; a test goes to the operator only
  *   sending  the every-minute job sends to whoever in the audience hasn't had it, at Resend's pace
  *   sent     nobody left
@@ -33,7 +38,7 @@ export interface AnnounceDeps {
   internalEmails: Set<string>;
   /** False when Resend isn't configured: nothing can be sent. */
   canSend: boolean;
-  /** Set (MAIL_POSTAL_ADDRESS): announcements are marketing mail, so sending to users waits for an address. */
+  /** MAIL_POSTAL_ADDRESS: in the footer when set; only needed if an email ever promotes rather than informs. */
   postalAddress?: string;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -79,12 +84,15 @@ export class Announcements {
 
   /** Why it can't go to users yet, or null when it can. */
   blocker(): string | null {
-    if (!this.d.canSend) return "Email isn't configured (RESEND_API_KEY).";
-    if (!this.d.postalAddress) return "Set MAIL_POSTAL_ADDRESS in .env first: announcements are marketing email, which needs a postal address in the footer.";
-    return null;
+    return this.d.canSend ? null : "Email isn't configured (RESEND_API_KEY).";
   }
 
-  /** A copy to the operator, nothing logged. Works without a postal address, so the draft can be checked first. */
+  /** Words that make a draft read as a promotion, which would need a postal address (MAIL_POSTAL_ADDRESS) in the footer. */
+  salesPitch(a: Pick<Announcement, "subject" | "body">): string[] {
+    return this.d.postalAddress ? [] : salesPitch(a);
+  }
+
+  /** A copy to the operator, nothing logged. */
   async sendTest(id: string, to: string): Promise<void> {
     const a = this.get(id);
     if (!a) throw new Error("No such announcement.");
@@ -131,6 +139,13 @@ export class Announcements {
 }
 
 const clean = (s: string, max: number) => s.replace(/\r\n/g, "\n").trim().slice(0, max);
+
+const PITCH = /\b(upgrade|discount|% off|offer|deal|sale|limited time|buy|subscribe now|pricing|coupon|promo)\b|[$€£]\d[\d.,]*/gi;
+/** The sales-pitch words in a draft's subject or opening paragraph, where the primary purpose is judged. */
+export function salesPitch(a: Pick<Announcement, "subject" | "body">): string[] {
+  const opening = `${a.subject}\n${a.body.split(/\n{2,}/).slice(0, 2).join("\n")}`;
+  return [...new Set((opening.match(PITCH) ?? []).map((w) => w.toLowerCase()))];
+}
 
 /**
  * Subject + body as an email. The body is plain text with a little markup: blank lines between paragraphs,
