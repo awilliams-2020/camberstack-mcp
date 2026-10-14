@@ -278,7 +278,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   tool("apply_changes", {
     title: "Apply an approved proposal",
-    description: "Applies a proposal from propose_changes to the Google Ads account. Only call this after the user has explicitly approved that proposal. Each change is logged and can be reversed with undo_changes.",
+    description: "Applies a proposal from propose_changes to the Google Ads account. Only call this after the user has explicitly approved that proposal. All or nothing: every change is checked with Google first, and if one still fails the ones before it are rolled back. Each change is logged and can be reversed with undo_changes.",
     inputSchema: { proposal_id: z.string().describe("The id returned by propose_changes") },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, ({ proposal_id }: { proposal_id: string }) => session().apply(proposal_id));

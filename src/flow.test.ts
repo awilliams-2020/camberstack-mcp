@@ -104,7 +104,12 @@ class FakeAds {
     return conversions.map((c) => (c.gclid === "STALE_CLICK_ID_0001" ? "The click is too old" : null));
   }
   removed: string[] = [];
+  /** A test can make Google refuse operations mentioning `text`: at validation too, or only on the real write. */
+  failOn: { text: string; writesOnly?: boolean } | undefined;
   async mutate(_cid: string, service: string, operations: any[], opts: { validateOnly?: boolean } = {}) {
+    if (this.failOn && JSON.stringify(operations).includes(this.failOn.text) && !(this.failOn.writesOnly && opts.validateOnly)) {
+      throw new Error(`Google Ads API 400: refused ${this.failOn.text}`);
+    }
     this.mutations.push({ service, operations, validateOnly: !!opts.validateOnly });
     if (opts.validateOnly) return { results: [] };
     if (service === "googleAds") {
@@ -624,6 +629,54 @@ describe("OAuth + MCP end to end", () => {
     expect(u.json.summary).toContain("Remove 1 negative keyword(s)");
     await call(token, "apply_changes", { proposal_id: u.json.proposal_id });
     expect(ads.negatives.filter((n) => n.text === "twice")).toHaveLength(0);
+  });
+
+  it("applies all of a proposal or none of it", async () => {
+    const writes = () => ads.mutations.filter((m) => !m.validateOnly).length;
+    const propose = async (text: string) => (await call(token, "propose_changes", { customer_id: "1112223333", changes: [
+      { type: "pause_keyword", ad_group_id: "5", criterion_id: "7" },
+      { type: "add_negative_keywords", campaign_id: "10", keywords: [{ text, match_type: "PHRASE" }] }] })).json.proposal_id as string;
+
+    // Google would refuse the second change: checked before writing, so the first isn't written either.
+    const p1 = await propose("refused-at-check");
+    ads.failOn = { text: "refused-at-check" };
+    const before = writes();
+    const a1 = (await call(token, "apply_changes", { proposal_id: p1 })).json;
+    ads.failOn = undefined;
+    expect(a1).toMatchObject({ status: "failed", note: "Nothing was changed." });
+    expect(a1.results[1].error).toContain("refused-at-check");
+    expect(a1.results[0].error).toContain("another change in this proposal would fail");
+    expect(writes()).toBe(before);
+    expect(ads.kwStatus).toBe("ENABLED");
+
+    // It passes the check but the write fails: the pause before it is rolled back.
+    const p2 = await propose("refused-at-write");
+    ads.failOn = { text: "refused-at-write", writesOnly: true };
+    const a2 = (await call(token, "apply_changes", { proposal_id: p2 })).json;
+    ads.failOn = undefined;
+    expect(a2.status).toBe("failed");
+    expect(a2.note).toContain("rolled back");
+    expect(a2.results.map((r: any) => r.error)).toEqual(["rolled back", expect.stringContaining("refused-at-write")]);
+    expect(ads.kwStatus).toBe("ENABLED");
+    expect(ads.negatives.some((n) => n.text === "refused-at-write")).toBe(false);
+    expect((await call(token, "undo_changes", { proposal_id: p2 })).text).toContain("Only applied proposals");
+  });
+
+  it("retakes an apply a dead server left behind, unless re-running could duplicate an ad", async () => {
+    const neg = (await call(token, "propose_changes", { customer_id: "1112223333", changes: [
+      { type: "add_negative_keywords", campaign_id: "10", keywords: [{ text: "interrupted", match_type: "PHRASE" }] }] })).json.proposal_id;
+    const ad = (await call(token, "propose_changes", { customer_id: "1112223333", changes: [{ type: "add_responsive_search_ad", ad_group_id: "5",
+      ad: { headlines: ["One", "Two", "Three"], descriptions: ["First line.", "Second line."], final_url: "https://example.com/" } }] }));
+    if (ad.isError) throw new Error(ad.text);
+    const claim = db.prepare("UPDATE proposals SET applied_at = ? WHERE id = ?");
+    const t = Math.floor(Date.now() / 1000);
+    claim.run(t - 60, neg);
+    expect((await call(token, "apply_changes", { proposal_id: neg })).text).toContain("already being applied");
+    claim.run(t - 11 * 60, neg);
+    expect((await call(token, "apply_changes", { proposal_id: neg })).json.status).toBe("applied");
+    claim.run(t - 11 * 60, ad.json.proposal_id);
+    expect((await call(token, "apply_changes", { proposal_id: ad.json.proposal_id })).text).toContain("interrupted while applying");
+    await call(token, "apply_changes", { proposal_id: (await call(token, "undo_changes", { proposal_id: neg })).json.proposal_id });
   });
 
   it("undoes a change only once", async () => {

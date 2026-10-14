@@ -35,6 +35,10 @@ const tokenCache = new Map<string, { token: string; exp: number }>();
  */
 const accountsCache = new Map<string, { at: number; list: Account[]; unreadable: { customerId: string; error: string }[] }>();
 const ACCOUNTS_TTL_MS = 10 * 60_000;
+/** An apply claim older than this was left by a server that died mid-apply (a real apply takes seconds). */
+const STALE_CLAIM = 10 * 60;
+/** Changes that re-running could duplicate: nothing identifies what an earlier, interrupted run created. */
+const NOT_REPEATABLE = new Set<string>(["add_ad_group", "add_responsive_search_ad", "add_sitelinks"]);
 /** Per user: the tail of their plan-gate checks (run one at a time), and the accounts with a call running. */
 const gateQueue = new Map<string, Promise<void>>();
 const inFlight = new Map<string, Map<string, number>>();
@@ -718,49 +722,89 @@ export class UserSession {
     const p = this.proposal(proposalId);
     if (p.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${p.status}.`);
     if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
+    const changes = JSON.parse(p.changes) as Change[];
     // Claim it before any write: a client retrying after a timeout would otherwise apply it twice. applied_at
     // marks the claim, and an undo also claims the change it reverses, so two undos of one change can't both run.
-    const claimed = this.deps.db.prepare(`UPDATE proposals SET applied_at = ? WHERE id = ? AND status = 'proposed' AND applied_at IS NULL
+    // A claim left by a server that died mid-apply can be retaken after STALE_CLAIM, unless re-running could
+    // duplicate something (re-resolving skips what's already in place, but ads, ad groups and sitelinks have no
+    // natural key to find them by).
+    const retake = !changes.some((c) => NOT_REPEATABLE.has(c.type));
+    const claimed = this.deps.db.prepare(`UPDATE proposals SET applied_at = ? WHERE id = ? AND status = 'proposed'
+        AND (applied_at IS NULL OR (? AND applied_at < ?))
         AND (undo_of IS NULL OR NOT EXISTS (SELECT 1 FROM proposals o WHERE o.undo_of = proposals.undo_of AND o.id <> proposals.id
-          AND o.applied_at IS NOT NULL AND o.status <> 'failed'))`).run(now(), p.id).changes;
+          AND o.applied_at IS NOT NULL AND o.status <> 'failed'))`).run(now(), p.id, retake ? 1 : 0, now() - STALE_CLAIM).changes;
     if (!claimed) {
       const cur = this.proposal(proposalId);
       if (cur.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${cur.status}.`);
+      if (cur.applied_at && cur.applied_at < now() - STALE_CLAIM) {
+        throw new Error(`Proposal ${proposalId} was interrupted while applying, and it adds ads, ad groups or sitelinks, which re-running could duplicate. `
+          + "Check the account with run_gaql and propose what's still missing.");
+      }
       if (cur.applied_at) throw new Error(`Proposal ${proposalId} is already being applied.`);
       throw new Error(`Proposal ${p.undo_of} has already been undone.`);
     }
-    const changes = JSON.parse(p.changes) as Change[];
+    const opts = { loginCustomerId: p.login_customer_id };
+    const save = (status: "applied" | "failed", outcomes: Outcome[]) => this.deps.db
+      .prepare("UPDATE proposals SET status = ?, result = ?, applied_at = ? WHERE id = ?").run(status, JSON.stringify(outcomes), now(), p.id);
+
+    // All or nothing. Re-resolve (the account may have moved since the proposal was made) and validate every
+    // change with Google before writing any; reads and validation run all at once, writes one at a time, in order.
     const pending = pendingOf(changes);
-    // Re-resolve: the account may have moved since the proposal was made. Reads only, so all at once (as propose
-    // does); the writes below stay one at a time and in order.
-    const fresh = await mapLimited(changes, (c) => resolveChange(this.ads, p.customer_id, p.login_customer_id, c, pending)
-      .then((r) => ({ r }), (e: Error) => ({ e })));
+    const checked = await mapLimited(changes, (c) => resolveChange(this.ads, p.customer_id, p.login_customer_id, c, pending)
+      .then((r) => (r.operations.length ? this.ads.mutate(p.customer_id, r.service, r.operations, { ...opts, validateOnly: true }) : Promise.resolve(null))
+        .then(() => ({ r }), (e: Error) => ({ e, describe: r.describe })), (e: Error) => ({ e, describe: c.type as string })));
+    if (checked.some((x) => "e" in x)) {
+      const outcomes = checked.map((x): Outcome => ("e" in x
+        ? { describe: x.describe, ok: false, error: x.e.message }
+        : { describe: x.r.describe, ok: false, error: "not applied: another change in this proposal would fail" }));
+      save("failed", outcomes);
+      return { proposal_id: p.id, status: "failed", note: "Nothing was changed.", results: publicResults(outcomes) };
+    }
+
     const outcomes: Outcome[] = [];
-    for (const [i, c] of changes.entries()) {
-      let describe = c.type as string;
+    let failed: { at: number; error: string } | undefined;
+    for (const [i, x] of checked.entries()) {
+      const r = (x as { r: ResolvedChange }).r;
+      if (!r.operations.length) { outcomes.push({ describe: `${r.describe} (already in place)`, ok: true }); continue; }
       try {
-        const got = fresh[i]!;
-        if ("e" in got) throw got.e;
-        const r = got.r;
-        describe = r.describe;
-        if (!r.operations.length) { outcomes.push({ describe: `${describe} (already in place)`, ok: true }); continue; }
-        const res = await this.ads.mutate(p.customer_id, r.service, r.operations, { loginCustomerId: p.login_customer_id });
-        const names = (res.results ?? []).map((x) => x.resourceName).filter((x): x is string => !!x);
-        outcomes.push({ describe, ok: true, inverse: inverseAfterApply(r, names) });
+        const res = await this.ads.mutate(p.customer_id, r.service, r.operations, opts);
+        const names = (res.results ?? []).map((n) => n.resourceName).filter((n): n is string => !!n);
+        outcomes.push({ describe: r.describe, ok: true, inverse: inverseAfterApply(r, names) });
       } catch (e) {
-        outcomes.push({ describe, ok: false, error: (e as Error).message });
+        failed = { at: i, error: (e as Error).message };
+        outcomes.push({ describe: r.describe, ok: false, error: failed.error });
+        break;
       }
     }
-    const allOk = outcomes.every((o) => o.ok);
-    const anyOk = outcomes.some((o) => o.ok);
-    this.deps.db.prepare("UPDATE proposals SET status = ?, result = ?, applied_at = ? WHERE id = ?")
-      .run(anyOk ? "applied" : "failed", JSON.stringify(outcomes), now(), p.id);
+    if (!failed) {
+      save("applied", outcomes);
+      return { proposal_id: p.id, status: "applied", results: publicResults(outcomes),
+        // A removal has no inverse (a removed campaign can't be restored), so don't offer an undo that would fail.
+        undo: outcomes.some((o) => o.inverse) ? `To reverse this, call undo_changes with proposal_id "${p.id}".` : undefined };
+    }
+
+    // A write failed despite validating (the account changed in between, or Google hiccuped): roll back the
+    // writes before it, newest first. One that can't be rolled back stays applied, and undo_changes can still try.
+    for (const o of outcomes.slice(0, -1).reverse()) {
+      if (!o.inverse) { if (!o.describe.endsWith("(already in place)")) o.error = "applied, and can't be rolled back"; continue; }
+      try {
+        const r = await resolveChange(this.ads, p.customer_id, p.login_customer_id, o.inverse);
+        if (r.operations.length) await this.ads.mutate(p.customer_id, r.service, r.operations, opts);
+        Object.assign(o, { ok: false, error: "rolled back", inverse: undefined });
+      } catch (e) {
+        o.error = `applied, and rolling it back failed: ${(e as Error).message}`;
+      }
+    }
+    for (const x of checked.slice(failed.at + 1)) {
+      outcomes.push({ describe: (x as { r: ResolvedChange }).r.describe, ok: false, error: "not applied: an earlier change failed" });
+    }
+    const stuck = outcomes.some((o) => o.ok && o.inverse);
+    save(outcomes.some((o) => o.ok && !o.describe.endsWith("(already in place)")) ? "applied" : "failed", outcomes);
     return {
-      proposal_id: p.id,
-      status: allOk ? "applied" : anyOk ? "partially applied" : "failed",
+      proposal_id: p.id, status: outcomes.some((o) => o.ok && o.error) ? "partially applied" : "failed",
+      note: outcomes.some((o) => o.ok && o.error) ? "Some changes stayed applied; see results." : "Nothing was changed: the changes made before the failure were rolled back.",
       results: publicResults(outcomes),
-      // A removal has no inverse (a removed campaign can't be restored), so don't offer an undo that would fail.
-      undo: outcomes.some((o) => o.ok && o.inverse) ? `To reverse this, call undo_changes with proposal_id "${p.id}".` : undefined,
+      undo: stuck ? `To reverse what stayed applied, call undo_changes with proposal_id "${p.id}".` : undefined,
     };
   }
 
