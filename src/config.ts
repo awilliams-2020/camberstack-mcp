@@ -45,6 +45,8 @@ export interface Config {
   openaiAppsChallenge?: string;
   /** Google Analytics (GA4) measurement ID for our own public pages (G-…), loaded through /e.js; unset = no GA tag. */
   ga4MeasurementId?: string;
+  /** NOINDEX=1: a non-production origin (dev.camberstack.io). robots.txt disallows everything and IndexNow is never pinged. */
+  noindex?: boolean;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
   matomo?: { url: string; siteId: string; token: string };
   gitSha: string;
@@ -79,6 +81,7 @@ export function loadConfig(): Config {
     adminUrl: process.env.ADMIN_URL?.replace(/\/+$/, "") || undefined,
     adminEmails: emails(process.env.ADMIN_EMAILS),
     ga4Public: process.env.GA4_PUBLIC === "1",
+    noindex: process.env.NOINDEX === "1",
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
     openaiAppsChallenge: process.env.OPENAI_APPS_CHALLENGE || undefined,
     ga4MeasurementId: /^G-[A-Z0-9]{4,20}$/.test(process.env.GA4_MEASUREMENT_ID ?? "") ? process.env.GA4_MEASUREMENT_ID : undefined,

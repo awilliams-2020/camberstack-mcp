@@ -282,7 +282,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   const { dates: lastmod, changed: changedPages } = pageDates(db, indexed, cfg.gitCommitDate);
   const inKey = indexNowKey(cfg.encryptionKey);
   app.get(`/${inKey}.txt`, (_q, r) => { r.type("text/plain").send(inKey); });
-  app.get("/robots.txt", (_q, r) => { r.type("text/plain").send(robotsTxt(cfg.baseUrl)); });
+  app.get("/robots.txt", (_q, r) => { r.type("text/plain").send(cfg.noindex ? "User-agent: *\nDisallow: /\n" : robotsTxt(cfg.baseUrl)); });
   app.get("/llms.txt", (_q, r) => { r.type("text/plain").send(llmsTxt(cfg.baseUrl, tools)); });
   app.get("/sitemap.xml", (_q, r) => { r.type("application/xml").send(sitemapXml(cfg.baseUrl, lastmod)); });
   // Brand assets: the SVG is the source; the PNGs are rendered from it (brand/).
@@ -341,7 +341,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     every(HOUR, "ad conversions", () => adConversions.flush());
     every(HOUR, "relay conversions", () => relay.flush());
     // Pages new or changed since the last boot. Production only: a dev or test origin isn't ours to submit.
-    if (cfg.baseUrl.startsWith("https://")) {
+    if (cfg.baseUrl.startsWith("https://") && !cfg.noindex) {
       pingIndexNow(cfg.baseUrl, inKey, changedPages, overrides.indexNowFetch)
         .then(() => changedPages.length && console.log(`IndexNow: submitted ${changedPages.join(" ")}`))
         .catch((e) => console.error(`IndexNow: ${(e as Error).message}`));
