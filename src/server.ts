@@ -21,7 +21,8 @@ import { mountAccount } from "./account.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
-import { aboutPage, docsPage, errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, searchConsolePage, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
+import { CHANGELOG } from "./changelog.js";
+import { aboutPage, changelogPage, docsPage, errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, searchConsolePage, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
 import { indexNowKey, pageDates, pingIndexNow } from "./lastmod.js";
 import { readCookie } from "./http.js";
 const DRAIN_FILE = "/tmp/drain";
@@ -271,6 +272,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     "/google-search-console-mcp": searchConsolePage(cfg.baseUrl),
     "/docs": docsPage(cfg.baseUrl),
     "/tools": toolsPage(cfg.baseUrl, tools),
+    "/changelog": changelogPage(cfg.baseUrl, CHANGELOG),
     "/about": aboutPage(cfg.baseUrl),
     "/privacy": privacyPage(cfg.baseUrl),
     "/terms": termsPage(cfg.baseUrl),

@@ -15,6 +15,7 @@ import { decrypt, encrypt } from "./crypto.js";
 import { createRelayKey } from "./relay.js";
 import { AdsApiError, NotGrantedError } from "./google.js";
 import { io } from "./changes.js";
+import { SERVER_VERSION } from "./tools.js";
 
 const key = randomBytes(32);
 const idToken = (sub: string, email: string) =>
@@ -1761,6 +1762,11 @@ describe("OAuth + MCP end to end", () => {
     expect(page).toContain("https://github.com/zwznco/camberstack-mcp");
     expect(page).toContain('<span class="pill act">Needs your go-ahead</span>');
     expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/tools`);
+    // The changelog: every release from changelog.ts, the newest matching the version the server reports, and in the sitemap.
+    const cl = await (await fetch(`${base}/changelog`)).text();
+    expect(cl).toContain(`id="v${SERVER_VERSION}"`);
+    expect(cl).toContain("<strong>Shared (portfolio) bid strategies.</strong>");
+    expect(await (await fetch(`${base}/sitemap.xml`)).text()).toContain(`${base}/changelog`);
   });
 
   it("serves /docs and points the OAuth metadata's documentation at it", async () => {

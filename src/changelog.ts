@@ -1,0 +1,48 @@
+/**
+ * What changed in each version, for people using Camberstack: /changelog renders it, and a GitHub release's notes
+ * come from the same entry (`npx tsx src/changelog.ts <version>`). Newest first. Keep it to what users notice;
+ * internal work (admin pages, deploys) stays in git.
+ */
+export interface Release { version: string; date: string; summary: string; items?: string[] }
+
+export const CHANGELOG: Release[] = [
+  {
+    version: "0.11.0", date: "2026-10-14",
+    summary: "Shared bid strategies, a field lookup for custom queries, and clearer query errors.",
+    items: [
+      "**Shared (portfolio) bid strategies.** Move one campaign off a shared strategy onto its own (undo puts it back); change a shared strategy's target CPA, target ROAS or max CPC ceiling, with every campaign it affects named before you approve; or create a new shared strategy and move campaigns onto it in one step (undo moves them back and removes it). Camberstack still never deletes a strategy you built.",
+      "**`gaql_fields`**: your AI can look fields up in Google's own field catalog before writing a custom query, instead of guessing names.",
+      "**Clearer errors on custom queries.** When Google rejects a query, Camberstack adds what Google's field catalog says: the real fields closest to a mistyped one, and where a field can be queried instead. Plus specific fixes for recommendation impact, Maximize clicks (`target_spend` in the API), and items Google won't let the API change.",
+      "**Emails**: a welcome after you connect, and a confirmation when you subscribe to Pro.",
+    ],
+  },
+  { version: "0.10.1", date: "2026-10-12", summary: "The source code moved to github.com/zwznco/camberstack-mcp. No changes to how Camberstack works." },
+  {
+    version: "0.10.0", date: "2026-10-12",
+    summary: "Three more campaign types, each proposed, approved, then created paused.",
+    items: [
+      "**Performance Max**: asset groups of headlines, descriptions, images and YouTube videos, with your business name and logo.",
+      "**Display**: responsive display ads from image URLs or images already in your account.",
+      "**YouTube**, through Demand Gen video campaigns (Google's API doesn't allow creating Video campaigns).",
+      "Clearer fixes for ad policy rejections, wrong image sizes and common query mistakes.",
+    ],
+  },
+  { version: "0.9.0", date: "2026-10-09", summary: "Supports the newest version of the MCP protocol, alongside the previous one. Nothing changes for you." },
+  { version: "0.8.0", date: "2026-10-06", summary: "Search Console: what's rising and falling, near-page-one opportunities, whether Google has indexed a page and why not, and when it last read your sitemaps." },
+  { version: "0.7.0", date: "2026-10-06", summary: "Search Console, read-only and optional: your sites, their search totals, queries and pages, and searches you pay for that already rank organically." },
+  { version: "0.6.0", date: "2026-10-04", summary: "Tuning: keyword and ad group bids, pausing and enabling ads, locations and languages, bid strategy, URL tracking suffix, and conversion actions." },
+  { version: "0.5.0", date: "2026-10-04", summary: "Campaign building: a whole Search campaign with ad groups, keywords, ads and sitelinks, created paused; plus adding ad groups, keywords and ads to existing ones." },
+  { version: "0.4.0", date: "2026-10-02", summary: "Set a campaign's end date. Turning a campaign on now warns with the budget it will spend." },
+  { version: "0.3.0", date: "2026-10-02", summary: "Plans count Google Ads accounts: Free covers one, Pro up to ten." },
+  { version: "0.2.0", date: "2026-10-02", summary: "Keyword Planner: keyword ideas, and search volume and bids for your own list." },
+  { version: "0.1.0", date: "2026-09-29", summary: "First release: read your Google Ads account, and make changes you approve one proposal at a time, each with an undo." },
+];
+
+/** A release's notes as Markdown, for its GitHub release. */
+export function releaseNotes(version: string): string {
+  const r = CHANGELOG.find((x) => x.version === version);
+  if (!r) throw new Error(`No changelog entry for ${version}`);
+  return [r.summary, ...(r.items?.length ? [r.items.map((i) => `- ${i}`).join("\n")] : []), "Full history: https://camberstack.io/changelog"].join("\n\n");
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) console.log(releaseNotes(process.argv[2] ?? CHANGELOG[0]!.version));

@@ -8,7 +8,7 @@ import { ACCOUNT_WINDOW_DAYS, PlanLimitError } from "./plans.js";
 import { isDemo, type Account, type UserSession } from "./session.js";
 
 const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.10.1";
+export const SERVER_VERSION = "0.11.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.

@@ -3,6 +3,7 @@
  * reviews: they must name the app, say what it does with Google user data, and link the policy.
  */
 
+import type { Release } from "./changelog.js";
 import { z } from "zod";
 import { ACCOUNT_WINDOW_DAYS, PRO_PRICE_LABEL } from "./plans.js";
 import type { ToolDoc } from "./tools.js";
@@ -120,7 +121,7 @@ ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</sc
 <nav><a href="/#setup">Connect</a><a href="/docs">Docs</a><a href="/#pricing">Pricing</a><a href="/account">Account</a></nav></div></header>
 <main class="wrap">${o.body}</main>
 <footer><div class="wrap">
-<a href="/docs">Docs</a><a href="/tools">Tools</a><a href="/about">About</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
+<a href="/docs">Docs</a><a href="/tools">Tools</a><a href="/changelog">Changelog</a><a href="/about">About</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
 <p>Camberstack is independent and not affiliated with or endorsed by Google. Google Ads is a trademark of Google LLC.</p>
 </div></footer>
 <script src="/e.js" defer></script>
@@ -919,6 +920,24 @@ export function aboutPage(baseUrl: string): string {
   });
 }
 
+/** /changelog: every release, newest first, from changelog.ts (the same entries the GitHub releases carry). */
+export function changelogPage(baseUrl: string, releases: Release[]): string {
+  // Entries are ours, not user input; still escaped, then **bold** and `code` turned into markup.
+  const md = (s: string) => esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`(.+?)`/g, "<code>$1</code>");
+  return layout({
+    baseUrl, path: "/changelog",
+    title: "Camberstack changelog: what's new in the Google Ads connector",
+    description: "Every Camberstack release, newest first: new tools, campaign types and fixes in the Google Ads and Search Console connector for Claude and ChatGPT.",
+    body: `<h1>Changelog</h1>
+<p class="muted">What's new in Camberstack, newest first. Fixes apply on your next request, with nothing to install. New tools appear once your AI app reloads Camberstack's tool list; in some apps that means reconnecting it.</p>
+${releases.map((r) => `<section id="v${r.version}">
+<h2>${r.version} <span class="muted" style="font-size:15px;font-weight:400">${r.date}</span></h2>
+<p>${md(r.summary)}</p>${r.items?.length ? `<ul>${r.items.map((i) => `<li>${md(i)}</li>`).join("")}</ul>` : ""}
+</section>`).join("\n")}
+<p class="muted">Source and release notes: <a href="${SOURCE_URL}/releases">${SOURCE_URL.replace("https://", "")}/releases</a>.</p>`,
+  });
+}
+
 /** A page that brings its own heading (the account page); body is trusted HTML built by the caller. */
 export function appPage(baseUrl: string, title: string, path: string, body: string): string {
   return layout({ baseUrl, path, title: `${esc(title)} | Camberstack`, description: title, body });
@@ -1012,7 +1031,7 @@ export function robotsTxt(baseUrl: string): string {
 }
 
 /** The indexable pages, in sitemap order. */
-export const SITEMAP_PATHS = ["/", "/docs", "/google-ads-claude", "/google-ads-chatgpt", "/google-search-console-mcp", "/tools", "/about", "/privacy", "/terms"];
+export const SITEMAP_PATHS = ["/", "/docs", "/google-ads-claude", "/google-ads-chatgpt", "/google-search-console-mcp", "/tools", "/changelog", "/about", "/privacy", "/terms"];
 
 /** `lastmod`: each page's own last-changed date (lastmod.ts), never one date for the whole site. */
 export function sitemapXml(baseUrl: string, lastmod: Record<string, string>): string {
