@@ -68,7 +68,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     signingKey: lifecycleSigningKey(cfg.encryptionKey),
     upgradeLink: (userId) => billing.link("upgrade", userId),
   });
-  const announcements = new Announcements({ db, lifecycle, internalEmails, canSend: !!cfg.mail, postalAddress: cfg.mail?.postalAddress });
+  const announcements = new Announcements({ db, lifecycle, internalEmails, canSend: !!cfg.mail });
   const info = (title: string, body: string) => infoPage(cfg.baseUrl, title, body);
 
   const provider = new CamberstackProvider(db, {
@@ -343,7 +343,6 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     void every(HOUR, "billing sweep", () => billing.sweep())();  // also at boot: a restart mustn't delay a downgrade an hour
     every(HOUR, "lifecycle", () => lifecycle.run());
     every(60_000, "transactional mail", () => lifecycle.transactional());
-    every(60_000, "announcements", () => announcements.process());
     every(HOUR, "ad conversions", () => adConversions.flush());
     every(HOUR, "relay conversions", () => relay.flush());
     // Pages new or changed since the last boot. Production only: a dev or test origin isn't ours to submit.

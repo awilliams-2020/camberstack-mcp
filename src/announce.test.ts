@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { openDb, now } from "./db.js";
 import { Lifecycle } from "./lifecycle.js";
-import { Announcements, render } from "./announce.js";
+import { Announcements, PRESETS, render } from "./announce.js";
 
-function setup(o: { address?: string; failFor?: string } = {}) {
+function setup(o: { failFor?: string } = {}) {
   const db = openDb(":memory:");
   const sent: any[] = [];
-  const mail = { apiKey: "re_test", from: "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io", postalAddress: o.address };
+  const mail = { apiKey: "re_test", from: "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io" };
   const lifecycle = new Lifecycle({
     db, baseUrl: "https://camberstack.io", signingKey: Buffer.alloc(32, 7), mail, internalEmails: new Set(), upgradeLink: () => null,
     fetch: (async (_u: string, init: RequestInit) => {
@@ -16,54 +16,46 @@ function setup(o: { address?: string; failFor?: string } = {}) {
       return new Response("{}", { status: 200 });
     }) as any,
   });
-  const ann = new Announcements({ db, lifecycle, internalEmails: new Set(["me@example.com"]), canSend: true, postalAddress: o.address, sleep: async () => {} });
-  const user = (id: string, email: string, plan = "free", optOut = 0) =>
-    db.prepare("INSERT INTO users (id, google_sub, email, plan, created_at, email_opt_out) VALUES (?, ?, ?, ?, ?, ?)").run(id, `s-${id}`, email, plan, now(), optOut);
-  return { db, ann, sent, user };
+  const ann = new Announcements({ db, lifecycle, internalEmails: new Set(["me@example.com"]), canSend: true, sleep: async () => {} });
+  const user = (id: string, email: string, plan = "free", optOut = 0, at = now() - 60) =>
+    db.prepare("INSERT INTO users (id, google_sub, email, plan, created_at, email_opt_out) VALUES (?, ?, ?, ?, ?, ?)").run(id, `s-${id}`, email, plan, at, optOut);
+  return { db, ann, sent, user, p: PRESETS[0]! };
 }
 
-describe("announcements", () => {
-  it("goes to the audience, never to unsubscribed or internal accounts, and only once", async () => {
-    const { ann, sent, user } = setup({ address: "PO Box 1, Austin TX 78701" });
+describe("announcement presets", () => {
+  it("send once to the audience, never to unsubscribed or internal accounts, and never again", async () => {
+    const { ann, sent, user, p } = setup();
     user("a", "a@example.com"); user("b", "b@example.com", "pro"); user("c", "c@example.com", "free", 1); user("me", "me@example.com");
-    const free = ann.create({ subject: "News", body: "Hi", audience: "free", by: "me@example.com" });
-    expect(ann.recipients(ann.get(free)!).map((u) => u.email)).toEqual(["a@example.com"]);
-    const all = ann.create({ subject: "GA4 is here", body: "Hi,\n\n**Google Analytics** is open: https://camberstack.io/docs", audience: "all", by: "me@example.com" });
-    expect(ann.recipients(ann.get(all)!).map((u) => u.email)).toEqual(["a@example.com", "b@example.com"]);
-    expect(ann.start(all)).toBe(true);
-    expect(await ann.process()).toBe(2);
-    expect(ann.get(all)!.status).toBe("sent");
+    expect(ann.recipients(p).map((u) => u.email)).toEqual(["a@example.com", "b@example.com"]);
+    expect(await ann.start(p.id)).toEqual({ sent: 2, left: 0 });
     expect(sent.map((m) => m.to[0])).toEqual(["a@example.com", "b@example.com"]);
-    expect(sent[0].text).toContain("Camberstack, PO Box 1, Austin TX 78701.");          // the postal address in the footer
+    expect(sent[0].subject).toBe(p.subject);
     expect(sent[0].headers["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
-    expect(sent[0].key).toBe(`a:announce:${all}`);
-    expect(await ann.process()).toBe(0);                                               // never twice
-    expect(ann.update(all, { subject: "x", body: "y", audience: "all" })).toBe(false);   // what was sent stays on record
-    expect(ann.delete(all)).toBe(false);
+    expect(sent[0].key).toBe(`a:announce:${p.id}`);
+    const st = ann.state(p.id);
+    expect(st.sent_at).not.toBeNull();
+    expect(st.sent).toBe(2);
+    // Sent means done: no second send, and someone who signs up afterwards isn't on the list.
+    user("d", "d@example.com", "free", 0, now() + 5);
+    expect(ann.recipients(p)).toEqual([]);
+    expect(() => ann.start(p.id)).toThrow("already sent");
   });
 
-  it("sends without a postal address (updates, not promotions), and flags a draft that reads like a sales pitch", async () => {
-    const { ann, sent, user } = setup();
-    user("a", "a@example.com");
-    const id = ann.create({ subject: "Google Analytics now works in your account", body: "Hi,\n\nAsk about traffic and landing pages.", audience: "all", by: "me@example.com" });
-    expect(ann.blocker()).toBeNull();
-    expect(ann.salesPitch(ann.get(id)!)).toEqual([]);
-    expect(ann.salesPitch({ subject: "Upgrade today", body: "Pro is $15 a month." })).toEqual(["upgrade", "$15"]);
-    await ann.sendTest(id, "me@example.com");
-    expect(sent[0].subject).toBe("[TEST] Google Analytics now works in your account");
-    expect(ann.start(id)).toBe(true);
-    expect(await ann.process()).toBe(1);
-    expect(sent[1].text).not.toContain("Camberstack, ");   // no address configured, none in the footer
-  });
-
-  it("resumes after a failed send without resending to anyone", async () => {
-    const s = setup({ address: "PO Box 1", failFor: "b@example.com" });
+  it("an interrupted send finishes without sending anyone twice", async () => {
+    const s = setup({ failFor: "b@example.com" });
     s.user("a", "a@example.com"); s.user("b", "b@example.com"); s.user("c", "c@example.com");
-    const id = s.ann.create({ subject: "News", body: "Hi", audience: "all", by: "me@example.com" });
     const err = console.error; console.error = () => {};
-    try { s.ann.start(id); expect(await s.ann.process()).toBe(1); } finally { console.error = err; }
-    expect(s.ann.get(id)!.status).toBe("sending");
-    expect(s.ann.recipients(s.ann.get(id)!).map((u) => u.email)).toEqual(["b@example.com", "c@example.com"]);
+    try { expect(await s.ann.start(s.p.id)).toEqual({ sent: 1, left: 2 }); } finally { console.error = err; }
+    expect(s.ann.state(s.p.id).sent_at).toBeNull();
+    expect(s.ann.recipients(s.p).map((u) => u.email)).toEqual(["b@example.com", "c@example.com"]);
+  });
+
+  it("a test goes to one address only and logs nothing", async () => {
+    const { ann, sent, user, p } = setup();
+    user("a", "a@example.com");
+    await ann.sendTest(p.id, "me@example.com");
+    expect(sent.map((m) => [m.to[0], m.subject])).toEqual([["me@example.com", `[TEST] ${p.subject}`]]);
+    expect(ann.state(p.id)).toMatchObject({ started_at: null, sent: 0 });
   });
 
   it("renders paragraphs, bullets, bold and links, and escapes everything else", () => {
@@ -73,5 +65,10 @@ describe("announcements", () => {
     expect(m.html).toContain('<a href="https://x.test/a?b=1&amp;c=2">two</a>');
     expect(m.html).toContain('<a href="https://camberstack.io/changelog">https://camberstack.io/changelog</a>.');
     expect(m.text).toContain("two (https://x.test/a?b=1&c=2)");
+  });
+
+  it("every preset is an update, not a sales pitch, and has a unique id", () => {
+    expect(new Set(PRESETS.map((p) => p.id)).size).toBe(PRESETS.length);
+    for (const p of PRESETS) expect(`${p.subject}\n${p.body}`, p.id).not.toMatch(/\b(upgrade|discount|offer|deal|sale|coupon)\b|\$\d/i);
   });
 });

@@ -11,7 +11,7 @@ import { buildReport, permissionLabels, SCOPE_LABELS, userDetail, type Report, t
 import { now } from "./db.js";
 import { esc } from "./pages.js";
 import { PRO_PRICE_LABEL } from "./plans.js";
-import { AUDIENCES, render as renderAnnouncement, type Announcement, type Announcements, type Audience } from "./announce.js";
+import { AUDIENCES, PRESETS, render as renderAnnouncement, type Announcements, type Preset, type SendState } from "./announce.js";
 
 export interface AdminDeps {
   db: DB;
@@ -87,7 +87,7 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
   });
   const ann = d.announcements;
   if (ann) {
-    const form = express.urlencoded({ extended: false, limit: "64kb" });
+    const form = express.urlencoded({ extended: false, limit: "4kb" });
     // POSTs must come from this site's own pages: the cookie is SameSite=Lax, and this checks the Origin as well.
     const post = (path: string, h: (req: Request, res: express.Response, who: string) => unknown) =>
       site.post(path, form, async (req, res) => {
@@ -96,48 +96,31 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
         if (req.get("origin") !== new URL(d.adminUrl!).origin) { res.status(403).send("Cross-site request refused."); return; }
         try { await h(req, res, who); } catch (e) { res.status(400).send(esc((e as Error).message)); }
       });
-    const fields = (req: Request) => {
-      const b = req.body as Record<string, string>;
-      const audience = (Object.keys(AUDIENCES).includes(b.audience ?? "") ? b.audience : "all") as Audience;
-      if (!b.subject?.trim() || !b.body?.trim()) throw new Error("Subject and message are both required.");
-      return { subject: b.subject, body: b.body, audience };
-    };
     site.get("/announcements", (req, res) => {
       const who = email(req);
       if (!who) { res.redirect(302, "/login"); return; }
-      const v = view(req);
-      res.type("html").send(shell("/announcements", who, v, announcementsPage(ann.list(), ann.blocker())));
+      res.type("html").send(shell("/announcements", who, view(req), announcementsPage(ann)));
     });
     site.get("/announcements/:id", (req, res) => {
       const who = email(req);
       if (!who) { res.redirect(302, "/login"); return; }
-      const a = ann.get(req.params.id);
-      if (!a) { res.status(404).send("No such announcement."); return; }
-      const v = view(req);
-      const heading = `<a class="muted" href="/announcements">Announcements</a> <span class="dim">/</span> ${esc(a.subject)}`;
-      res.type("html").send(shell("/announcements", who, v, announcementPage(a, ann.recipients(a), ann.list().find((x) => x.id === a.id)?.sent ?? 0,
-        ann.blocker(), who, String(req.query.note ?? ""), ann.salesPitch(a)), heading));
-    });
-    post("/announcements", (req, res, who) => res.redirect(303, `/announcements/${ann.create({ ...fields(req), by: who })}`));
-    post("/announcements/:id", (req, res) => {
-      if (!ann.update(String(req.params.id), fields(req))) throw new Error("Only a draft can be edited.");
-      res.redirect(303, `/announcements/${req.params.id}?note=saved`);
+      const p = ann.preset(req.params.id);
+      if (!p) { res.status(404).send("No such announcement."); return; }
+      const heading = `<a class="muted" href="/announcements">Announcements</a> <span class="dim">/</span> ${esc(p.subject)}`;
+      res.type("html").send(shell("/announcements", who, view(req), announcementPage(ann, p, who, String(req.query.note ?? "")), heading));
     });
     post("/announcements/:id/test", async (req, res, who) => {
       await ann.sendTest(String(req.params.id), who);
       res.redirect(303, `/announcements/${req.params.id}?note=test`);
     });
     post("/announcements/:id/send", (req, res) => {
-      const a = ann.get(String(req.params.id));
+      const p = ann.preset(String(req.params.id));
       // The count the page showed must still hold: a stale tab can't send to a different list than the one confirmed.
-      if (!a || String(ann.recipients(a).length) !== (req.body as Record<string, string>).count) throw new Error("The recipient list changed; reload the page and check it again.");
-      if (!ann.start(a.id)) throw new Error(ann.blocker() ?? "Only a draft can be sent.");
-      void ann.process();
-      res.redirect(303, `/announcements/${a.id}?note=sending`);
-    });
-    post("/announcements/:id/delete", (req, res) => {
-      if (!ann.delete(String(req.params.id))) throw new Error("Only a draft can be deleted.");
-      res.redirect(303, "/announcements");
+      if (!p || String(ann.recipients(p).length) !== (req.body as Record<string, string>).count) {
+        throw new Error("The recipient list changed since the page loaded; go back, reload and check it again.");
+      }
+      void ann.start(p.id).catch((e) => console.error(`announcement ${p.id}: ${(e as Error).message}`));
+      res.redirect(303, `/announcements/${p.id}?note=sending`);
     });
   }
   site.use((_req, res) => { res.status(404).send("Not found."); });
@@ -409,59 +392,60 @@ ${card("Ad conversions", `<dl><dt>Recorded</dt><dd>${num(r.adConversions?.record
 
 // ---------------------------------------------------------------- announcements
 
-const statusChip = (s: Announcement["status"]) => `<span class="chip ${s === "sent" ? "okc" : s === "sending" ? "pro" : ""}">${s}</span>`;
-
-function composeForm(action: string, a?: Pick<Announcement, "subject" | "body" | "audience">, submit = "Save draft"): string {
-  return `<form method="post" action="${action}" class="compose">
-<label>Subject<input name="subject" required maxlength="150" value="${esc(a?.subject ?? "")}"></label>
-<label>Send to<select name="audience">${Object.entries(AUDIENCES).map(([k, l]) => `<option value="${k}"${a?.audience === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>
-<label>Message<textarea name="body" required rows="12" placeholder="Hi,&#10;&#10;Blank line between paragraphs. Lines starting &quot;- &quot; are bullets. **bold**, [link text](https://…).">${esc(a?.body ?? "")}</textarea></label>
-<p class="dim" style="margin:0">Write it as an update about their account: what changed, at the top. No upgrade pitch, offers or prices: those make it promotional email, which needs a postal address (MAIL_POSTAL_ADDRESS). Every email ends with an unsubscribe link; nobody who unsubscribed, and no internal account, gets it.</p>
-<button class="primary">${submit}</button></form>`;
+function sendStatus(st: SendState & { running: boolean }, left: number): string {
+  if (st.sent_at) return `<span class="chip okc">sent</span>`;
+  if (st.running) return `<span class="chip pro">sending</span>`;
+  if (st.started_at) return `<span class="chip badc">interrupted · ${left} left</span>`;
+  return `<span class="chip">not sent</span>`;
 }
 
-function announcementsPage(list: (Announcement & { sent: number })[], blocker: string | null): string {
-  return `${blocker ? `<p class="warn">${esc(blocker)}</p>` : ""}
-${card("Announcements", table(["subject", "to", "status", ["sent", "r"], "created"], list.map((a) => [
-    `<a href="/announcements/${a.id}">${esc(a.subject)}</a>`, AUDIENCES[a.audience], statusChip(a.status), `<span class="n">${a.sent}</span>`, when(a.created_at)]),
-    "None yet."))}
-${card("New announcement", `<div class="pad">${composeForm("/announcements")}</div>`)}
-${COMPOSE_CSS}`;
+function announcementsPage(ann: Announcements): string {
+  return `${ann.canSend ? "" : `<p class="warn">Email isn't configured (RESEND_API_KEY): nothing can be sent.</p>`}
+<p class="dim" style="margin:0 0 16px">Preset emails, written in <code>src/announce.ts</code>. Each goes out once, when you press Send on its page.</p>
+<div class="cards">${PRESETS.map((p) => {
+    const st = ann.state(p.id), left = ann.recipients(p).length;
+    return `<a class="pcard" href="/announcements/${p.id}"><div class="row">${sendStatus(st, left)}<span class="dim">${AUDIENCES[p.audience]}</span></div>
+<h3>${esc(p.subject)}</h3><p class="dim">${st.sent_at ? `Sent ${date(st.sent_at)} UTC to ${st.sent}` : esc(p.plan)}</p></a>`;
+  }).join("")}</div>
+${STYLE}`;
 }
 
-function announcementPage(a: Announcement, to: { email: string; plan: string }[], sent: number, blocker: string | null, who: string, note: string, pitch: string[]): string {
-  const m = renderAnnouncement(a, false);
-  const notes: Record<string, string> = { saved: "Saved.", test: `Test sent to ${esc(who)}.`, sending: "Sending: about one email a second. Reload to follow along." };
-  const actions = a.status !== "draft" ? "" : `<div class="actions">
-<form method="post" action="/announcements/${a.id}/test"><button>Send a test to ${esc(who)}</button></form>
-<form method="post" action="/announcements/${a.id}/send" data-confirm="${esc(`Send “${a.subject}” to ${to.length} ${to.length === 1 ? "person" : "people"}? This can't be undone.`)}" onsubmit="return confirm(this.dataset.confirm)">
-<input type="hidden" name="count" value="${to.length}"><button class="primary"${blocker || !to.length ? " disabled" : ""}>Send to ${to.length} ${to.length === 1 ? "person" : "people"}</button></form>
-<form method="post" action="/announcements/${a.id}/delete" data-confirm="Delete this draft?" onsubmit="return confirm(this.dataset.confirm)"><button>Delete draft</button></form></div>
-${blocker ? `<p class="warn">${esc(blocker)}</p>` : ""}
-${pitch.length ? `<p class="caution">This reads like a promotion (${pitch.map((w) => `“${esc(w)}”`).join(", ")} in the subject or opening). Announcements are account updates; reword it, or set MAIL_POSTAL_ADDRESS so the footer carries a postal address.</p>` : ""}`;
+function announcementPage(ann: Announcements, p: Preset, who: string, note: string): string {
+  const st = ann.state(p.id), to = ann.recipients(p), m = renderAnnouncement(p, false);
+  const notes: Record<string, string> = { test: `Test sent to ${esc(who)}.`, sending: "Sending, about one email a second. Reload to follow along." };
+  const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+  const label = st.sent_at ? `Sent ${date(st.sent_at)} UTC to ${people(st.sent)}` : st.running ? "Sending…"
+    : st.started_at ? `Finish sending (${people(to.length)} left)` : `Send to ${people(to.length)}`;
+  const off = !!st.sent_at || st.running || !ann.canSend || !to.length;
   return `${note && notes[note] ? `<p class="okmsg">${notes[note]}</p>` : ""}
 <div class="stats">
-${stat("Status", statusChip(a.status))}
-${stat("Audience", esc(AUDIENCES[a.audience]))}
-${stat(a.status === "draft" ? "Would go to" : "Still to send", `<span class="n">${to.length}</span>`)}
-${stat("Sent", `<span class="n">${sent}</span>`, a.sent_at ? `finished ${ago(a.sent_at)}` : a.started_at ? `started ${ago(a.started_at)}` : "")}
+${stat("Status", sendStatus(st, to.length))}
+${stat("Audience", esc(AUDIENCES[p.audience]))}
+${stat(st.sent_at ? "Sent to" : st.started_at ? "Still to send" : "Would go to", `<span class="n">${st.sent_at ? st.sent : to.length}</span>`)}
+${stat("Planned", `<span style="font:13px/1.4 inherit;font-family:inherit">${esc(p.plan)}</span>`)}
 </div>
-${actions}
+<div class="actions">
+<form method="post" action="/announcements/${p.id}/send" data-confirm="${esc(`Send “${p.subject}” to ${people(to.length)}? It goes out once and can't be undone.`)}" onsubmit="return confirm(this.dataset.confirm)">
+<input type="hidden" name="count" value="${to.length}"><button class="primary"${off ? " disabled" : ""}>${label}</button></form>
+<form method="post" action="/announcements/${p.id}/test"><button${ann.canSend ? "" : " disabled"}>Send a test to ${esc(who)}</button></form>
+</div>
+${ann.canSend ? "" : `<p class="warn">Email isn't configured (RESEND_API_KEY): nothing can be sent.</p>`}
 <div class="grid2">
 ${card("Preview", `<div class="pad"><p class="dim" style="margin:0 0 4px">Subject</p><p style="margin:0 0 16px;font-weight:600">${esc(m.subject)}</p>
 <div class="mail">${m.html}<hr><p class="dim" style="font-size:12px">You're getting this because you connected Camberstack (camberstack.io) to Google Ads. … Unsubscribe</p></div></div>`)}
-${a.status === "draft" ? card("Edit", `<div class="pad">${composeForm(`/announcements/${a.id}`, a)}</div>`) : card("Recipients still to send", table(["email", "plan"], to.map((u) => [esc(u.email), esc(u.plan)]), "Everyone has it."))}
+${card(st.sent_at ? "Recipients" : `Recipients (${to.length})`, st.sent_at ? `<p class="empty">Sent to ${people(st.sent)}. It can't send again.</p>`
+    : table(["email", "plan"], to.map((u) => [esc(u.email), esc(u.plan)]), "Nobody matches this audience."))}
 </div>
-${a.status === "draft" ? card(`Recipients (${to.length})`, table(["email", "plan"], to.map((u) => [esc(u.email), esc(u.plan)]), "Nobody matches this audience.")) : ""}
-${COMPOSE_CSS}`;
+${STYLE}`;
 }
 
-const COMPOSE_CSS = `<style>
-.compose{display:flex;flex-direction:column;gap:12px}.compose label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}
-.compose input,.compose select,.compose textarea{font:13px/1.5 inherit;font-family:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
-.compose textarea{font-family:ui-monospace,Menlo,monospace;font-size:12px;resize:vertical}
-button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg);padding:6px 14px;align-self:flex-start}button[disabled]{opacity:.4;cursor:not-allowed}
+const STYLE = `<style>
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.pcard{display:block;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;color:var(--fg)}
+.pcard:hover{border-color:var(--muted);color:var(--fg)}.pcard h3{font-size:14px;font-weight:600;margin:10px 0 6px}.pcard p{margin:0;font-size:12px}
+.pcard .row{display:flex;justify-content:space-between;align-items:center;font-size:12px}
+button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg);padding:6px 14px}button[disabled]{opacity:.45;cursor:not-allowed}
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}.actions form{margin:0}
-.warn{border:1px solid var(--bad);color:var(--bad);border-radius:6px;padding:8px 12px}.caution{border:1px solid #d97706;color:#d97706;border-radius:6px;padding:8px 12px}.okmsg{border:1px solid var(--ok);color:var(--ok);border-radius:6px;padding:8px 12px}
+.warn{border:1px solid var(--bad);color:var(--bad);border-radius:6px;padding:8px 12px}.okmsg{border:1px solid var(--ok);color:var(--ok);border-radius:6px;padding:8px 12px}
 .mail{background:#fff;color:#1c1b19;border-radius:6px;padding:16px;font-size:14px}.mail a{color:#1f5f4a;text-decoration:underline}.mail hr{border:0;border-top:1px solid #ddd}
 </style>`;

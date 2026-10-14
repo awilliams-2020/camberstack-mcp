@@ -1322,19 +1322,18 @@ describe("OAuth + MCP end to end", () => {
     expect(await (await fetch(`${admin}/activity?days=30&internal=1`, { headers: { cookie } })).text()).toContain("account_overview");
     expect((await fetch(`${admin}/revenue`, { headers: { cookie } })).status).toBe(200);
     expect((await fetch(`${admin}/users`, { redirect: "manual" })).status).toBe(302);  // every page is behind sign-in
-    // Announcements: drafted and previewed in the admin; a POST from another site is refused; with no email configured, nothing sends.
+    // Announcements: preset cards; a preset's page previews it and has the Send button; a POST from another site is refused;
+    // with no email configured, nothing can send.
     const postForm = (path: string, fields: Record<string, string>, origin = new URL(admin).origin) => fetch(`${admin}${path}`, { method: "POST", redirect: "manual",
       headers: { cookie, origin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields).toString() });
-    expect((await postForm("/announcements", { subject: "x", body: "y", audience: "all" }, "https://evil.test")).status).toBe(403);
-    const made = await postForm("/announcements", { subject: "GA4 is open", body: "Hi,\n\n**Google Analytics** works now.", audience: "all" });
-    expect(made.status).toBe(303);
-    const draftUrl = made.headers.get("location")!;
-    const draft = await (await fetch(`${admin}${draftUrl}`, { headers: { cookie } })).text();
-    expect(draft).toContain("<strong>Google Analytics</strong> works now.");
-    expect(draft).toContain("configured (RESEND_API_KEY)");
-    expect(draft).toMatch(/Send to \d+ (person|people)<\/button>/);
-    expect((await postForm(`${draftUrl}/send`, { count: "0" })).status).toBe(400);
-    expect(await (await fetch(`${admin}/announcements`, { headers: { cookie } })).text()).toContain("GA4 is open");
+    const list = await (await fetch(`${admin}/announcements`, { headers: { cookie } })).text();
+    expect(list).toContain('href="/announcements/ga4-open"');
+    const preset = await (await fetch(`${admin}/announcements/ga4-open`, { headers: { cookie } })).text();
+    expect(preset).toContain("<li>Which landing pages");   // the rendered preview
+    expect(preset).toMatch(/<button class="primary" disabled>Send to \d+ (person|people)<\/button>/);   // disabled: no email configured
+    expect((await postForm("/announcements/ga4-open/send", { count: "0" }, "https://evil.test")).status).toBe(403);
+    expect((await postForm("/announcements/ga4-open/send", { count: "999" })).status).toBe(400);   // not the list the page showed
+    expect((await fetch(`${admin}/announcements/nope`, { headers: { cookie } })).status).toBe(404);
     // The operator's own account is internal: hidden unless asked for.
     const json = await (await fetch(`${admin}/?format=json`, { headers: { cookie } })).json();  // still served, just not linked
     expect(json.funnel.all.connected).toBe(0);
