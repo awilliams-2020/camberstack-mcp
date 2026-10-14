@@ -819,8 +819,8 @@ export async function resolveChange(
         nextFields[api.camel] = k === "target_roas" ? v : String(toMicros(v!));
         if (before !== undefined && before !== null) prevFields[api.camel] = before;   // left out = cleared on undo
         masks.push(`${field.key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}.${api.snake}`);
-        diff.push(`${k.replace(/_/g, " ").replace("cpa", "CPA").replace("roas", "ROAS")} ${show(k, before)} → ${show(k, nextFields[api.camel])}`);
-        back.push(`${k.replace(/_/g, " ").replace("cpa", "CPA").replace("roas", "ROAS")} ${show(k, before)}`);
+        diff.push(`${settingLabel(k)} ${show(k, before)} → ${show(k, nextFields[api.camel])}`);
+        back.push(`${settingLabel(k)} ${show(k, before)}`);
       }
       const same = given.every(([k]) => String(block[field[k]!.camel] ?? "") === String(nextFields[field[k]!.camel]));
       return {
@@ -932,6 +932,8 @@ async function sharedStrategy(q: (query: string) => Promise<any[]>, resourceName
 }
 
 type SharedField = { camel: string; snake: string };
+/** "max_cpc_ceiling" → "max CPC ceiling", as the summary shows it. */
+const settingLabel = (k: string) => k.replace(/_/g, " ").replace(/\b(cpa|roas|cpc)\b/g, (m) => m.toUpperCase());
 type SharedSetting = "target_cpa" | "target_roas" | "max_cpc_ceiling";
 const SETTINGS: SharedSetting[] = ["target_cpa", "target_roas", "max_cpc_ceiling"];
 /** Which settings each shared strategy type has, by the names set_shared_bid_strategy takes. */
