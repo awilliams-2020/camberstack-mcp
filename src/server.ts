@@ -234,6 +234,19 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     onerror: (e) => console.warn(`mcp error: ${e.message}`),
   }));
 
+  // CORS for browser-based MCP clients (the OAuth endpoints already get it from mcpAuthRouter). Every
+  // call still needs a bearer token, so any origin is fine; no cookies are involved.
+  app.use("/mcp", (req, res, next) => {
+    if (req.path !== "/") { next(); return; }
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, Mcp-Protocol-Version, WWW-Authenticate");
+    if (req.method !== "OPTIONS") { next(); return; }
+    res.setHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    res.status(204).end();
+  });
+
   app.post("/mcp", bearer, express.json({ limit: "1mb" }), async (req, res) => {
     res.on("finish", () => {
       // Diagnostics for rejected requests only: method + protocol header, never arguments or data.

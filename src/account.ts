@@ -8,7 +8,7 @@ import type { DB, UserRow } from "./db.js";
 import type { GoogleCreds } from "./google.js";
 import type { UserSession } from "./session.js";
 import { SignIn } from "./signin.js";
-import { appPage, COPY_JS, esc, infoPage } from "./pages.js";
+import { appPage, cmd, COPY_JS, esc, infoPage } from "./pages.js";
 import { DEMO_CID } from "./demo.js";
 import { GA_TARGET } from "./ga4-changes.js";
 import { ACCOUNT_WINDOW_DAYS, PRO_PRICE_LABEL } from "./plans.js";
@@ -68,8 +68,21 @@ export function mountAccount(app: Express, d: AccountDeps): SignIn {
     if (!who) { res.status(400).type("html").send(page("Sign-in didn't finish", `<p>The sign-in expired or was cancelled. <a href="/account/login">Try again</a>.</p>`)); return; }
     const u = d.db.prepare("SELECT * FROM users WHERE google_sub = ?").get(who.sub) as UserRow | undefined;
     if (!u) {
-      res.status(404).type("html").send(page("No Camberstack connection", `<p>${esc(who.email)} hasn't connected Camberstack yet.
-Add it to your AI app first (<a href="/#setup">how to connect</a>), then come back here.</p>`));
+      // Signed in before connecting: the account is made by connecting from an AI app, so this is the
+      // next step, not an error. (2026-10-14: a new Pro user's first visit ended on a bare 404 here.)
+      const mcpUrl = `${d.baseUrl}/mcp`;
+      res.type("html").send(page("Connect Camberstack first", `<p>${esc(who.email)} hasn't connected Camberstack yet.
+Your account is created when you connect it to your AI app. It takes about a minute:</p>
+<p>1. Add this server URL to your AI app:</p>
+<div class="url"><code>${mcpUrl}</code><button class="copy" type="button" data-copy="${mcpUrl}">Copy</button></div>
+<p><strong>Claude:</strong> <a href="https://claude.ai/directory/connectors/camberstack">open Camberstack in the connector directory</a> and click Connect
+(<a href="/google-ads-claude">guide</a>).<br>
+<strong>ChatGPT:</strong> turn on developer mode and add it as an MCP app (<a href="/google-ads-chatgpt">guide</a>).<br>
+<strong>Claude Code:</strong></p>
+${cmd(`claude mcp add --transport http camberstack ${mcpUrl}`)}
+<p>2. Sign in with Google when your AI app asks, using ${esc(who.email)}.</p>
+<p>3. Come back and <a href="/account/login${who.next === "/account?upgrade=1" ? "?next=upgrade" : ""}">sign in here again</a>${who.next === "/account?upgrade=1" ? " to finish upgrading to Pro" : ""}.</p>
+${COPY_JS}`));
       return;
     }
     auth.open(res, u.id);
@@ -105,6 +118,7 @@ Your AI app can no longer use Camberstack until you connect again.</p>
 <p class="muted">${req.query.upgrade === "1" ? "Sign in to upgrade to Pro. You'll go straight to checkout." : "See your plan, every change Camberstack made to your Google Ads, and manage billing or disconnect."}</p>
 <a class="btn" href="/account/login${wantsUpgrade ? "?next=upgrade" : ""}">Sign in with Google</a>
 <p class="muted" style="font-size:14px">Use the Google account you connected to your AI app. We only ask for your email address here.</p>
+<p class="muted" style="font-size:14px">New to Camberstack? <a href="/#setup">Connect it to your AI app first</a>: that creates your account.</p>
 </div></div>`));
       return;
     }
