@@ -47,7 +47,7 @@ export interface Config {
   gitCommitDate: string;
 }
 
-export function parseKey(raw: string): Buffer {
+function parseKey(raw: string): Buffer {
   const key = /^[0-9a-f]{64}$/i.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
   if (key.length !== 32) throw new Error("ENCRYPTION_KEY must decode to 32 bytes (64 hex chars or base64)");
   return key;

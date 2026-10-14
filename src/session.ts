@@ -35,6 +35,11 @@ const tokenCache = new Map<string, { token: string; exp: number }>();
  */
 const accountsCache = new Map<string, { at: number; list: Account[]; unreadable: { customerId: string; error: string }[] }>();
 const ACCOUNTS_TTL_MS = 10 * 60_000;
+/** Drop a user's cached Google token and account list: on disconnect, and on reconnect (the old token may be revoked). */
+export function clearGoogleCache(userId: string): void {
+  tokenCache.delete(userId);
+  accountsCache.delete(userId);
+}
 /** An apply claim older than this was left by a server that died mid-apply (a real apply takes seconds). */
 const STALE_CLAIM = 10 * 60;
 /** Changes that re-running could duplicate: nothing identifies what an earlier, interrupted run created. */
@@ -79,7 +84,7 @@ export interface SessionDeps {
   scFactory?: (user: UserRow) => SearchConsole;
 }
 
-export class NotConnectedError extends Error {}
+class NotConnectedError extends Error {}
 
 /** The Google Ads calls the tools make; the demo account answers the same ones. */
 type Ads = Pick<AdsClient, "listAccessibleCustomers" | "search" | "mutate" | "keywordPlan">;
@@ -844,8 +849,7 @@ export class UserSession {
 
   private forgetGoogle(): void {
     this.deps.db.prepare("UPDATE users SET enc_refresh = NULL WHERE id = ?").run(this.user.id);
-    tokenCache.delete(this.user.id);
-    accountsCache.delete(this.user.id);
+    clearGoogleCache(this.user.id);
   }
 
   private proposal(id: string): ProposalRow {
@@ -895,7 +899,7 @@ function monthly(volumes: { year?: number | string; month?: string; monthlySearc
  * Search Console's window: its last ~2 days are still incomplete, so it ends 3 days ago. The overlap tool reads the
  * Ads side over the same dates, so the two sides compare like for like.
  */
-export function searchConsoleWindow(days: number, before = 0): { start: string; end: string } {
+function searchConsoleWindow(days: number, before = 0): { start: string; end: string } {
   const d = Math.max(1, Math.min(480, Math.floor(days)));
   const end = new Date(Date.now() - (3 + before) * 86_400_000);
   const start = new Date(end.getTime() - (d - 1) * 86_400_000);
@@ -914,7 +918,7 @@ const isoDay = (t: number) => new Date(t).toISOString().slice(0, 10);
  * The window a Search Console tool reads: exact dates when both are given, otherwise the last `days` days ending 3 days ago
  * (or yesterday with fresh data). Google keeps about 16 months.
  */
-export function scWindow(o: ScWindowOpts): { start: string; end: string } {
+function scWindow(o: ScWindowOpts): { start: string; end: string } {
   if (o.start_date || o.end_date) {
     if (!o.start_date || !o.end_date) throw new Error("Pass both start_date and end_date, or neither (then days is used).");
     const a = Date.parse(o.start_date), b = Date.parse(o.end_date);
@@ -930,7 +934,7 @@ export function scWindow(o: ScWindowOpts): { start: string; end: string } {
 }
 
 /** The same number of days immediately before a window. */
-export function priorWindow(w: { start: string; end: string }): { start: string; end: string } {
+function priorWindow(w: { start: string; end: string }): { start: string; end: string } {
   const len = Date.parse(w.end) - Date.parse(w.start);
   const end = Date.parse(w.start) - DAY;
   return { start: isoDay(end - len), end: isoDay(end) };
@@ -1001,7 +1005,7 @@ const organicMetrics = (r: SearchAnalyticsRow) => ({
   clicks: r.clicks, impressions: r.impressions, ctr_pct: round(r.ctr * 100), position: Math.round(r.position * 10) / 10,
 });
 
-export function dateRange(days: number): string {
+function dateRange(days: number): string {
   const d = Math.max(1, Math.min(365, Math.floor(days)));
   const end = new Date(Date.now() - 86_400_000);           // yesterday: today is partial
   const start = new Date(end.getTime() - (d - 1) * 86_400_000);
@@ -1024,10 +1028,10 @@ export function expandDuring(query: string): { query: string; rewrote: string[] 
   return { query: q, rewrote };
 }
 
-/** Sum rows' cost, clicks and conversions per key (Google returns one row per segment); `add` sums any extra metrics. */
 /** Two decimals, for money and fractional conversions. */
 const round = (n: number) => Math.round(n * 100) / 100;
 
+/** Sum rows' cost, clicks and conversions per key (Google returns one row per segment); `add` sums any extra metrics. */
 function aggregate<T extends { cost: number; clicks: number; conversions: number }>(
   rows: any[], key: (r: any) => string, init: (r: any) => T, add?: (e: T, r: any) => void,
 ): T[] {

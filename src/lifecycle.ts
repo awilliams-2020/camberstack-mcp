@@ -42,15 +42,18 @@ const DAY = 86400;
 /** Local hours an email may go out in: three hourly runs, so one always lands. */
 const SEND_HOURS = { from: 9, to: 12 };
 /** For users whose Google Ads time zone we never saw: 9am Central is 10 Eastern, 7 Pacific. */
-export const FALLBACK_TZ = "America/Chicago";
+const FALLBACK_TZ = "America/Chicago";
 
 /** Hour of day (0–23) at `at` in `tz`; an unknown zone counts as FALLBACK_TZ. */
-export function localHour(at: Date, tz: string | null | undefined): number {
+function localHour(at: Date, tz: string | null | undefined): number {
   const fmt = (zone: string) => Number(new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", hourCycle: "h23" }).format(at));
   try { return fmt(tz || FALLBACK_TZ); } catch { return fmt(FALLBACK_TZ); }
 }
 type Kind = "first_steps" | "limit_reached" | "check_in";
-const USED_TOOLS = "('account_overview','run_gaql','keyword_ideas','keyword_metrics','propose_changes')";
+/** Tools that mean someone has asked Camberstack something real (not just listed accounts or sites). */
+const USED_TOOLS = "('account_overview','run_gaql','keyword_ideas','keyword_metrics','propose_changes','paid_organic_overlap',"
+  + "'search_console_summary','search_console_performance','search_console_trend','search_console_opportunities',"
+  + "'search_console_inspect_urls','search_console_sitemaps')";
 
 export class Lifecycle {
   constructor(private d: LifecycleDeps) {}
@@ -106,7 +109,7 @@ export class Lifecycle {
       try {
         const m = u.kind === "first_steps" ? firstSteps(u.days)
           : u.kind === "limit_reached" ? limitReached(this.d.baseUrl, this.d.upgradeLink(u.id)) : checkInEmail();
-        await this.send(u.email, m, u.id);
+        await this.send(u.email, m, u.id, `${u.id}:${u.kind}`);
         sent++;
       } catch (e) {
         this.d.db.prepare("DELETE FROM email_log WHERE user_id = ? AND kind = ?").run(u.id, u.kind);
@@ -116,12 +119,13 @@ export class Lifecycle {
     return sent;
   }
 
-  private async send(to: string, m: { subject: string; text: string; html: string }, userId: string): Promise<void> {
+  /** `once`: Resend's idempotency key (kept 24h), so a send that timed out after Resend took it isn't sent again an hour later. */
+  private async send(to: string, m: { subject: string; text: string; html: string }, userId: string, once?: string): Promise<void> {
     const unsub = this.unsubscribeUrl(userId);
     const footer = `You're getting this because you connected Camberstack (camberstack.io) to Google Ads.`;
     const res = await (this.d.fetch ?? fetch)("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${this.d.mail!.apiKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${this.d.mail!.apiKey}`, "Content-Type": "application/json", ...(once ? { "Idempotency-Key": once } : {}) },
       body: JSON.stringify({
         from: this.d.mail!.from, to: [to], reply_to: this.d.mail!.replyTo, subject: m.subject,
         text: `${m.text}\n\n--\n${footer}\nUnsubscribe: ${unsub}`,

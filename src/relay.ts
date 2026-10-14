@@ -20,7 +20,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { now, type DB, type UserRow } from "./db.js";
-import { AdsClient } from "./google.js";
+import { AdsClient, adsDateTime } from "./google.js";
 import { UserSession, type SessionDeps } from "./session.js";
 
 const MAX_ATTEMPTS = 8;
@@ -108,8 +108,7 @@ export class Relay {
           const errors = await ads.uploadClickConversions(first.customer_id, batch.map((r) => ({
             [r.kind]: r.click_id,
             conversionAction: `customers/${first.customer_id}/conversionActions/${r.action_id}`,
-            // Google's required format: "yyyy-MM-dd HH:mm:ss+00:00".
-            conversionDateTime: new Date(r.at * 1000).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "+00:00"),
+            conversionDateTime: adsDateTime(r.at),
             ...(r.value != null ? { conversionValue: r.value, currencyCode: r.currency ?? "USD" } : {}),
             ...(r.order_id ? { orderId: r.order_id } : {}),
           })), first.login_customer_id);

@@ -5,7 +5,7 @@ import { PublicChangeSchema } from "./changes.js";
 import { ACCOUNT_WINDOW_DAYS, PlanLimitError } from "./plans.js";
 import { isDemo, type Account, type UserSession } from "./session.js";
 
-export const SERVER_NAME = "camberstack";
+const SERVER_NAME = "camberstack";
 export const SERVER_VERSION = "0.10.1";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.

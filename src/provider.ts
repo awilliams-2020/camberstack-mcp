@@ -21,6 +21,7 @@ import type { DB, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { encrypt, randomToken, sha256 } from "./crypto.js";
 import { consentPage } from "./pages.js";
+import { clearGoogleCache } from "./session.js";
 import {
   ADS_SCOPE, exchangeGoogleCode, googleAuthUrl, idTokenClaims, type GoogleCreds,
 } from "./google.js";
@@ -197,6 +198,7 @@ export class CamberstackProvider implements OAuthServerProvider {
     if (existing) {
       this.db.prepare("UPDATE users SET email = ?, enc_refresh = COALESCE(?, enc_refresh), last_seen_at = ? WHERE id = ?")
         .run(email, enc, now(), existing.id);
+      if (enc) clearGoogleCache(existing.id);
       return { user: { ...existing, email, enc_refresh: enc ?? existing.enc_refresh }, created: false };
     }
     if (!enc) throw new Error("Google did not return a refresh token; remove Camberstack at myaccount.google.com/permissions and connect again.");

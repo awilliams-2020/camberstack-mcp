@@ -8,7 +8,7 @@ import type { Request, Response } from "express";
 import { readCookie } from "./http.js";
 import type { DB } from "./db.js";
 import { now } from "./db.js";
-import { randomToken, sha256 } from "./crypto.js";
+import { randomToken, safeEqual, sha256 } from "./crypto.js";
 import { exchangeGoogleCode, googleSignInUrl, idTokenClaims, type GoogleCreds } from "./google.js";
 
 export interface SignInDeps {
@@ -37,11 +37,16 @@ export class SignIn {
 
   owns(state: unknown): boolean { return typeof state === "string" && state.startsWith(this.prefix); }
 
-  /** Redirect the browser to Google. `next` (a path on this page) is where finish() says to go afterwards; it rides in the one-use state row, not a cookie. */
+  /**
+   * Redirect the browser to Google. `next` (a path on this page) is where finish() says to go afterwards; it rides in
+   * the one-use state row. A nonce in the row and in a cookie ties the sign-in to this browser, so nobody can hand
+   * someone a callback link that signs them in as the sender (login CSRF).
+   */
   start(res: Response, next?: string): void {
-    const id = this.prefix + randomToken(24);
+    const id = this.prefix + randomToken(24), nonce = randomToken(16);
     this.d.db.prepare("INSERT INTO pending_auth (id, client_id, params, created_at) VALUES (?, ?, ?, ?)")
-      .run(id, `__${this.prefix}`, JSON.stringify(next ? { next } : {}), now());
+      .run(id, `__${this.prefix}`, JSON.stringify({ nonce, ...(next ? { next } : {}) }), now());
+    this.cookie(res, nonce, 600, `${this.cookieName}_state`);
     res.redirect(302, googleSignInUrl(this.d.google, this.redirectUri, id));
   }
 
@@ -53,10 +58,11 @@ export class SignIn {
       { created_at: number; params: string } | undefined;
     this.d.db.prepare("DELETE FROM pending_auth WHERE id = ?").run(state);
     if (!row || row.created_at < now() - 600 || !code) return null;
+    const p = JSON.parse(row.params || "{}") as { next?: unknown; nonce?: string };
+    if (!p.nonce || !safeEqual(p.nonce, readCookie(req, `${this.cookieName}_state`) ?? "")) return null;
     const g = await exchangeGoogleCode(this.d.google, code, this.redirectUri, this.d.fetch);
     const c = g.id_token ? idTokenClaims(g.id_token) : null;
-    const next = (JSON.parse(row.params || "{}") as { next?: unknown }).next;
-    return c?.emailVerified ? { sub: c.sub, email: c.email, ...(typeof next === "string" ? { next } : {}) } : null;
+    return c?.emailVerified ? { sub: c.sub, email: c.email, ...(typeof p.next === "string" ? { next: p.next } : {}) } : null;
   }
 
   /** Start a session for `subject` (an email for /admin, a user id for /account). */
@@ -82,7 +88,7 @@ export class SignIn {
     this.cookie(res, "", 0);
   }
 
-  private cookie(res: Response, value: string, maxAge: number): void {
-    res.append("Set-Cookie", `${this.cookieName}=${value}; Path=${this.path}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${this.secure ? "; Secure" : ""}`);
+  private cookie(res: Response, value: string, maxAge: number, name = this.cookieName): void {
+    res.append("Set-Cookie", `${name}=${value}; Path=${this.path}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${this.secure ? "; Secure" : ""}`);
   }
 }

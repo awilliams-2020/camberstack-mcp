@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AdsApiError } from "./google.js";
+import { AdsApiError, AdsClient } from "./google.js";
 import { expandDuring } from "./session.js";
 
 /** Google's error body for one GAQL error, as the REST API returns it. */
@@ -46,5 +46,19 @@ describe("expandDuring", () => {
   it("leaves the windows Google supports alone", () => {
     const q = "SELECT metrics.clicks FROM campaign WHERE segments.date DURING last_30_days";
     expect(expandDuring(q)).toEqual({ query: q, rewrote: [] });
+  });
+});
+
+describe("AdsClient.search", () => {
+  const client = (batches: unknown[]) => new AdsClient(async () => "t", "dev",
+    (async () => new Response(JSON.stringify(batches), { status: 200 })) as typeof fetch);
+
+  it("joins the stream's batches", async () => {
+    expect(await client([{ results: [1, 2] }, { results: [3] }]).search("1", "SELECT x")).toEqual([1, 2, 3]);
+  });
+
+  it("throws when the stream fails partway instead of returning a short list", async () => {
+    const broken = client([{ results: [1] }, { error: { code: 503, message: "The service is currently unavailable.", status: "UNAVAILABLE" } }]);
+    await expect(broken.search("1", "SELECT x")).rejects.toThrow(/unavailable/i);
   });
 });

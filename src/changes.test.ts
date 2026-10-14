@@ -27,3 +27,27 @@ describe("remove_campaign_targeting", () => {
     expect(r.inverse).toBeUndefined();
   });
 });
+
+describe("keyword lists", () => {
+  it("skip what's already there and repeats within the request, case-insensitively", async () => {
+    const ads = { async search(_c: string, q: string): Promise<any[]> {
+      if (q.includes("FROM campaign_criterion")) return [{ campaignCriterion: { keyword: { text: "jobs", matchType: "PHRASE" } } }];
+      return [{ campaign: { id: "10", name: "Search", advertisingChannelType: "SEARCH", status: "ENABLED" } }];
+    } };
+    const r = await resolveChange(ads, "1", null, { type: "add_negative_keywords", campaign_id: "10", keywords: [
+      { text: "jobs", match_type: "PHRASE" }, { text: "Free", match_type: "PHRASE" }, { text: "free", match_type: "PHRASE" }, { text: "free", match_type: "EXACT" }] });
+    expect(r.operations.map((o: any) => [o.create.keyword.text, o.create.keyword.matchType])).toEqual([["Free", "PHRASE"], ["free", "EXACT"]]);
+    expect(r.describe).toContain("(2 already present or repeated, skipped)");
+  });
+});
+
+describe("set_daily_budget", () => {
+  it("writes nothing and offers no undo when the budget is already that amount", async () => {
+    const ads = { async search(): Promise<any[]> {
+      return [{ campaign: { name: "Search" }, campaignBudget: { resourceName: "customers/1/campaignBudgets/9", amountMicros: "40000000", explicitlyShared: false } }];
+    } };
+    const r = await resolveChange(ads, "1", null, { type: "set_daily_budget", campaign_id: "10", amount: 40 });
+    expect(r.operations).toEqual([]);
+    expect(r.inverse).toBeUndefined();
+  });
+});

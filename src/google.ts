@@ -6,9 +6,12 @@
  * is, so a reconnect finds the same account and change log). Nothing else from the Google account is touched.
  */
 
+/** A unix time in the format Google Ads wants for conversion times: "yyyy-MM-dd HH:mm:ss+00:00". */
+export const adsDateTime = (at: number) => new Date(at * 1000).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "+00:00");
+
 export const ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
-export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
-export const GOOGLE_SCOPES = ["openid", "email", ADS_SCOPE, SEARCH_CONSOLE_SCOPE];
+const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+const GOOGLE_SCOPES = ["openid", "email", ADS_SCOPE, SEARCH_CONSOLE_SCOPE];
 export const ADS_API = "https://googleads.googleapis.com/v23";
 
 /** The Ads API counts money in millionths of the account currency. */
@@ -108,7 +111,7 @@ const DURING_LITERALS = "TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, LAST_30_DA
  * How to fix the GAQL and request errors AIs actually hit (tool_calls.error), appended to Google's message.
  * The rules are in run_gaql's description too, but a fix next to the error gets the retry right first time.
  */
-export function adsErrorFix(code: string, message: string, field: string): string | null {
+function adsErrorFix(code: string, message: string, field: string): string | null {
   switch (code) {
     case "EXPECTED_FILTERS_ON_DATE_RANGE":
       return "add a finite range to WHERE: segments.date DURING LAST_30_DAYS, or segments.date BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'.";
@@ -213,7 +216,11 @@ export class AdsClient {
       headers: await this.headers(loginCustomerId),
       body: JSON.stringify({ query }),
     });
-    return (JSON.parse(await AdsClient.body(res)) as { results?: any[] }[]).flatMap((b) => b.results ?? []);
+    const batches = JSON.parse(await AdsClient.body(res)) as { results?: any[]; error?: { code?: number } }[];
+    // A stream that fails partway still answers 200, with the error as its last element: never return a short list as if whole.
+    const broken = batches.find((b) => b.error);
+    if (broken) throw new AdsApiError(broken.error!.code ?? 500, JSON.stringify(broken));
+    return batches.flatMap((b) => b.results ?? []);
   }
 
   /** Keyword Planner (KeywordPlanIdeaService). Read-only: needs Basic access or above on the developer token. */

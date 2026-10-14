@@ -15,7 +15,7 @@
 import type { Request, Response } from "express";
 import type { DB } from "./db.js";
 import { now } from "./db.js";
-import { ADS_API, refreshGoogleToken } from "./google.js";
+import { ADS_API, adsDateTime, refreshGoogleToken } from "./google.js";
 import { readCookie } from "./http.js";
 
 export interface ConversionConfig {
@@ -65,15 +65,23 @@ export class AdConversions {
     void this.flush().catch(() => { /* retried by the sweep */ });
   }
 
-  /** Upload every pending conversion (new ones, and failures under the retry cap). */
+  private flushing = false;
+
+  /** Upload every pending conversion (new ones, and failures under the retry cap). One flush at a time, or a
+   *  record() during the hourly flush would upload the same click twice and log Google's rejection as an error. */
   async flush(): Promise<void> {
-    if (!this.cfg) return;
+    if (!this.cfg || this.flushing) return;
+    this.flushing = true;
+    try { await this.flushPending(this.cfg); } finally { this.flushing = false; }
+  }
+
+  private async flushPending(cfg: ConversionConfig): Promise<void> {
     const pending = this.db.prepare(`SELECT * FROM ad_conversions WHERE uploaded_at IS NULL AND attempts < ? ORDER BY at`).all(MAX_ATTEMPTS) as
       { user_id: string; kind: Kind; click_id: string; at: number }[];
     if (!pending.length) return;
     let token: string;
     try {
-      token = (await refreshGoogleToken(this.cfg, this.cfg.refreshToken, this.f)).access_token;
+      token = (await refreshGoogleToken(cfg, cfg.refreshToken, this.f)).access_token;
     } catch (e) {
       for (const p of pending) this.fail(p.user_id, `token: ${(e as Error).message}`);
       return;
@@ -94,8 +102,7 @@ export class AdConversions {
 
   private async upload(token: string, kind: Kind, clickId: string, at: number): Promise<void> {
     const c = this.cfg!;
-    // Google's required format: "yyyy-MM-dd HH:mm:ss+00:00".
-    const when = new Date(at * 1000).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "+00:00");
+    const when = adsDateTime(at);
     const res = await this.f(`${ADS_API}/customers/${c.customerId}:uploadClickConversions`, {
       method: "POST",
       headers: {

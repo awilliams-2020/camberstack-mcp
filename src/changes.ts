@@ -314,7 +314,7 @@ export async function resolveChange(
         AND campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = true`);
       const have = new Set(existing.map((r) =>
         `${String(r.campaignCriterion?.keyword?.text ?? "").toLowerCase()}|${r.campaignCriterion?.keyword?.matchType}`));
-      const fresh = change.keywords.filter((k) => !have.has(`${k.text.toLowerCase()}|${k.match_type}`));
+      const fresh = change.keywords.filter((k) => isNew(have, `${k.text.toLowerCase()}|${k.match_type}`));
       const skipped = change.keywords.length - fresh.length;
       const campaign = `customers/${customerId}/campaigns/${change.campaign_id}`;
       return {
@@ -325,7 +325,7 @@ export async function resolveChange(
         })),
         describe: `Add ${fresh.length} negative keyword(s) to campaign "${c.campaign.name}": ` +
           fresh.map((k) => fmtKw(k.text, k.match_type)).join(", ") +
-          (skipped ? ` (${skipped} already present, skipped)` : ""),
+          (skipped ? ` (${skipped} already present or repeated, skipped)` : ""),
       };
     }
     case "pause_keyword":
@@ -382,13 +382,14 @@ export async function resolveChange(
         throw new Error(`Campaign "${c.campaign.name}" uses a shared budget; changing it would change every campaign on it. Edit it in Google Ads instead.`);
       }
       const before = micros(c.campaignBudget.amountMicros);
+      const same = before === change.amount;
       return {
         change,
         service: "campaignBudgets",
-        operations: [{ update: { resourceName: c.campaignBudget.resourceName, amountMicros: toMicros(change.amount) }, updateMask: "amount_micros" }],
+        operations: same ? [] : [{ update: { resourceName: c.campaignBudget.resourceName, amountMicros: toMicros(change.amount) }, updateMask: "amount_micros" }],
         describe: `Set daily budget of campaign "${c.campaign.name}" from ${before.toFixed(2)} to ${change.amount.toFixed(2)}` +
           (before > 0 && change.amount > before * 2 ? ` ⚠ ${(change.amount / before).toFixed(1)}× the current budget` : ""),
-        inverse: { type: "set_daily_budget", campaign_id: change.campaign_id, amount: before },
+        inverse: same ? undefined : { type: "set_daily_budget", campaign_id: change.campaign_id, amount: before },
       };
     }
     case "set_end_date": {
@@ -578,7 +579,7 @@ export async function resolveChange(
         WHERE ad_group.id = ${change.ad_group_id} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = false
         AND ad_group_criterion.status != 'REMOVED'`);
       const have = new Set(existing.map((r) => `${String(r.adGroupCriterion?.keyword?.text ?? "").toLowerCase()}|${r.adGroupCriterion?.keyword?.matchType}`));
-      const fresh = change.keywords.filter((k) => !have.has(`${k.text.toLowerCase()}|${k.match_type}`));
+      const fresh = change.keywords.filter((k) => isNew(have, `${k.text.toLowerCase()}|${k.match_type}`));
       const skipped = change.keywords.length - fresh.length;
       const adGroup = `customers/${customerId}/adGroups/${change.ad_group_id}`;
       return {
@@ -586,7 +587,7 @@ export async function resolveChange(
         operations: fresh.map((k) => ({ create: keywordCreate(adGroup, k) })),
         describe: `Add ${fresh.length} keyword(s) to ad group "${g.adGroup.name}" (campaign "${g.campaign.name}"): ` +
           fresh.map((k) => fmtKw(k.text, k.match_type) + (k.max_cpc ? ` @ ${k.max_cpc.toFixed(2)}` : "")).join(", ") +
-          (skipped ? ` (${skipped} already present, skipped)` : ""),
+          (skipped ? ` (${skipped} already present or repeated, skipped)` : ""),
       };
     }
     case "add_responsive_search_ad": {
@@ -743,7 +744,7 @@ export async function resolveChange(
     }
     case "set_bidding_strategy": {
       const [c] = await q(`SELECT campaign.name, campaign.bidding_strategy_type, campaign.bidding_strategy, campaign.target_spend.cpc_bid_ceiling_micros,
-          campaign.maximize_conversions.target_cpa_micros, campaign.manual_cpc.enhanced_cpc_enabled, campaign.advertising_channel_type
+          campaign.maximize_conversions.target_cpa_micros
         FROM campaign WHERE campaign.id = ${change.campaign_id}`);
       if (!c) throw new Error(`Campaign ${change.campaign_id} not found`);
       if (c.campaign.biddingStrategy) throw new Error(`Campaign "${c.campaign.name}" uses a shared (portfolio) bid strategy; change it in Google Ads.`);
@@ -791,7 +792,7 @@ export async function resolveChange(
         change, service: "conversionActions",
         operations: [{ create: {
           name: change.name, category: change.category, type: change.source, status: "ENABLED", countingType: change.counting, primaryForGoal: change.primary,
-          valueSettings: change.default_value != null ? { defaultValue: change.default_value, alwaysUseDefaultValue: false } : { defaultValue: 0, alwaysUseDefaultValue: false },
+          valueSettings: { defaultValue: change.default_value ?? 0, alwaysUseDefaultValue: false },
         } }],
         describe: `Create conversion action "${change.name}" (${change.category}, ${change.source === "UPLOAD_CLICKS" ? "uploaded click ids" : "website tag"}, ` +
           `${change.counting === "ONE_PER_CLICK" ? "one per click" : "every conversion"}, ${change.primary ? "primary" : "secondary"})` +
@@ -1049,6 +1050,13 @@ function sitelinkOps(T: ReturnType<typeof tempIds>, campaign: string, links: Sit
   });
 }
 
+/** True the first time `key` is seen (adding it to `seen`): drops what's already there and repeats in one request. */
+function isNew(seen: Set<string>, key: string): boolean {
+  if (seen.has(key)) return false;
+  seen.add(key);
+  return true;
+}
+
 /** Human names for geo or language constants; falls back to the ids if they can't be read. */
 async function names(q: (query: string) => Promise<any[]>, resource: string, field: string, rns: string[]): Promise<string[]> {
   try {
@@ -1108,7 +1116,7 @@ export function inverseAfterApply(r: ResolvedChange, resourceNames: string[]): C
   return r.inverse;
 }
 
-export function fmtKw(text: string, matchType: string): string {
+function fmtKw(text: string, matchType: string): string {
   return matchType === "EXACT" ? `[${text}]` : matchType === "PHRASE" ? `"${text}"` : text;
 }
 

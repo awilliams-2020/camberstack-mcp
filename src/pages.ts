@@ -99,7 +99,7 @@ nav a{margin-left:12px}nav{white-space:nowrap}
 }
 `;
 
-export const SOURCE_URL = "https://github.com/zwznco/camberstack-mcp";
+const SOURCE_URL = "https://github.com/zwznco/camberstack-mcp";
 
 function layout(o: { title: string; description: string; path: string; body: string; baseUrl: string; jsonLd?: object; noindex?: boolean }): string {
   return `<!doctype html>

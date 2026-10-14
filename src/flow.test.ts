@@ -313,11 +313,14 @@ async function approve(auth: URL, decision = "approve"): Promise<{ g: URL; conse
   return { g: new URL(post.headers.get("location")!), consent, html, id };
 }
 
+/** The sign-in nonce cookie a page's /login set, which its callback needs to see from the same browser. */
+const stateCookie = (login: Response) => login.headers.get("set-cookie")!.split(";")[0]!;
+
 /** Google → our shared callback → the page's own callback, which sets its session cookie. */
-async function signIn(google: URL): Promise<string> {
+async function signIn(google: URL, state: string): Promise<string> {
   const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${google.searchParams.get("state")}`, { redirect: "manual" });
   expect(back.status).toBe(302);
-  const hop = await fetch(new URL(back.headers.get("location")!, base), { redirect: "manual" });
+  const hop = await fetch(new URL(back.headers.get("location")!, base), { redirect: "manual", headers: { cookie: state } });
   expect(hop.status).toBe(302);
   expect(hop.headers.get("set-cookie")).toContain("HttpOnly");
   return hop.headers.get("set-cookie")!.split(";")[0]!;
@@ -1082,7 +1085,11 @@ describe("OAuth + MCP end to end", () => {
     expect(g.searchParams.get("scope")).toBe("openid email");
     // Google returns to the main site's registered callback, which forwards to the admin host.
     expect(g.searchParams.get("redirect_uri")).toBe(`${base}/oauth/google/callback`);
-    const cookie = await signIn(g);
+    // A callback reached without the browser that started the sign-in (a link someone was sent) is refused.
+    const other = await fetch(`${admin}/login`, { redirect: "manual" });
+    const otherState = new URL(other.headers.get("location")!).searchParams.get("state");
+    expect((await fetch(`${admin}/callback?code=gcode&state=${otherState}`, { redirect: "manual" })).status).toBe(400);
+    const cookie = await signIn(g, stateCookie(login));
     expect(cookie).toMatch(/^cs_admin=/);
     const page = await fetch(`${admin}/?days=30&internal=1`, { headers: { cookie } });
     expect(page.status).toBe(200);
@@ -1109,12 +1116,13 @@ describe("OAuth + MCP end to end", () => {
     const login = await fetch(`${base}/account/login`, { redirect: "manual" });
     const g = new URL(login.headers.get("location")!);
     expect(g.searchParams.get("scope")).toBe("openid email");
-    const cookie = await signIn(g);
+    const cookie = await signIn(g, stateCookie(login));
     expect(cookie).toMatch(/^cs_account=/);
     // A sign-in started from the upgrade screen comes back to /account?upgrade=1; an ordinary one to /account.
-    const viaUpgrade = new URL((await fetch(`${base}/account/login?next=upgrade`, { redirect: "manual" })).headers.get("location")!);
+    const upLogin = await fetch(`${base}/account/login?next=upgrade`, { redirect: "manual" });
+    const viaUpgrade = new URL(upLogin.headers.get("location")!);
     const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${viaUpgrade.searchParams.get("state")}`, { redirect: "manual" });
-    const hop = await fetch(new URL(back.headers.get("location")!, base), { redirect: "manual" });
+    const hop = await fetch(new URL(back.headers.get("location")!, base), { redirect: "manual", headers: { cookie: stateCookie(upLogin) } });
     expect(hop.headers.get("location")).toBe("/account?upgrade=1");
     expect((await fetch(`${base}/account`, { headers: { cookie }, redirect: "manual" })).status).toBe(200);
     const html = await (await fetch(`${base}/account`, { headers: { cookie } })).text();
@@ -1232,7 +1240,7 @@ describe("OAuth + MCP end to end", () => {
     // Keywords: duplicates of what's there are skipped; undo removes exactly what was added.
     const k = await propose([{ type: "add_keywords", ad_group_id: "20", keywords: [
       { text: "invoice", match_type: "BROAD" }, { text: "cleaning invoice", match_type: "PHRASE", max_cpc: 3 }] }]);
-    expect(k.summary).toContain('Add 1 keyword(s) to ad group "AG" (campaign "Search"): "cleaning invoice" @ 3.00 (1 already present, skipped)');
+    expect(k.summary).toContain('Add 1 keyword(s) to ad group "AG" (campaign "Search"): "cleaning invoice" @ 3.00 (1 already present or repeated, skipped)');
     await call(token, "apply_changes", { proposal_id: k.proposal_id });
     const ku = await call(token, "undo_changes", { proposal_id: k.proposal_id });
     await call(token, "apply_changes", { proposal_id: ku.json.proposal_id });
