@@ -19,16 +19,19 @@ const DATA_API = "https://analyticsdata.googleapis.com/v1beta";
 export const DEMO_PROPERTY = "000000001";
 const DEMO_NOTE = "Sample data from Camberstack's demo Google Analytics property (a fictional plumbing business), not a real property.";
 
-/** Raised when the user's Google connection doesn't include Google Analytics yet. */
+/** Raised when the user's Google connection doesn't include Google Analytics yet (or, for a change, its edit access). */
 export class AnalyticsNotGrantedError extends Error {
-  constructor(readonly link: string | null) {
-    super("Google Analytics access isn't part of this Google connection yet. "
+  constructor(readonly link: string | null, edit = false) {
+    super((edit
+      ? "Changing Google Analytics needs its edit access, which this connection doesn't have (the box was unticked on Google's consent screen). "
+      : "Google Analytics access isn't part of this Google connection yet. ")
       + (link ? `The user adds it here (a personal link, valid 7 days): ${link} . ` : "")
       + "Google Ads and Search Console keep working either way; the demo property (000000001) works without it.");
   }
 }
 
-export interface Property { property_id: string; name: string; account: string }
+export interface Property { property_id: string; name: string; account: string; account_id: string }
+export interface GaAccount { account_id: string; name: string }
 export interface ReportRequest {
   startDate: string;
   endDate: string;
@@ -43,22 +46,28 @@ export interface ReportRequest {
 export interface Report { rows: Record<string, string | number>[]; row_count: number }
 
 /** The GA4 calls the tools make; the demo property answers the same ones. */
-export type Analytics = { properties(): Promise<Property[]>; runReport(propertyId: string, req: ReportRequest): Promise<Report> };
+export type Analytics = {
+  /** Every account this login can see (including ones with no property yet) and every property in them. */
+  summaries(): Promise<{ accounts: GaAccount[]; properties: Property[] }>;
+  runReport(propertyId: string, req: ReportRequest): Promise<Report>;
+  /** An Admin API call by path under v1beta, e.g. GET properties/123/keyEvents. Writes go through ga4-changes.ts only. */
+  admin(method: "GET" | "POST" | "DELETE", path: string, body?: object): Promise<any>;
+};
 
-/** One user's view of the GA4 Admin and Data APIs (read-only). */
+/** One user's view of the GA4 Admin and Data APIs. */
 export class AnalyticsClient implements Analytics {
   constructor(private accessToken: () => Promise<string>, private grantLink: () => string | null, private f: typeof fetch = fetch) {}
 
-  private async call(url: string, body?: object): Promise<any> {
+  private async call(url: string, body?: object, method = body ? "POST" : "GET"): Promise<any> {
     const res = await this.f(url, {
-      method: body ? "POST" : "GET",
+      method,
       headers: { Authorization: `Bearer ${await this.accessToken()}`, "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
     if (!res.ok) {
       if (res.status === 403 && /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(text)) {
-        throw new AnalyticsNotGrantedError(this.grantLink());
+        throw new AnalyticsNotGrantedError(this.grantLink(), method !== "GET" && url.startsWith(ADMIN_API));  // a report is a POST too
       }
       let msg = text.slice(0, 300);
       try { msg = JSON.parse(text).error?.message ?? msg; } catch { /* not JSON */ }
@@ -67,19 +76,25 @@ export class AnalyticsClient implements Analytics {
     return text ? JSON.parse(text) : {};
   }
 
-  async properties(): Promise<Property[]> {
-    const out: Property[] = [];
+  async summaries(): Promise<{ accounts: GaAccount[]; properties: Property[] }> {
+    const accounts: GaAccount[] = [], properties: Property[] = [];
     let page = "";
     do {
       const r = await this.call(`${ADMIN_API}/accountSummaries?pageSize=200${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`);
       for (const a of r.accountSummaries ?? []) {
+        const account_id = String(a.account).replace("accounts/", "");
+        accounts.push({ account_id, name: a.displayName });
         for (const p of a.propertySummaries ?? []) {
-          out.push({ property_id: String(p.property).replace("properties/", ""), name: p.displayName, account: a.displayName });
+          properties.push({ property_id: String(p.property).replace("properties/", ""), name: p.displayName, account: a.displayName, account_id });
         }
       }
       page = r.nextPageToken ?? "";
     } while (page);
-    return out;
+    return { accounts, properties };
+  }
+
+  admin(method: "GET" | "POST" | "DELETE", path: string, body?: object): Promise<any> {
+    return this.call(`${ADMIN_API}/${path}`, body, method);
   }
 
   async runReport(propertyId: string, q: ReportRequest): Promise<Report> {
@@ -114,9 +129,11 @@ function num(v: string, type: string): number {
 
 /** Sends the demo property's calls to the demo, everything else to Google. */
 export function routedAnalytics(google: Analytics, demo: Analytics): Analytics {
+  const isDemo = (path: string) => path.startsWith(`properties/${DEMO_PROPERTY}`);
   return {
-    properties: () => google.properties(),
+    summaries: () => google.summaries(),
     runReport: (id, q) => (id === DEMO_PROPERTY ? demo.runReport(id, q) : google.runReport(id, q)),
+    admin: (method, path, body) => (isDemo(path) ? demo.admin(method, path, body) : google.admin(method, path, body)),
   };
 }
 
@@ -137,11 +154,15 @@ export function gaWindow(o: { days: number; start_date?: string; end_date?: stri
 
 /** Properties this login can read; the demo property only when there are none (or Analytics isn't granted). */
 export async function listProperties(ga: Analytics) {
-  const demo = [{ property_id: DEMO_PROPERTY, name: "DEMO: Northwind Plumbing (sample data)", account: "Demo" }];
+  const demo = [{ property_id: DEMO_PROPERTY, name: "DEMO: Northwind Plumbing (sample data)", account: "Demo", account_id: "demo" }];
   try {
-    const props = await ga.properties();
-    if (props.length) return { properties: props };
-    return { properties: demo, note: "This Google login has no Google Analytics property, so the demo property (sample data) is offered. Tell the user it is a demo." };
+    const { accounts, properties } = await ga.summaries();
+    if (properties.length) return { properties, accounts };
+    return { properties: demo, accounts, note: accounts.length
+      ? "This login's Google Analytics account has no property yet, so the demo property (sample data) is offered. create_ga4_property "
+        + "(through propose_analytics_changes) can make one in an account listed here. Tell the user the data shown is a demo."
+      : "This Google login has no Google Analytics account. The user creates one at analytics.google.com (Google requires accepting its "
+        + "terms there); Camberstack can then add the property. Until then only the demo property (sample data) is offered: say so." };
   } catch (e) {
     if (!(e instanceof AnalyticsNotGrantedError)) throw e;
     return { properties: demo, not_granted: e.message, ...(e.link ? { grant_url: e.link } : {}),
@@ -193,7 +214,20 @@ const DEMO_DIMS = ["date", "landingPage", "sessionDefaultChannelGroup", "session
 const DEMO_METRICS = ["sessions", "engagedSessions", "engagementRate", "keyEvents", "sessionKeyEventRate", "totalUsers", "screenPageViews"];
 
 export class DemoAnalytics implements Analytics {
-  async properties(): Promise<Property[]> { return []; }
+  async summaries() { return { accounts: [], properties: [] }; }
+
+  /** The demo property's setup: one web stream, one key event, no Google Ads link. Changes are accepted and simulated. */
+  async admin(method: "GET" | "POST" | "DELETE", path: string): Promise<any> {
+    const p = `properties/${DEMO_PROPERTY}`;
+    if (method === "POST") return { name: `${path}/${Date.now()}` };
+    if (method === "DELETE") return {};
+    if (path === p) return { name: p, displayName: "DEMO: Northwind Plumbing (sample data)", timeZone: "America/Chicago", currencyCode: "USD" };
+    if (path.startsWith(`${p}/dataStreams`)) return { dataStreams: [{ name: `${p}/dataStreams/1`, type: "WEB_DATA_STREAM", displayName: "northwindplumbing.example",
+      webStreamData: { measurementId: "G-DEMO000001", defaultUri: "https://northwindplumbing.example" } }] };
+    if (path.startsWith(`${p}/keyEvents`)) return { keyEvents: [{ name: `${p}/keyEvents/1`, eventName: "generate_lead", countingMethod: "ONCE_PER_EVENT" }] };
+    if (path.startsWith(`${p}/googleAdsLinks`)) return { googleAdsLinks: [] };
+    throw new Error(`The demo property doesn't support ${method} ${path}.`);
+  }
 
   async runReport(_id: string, q: ReportRequest): Promise<Report> {
     const bad = [...q.dimensions.filter((d) => !DEMO_DIMS.includes(d)), ...q.metrics.filter((m) => !DEMO_METRICS.includes(m))];

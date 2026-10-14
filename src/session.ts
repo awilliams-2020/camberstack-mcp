@@ -12,6 +12,7 @@ import {
 } from "./google.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError, accountsLabel } from "./plans.js";
 import { AnalyticsClient, DemoAnalytics, routedAnalytics, type Analytics } from "./ga4.js";
+import { GA_TARGET, GaChangeSchema, gaInverseAfterApply, gaNoteAfterApply, resolveGaChange, writeGa, type GaChange, type GaResolved } from "./ga4-changes.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
 import {
   ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, pendingOf, resolveChange, summarize,
@@ -126,9 +127,13 @@ export const isDemo = (customerId: string | null | undefined) => bareCid(custome
 /** Spread into any result about an account, so the AI can't mistake demo data for the user's. */
 const demoNote = (customerId: string) => (isDemo(customerId) ? { note: DEMO_NOTE } : {});
 
-type Outcome = { describe: string; ok: boolean; error?: string; inverse?: Change };
+type AnyChange = Change | GaChange;
+type AnyResolved = ResolvedChange | GaResolved;
+/** `note`: something the user must do next, e.g. a new GA4 property's tag. */
+type Outcome = { describe: string; ok: boolean; error?: string; note?: string; inverse?: AnyChange };
 /** What the AI (and the account page) sees of an applied proposal's outcomes. */
-const publicResults = (outcomes: Outcome[]) => outcomes.map(({ describe, ok, error }) => ({ change: describe, ok, ...(error ? { error } : {}) }));
+const publicResults = (outcomes: Outcome[]) => outcomes.map(({ describe, ok, error, note }) =>
+  ({ change: describe, ok, ...(error ? { error } : {}), ...(note ? { note } : {}) }));
 
 export class UserSession {
   readonly ads: Ads;
@@ -181,7 +186,7 @@ export class UserSession {
   /**
    * Google Ads accounts this user has run tools on in the window: what a plan is sized by. Accounts used,
    * not accounts reachable, so a manager login that can see 50 clients isn't charged for 50. The demo never
-   * counts, and nor do failed calls (a call the gate refused is logged as failed).
+   * counts, nor does Google Analytics (change_history for "ga4"), nor failed calls (a call the gate refused is logged as failed).
    */
   accountsInUse(): string[] {
     return this.usage().map((u) => u.c);
@@ -190,9 +195,9 @@ export class UserSession {
   /** accountsInUse, most recently used first, with when each was last used. */
   private usage(): { c: string; last: number }[] {
     return this.deps.db.prepare(`SELECT customer_id c, max(at) last FROM tool_calls
-        WHERE user_id = ? AND ok = 1 AND customer_id IS NOT NULL AND customer_id != ? AND at >= ?
+        WHERE user_id = ? AND ok = 1 AND customer_id IS NOT NULL AND customer_id NOT IN (?, ?) AND at >= ?
         GROUP BY customer_id ORDER BY last DESC, c`)
-      .all(this.user.id, DEMO_CID, now() - ACCOUNT_WINDOW_DAYS * 86400) as { c: string; last: number }[];
+      .all(this.user.id, DEMO_CID, GA_TARGET, now() - ACCOUNT_WINDOW_DAYS * 86400) as { c: string; last: number }[];
   }
 
   /**
@@ -710,17 +715,18 @@ export class UserSession {
   // ---------------------------------------------------------------- write
 
   async propose(customerId: string, rawChanges: unknown[], undoOf?: string): Promise<{ proposal_id: string; summary: string; changes: number; skipped: string[] }> {
-    const a = await this.account(customerId);
-    const changes: Change[] = rawChanges.map((c) => ChangeSchema.parse(c));
+    const ga = customerId === GA_TARGET;
+    const a = ga ? { customerId: GA_TARGET, loginCustomerId: null } : await this.account(customerId);
+    const changes: AnyChange[] = rawChanges.map((c) => (ga ? GaChangeSchema : ChangeSchema).parse(c));
     const count = changes.reduce((n, c) => n + (c.type === "add_negative_keywords" || c.type === "add_keywords" ? c.keywords.length : 1), 0);
     if (count > MAX_CHANGES) throw new Error(`At most ${MAX_CHANGES} changes per proposal (got ${count}). Split it.`);
-    const pending = pendingOf(changes);
+    const pending = pendingOf(changes as Change[]);
     // Resolving only reads, and `pending` already carries what sibling changes set, so the changes resolve in parallel.
-    const resolved: ResolvedChange[] = await mapLimited(changes, (c) => resolveChange(this.ads, a.customerId, a.loginCustomerId, c, pending));
+    const resolved = await mapLimited(changes, (c) => this.resolve(a.customerId, a.loginCustomerId, c, pending));
     const live = resolved.filter((r) => r.operations.length);
     if (!live.length) throw new Error("Nothing to change: every requested change is already in place.");
     // Dry run against Google so problems surface now, not after the user approves.
-    await mapLimited(live, (r) => this.ads.mutate(a.customerId, r.service, r.operations, { validateOnly: true, loginCustomerId: a.loginCustomerId }));
+    await mapLimited(live, (r) => this.write(a.customerId, a.loginCustomerId, r, true));
     const id = `p_${randomUUID().slice(0, 8)}`;
     const summary = summarize(live);
     this.deps.db.prepare(`INSERT INTO proposals (id, user_id, customer_id, login_customer_id, changes, summary, status, undo_of, created_at)
@@ -734,7 +740,7 @@ export class UserSession {
     const p = this.proposal(proposalId);
     if (p.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${p.status}.`);
     if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
-    const changes = JSON.parse(p.changes) as Change[];
+    const changes = JSON.parse(p.changes) as AnyChange[];
     // Claim it before any write: a client retrying after a timeout would otherwise apply it twice. applied_at
     // marks the claim, and an undo also claims the change it reverses, so two undos of one change can't both run.
     // A claim left by a server that died mid-apply can be retaken after STALE_CLAIM, unless re-running could
@@ -755,15 +761,14 @@ export class UserSession {
       if (cur.applied_at) throw new Error(`Proposal ${proposalId} is already being applied.`);
       throw new Error(`Proposal ${p.undo_of} has already been undone.`);
     }
-    const opts = { loginCustomerId: p.login_customer_id };
     const save = (status: "applied" | "failed", outcomes: Outcome[]) => this.deps.db
       .prepare("UPDATE proposals SET status = ?, result = ?, applied_at = ? WHERE id = ?").run(status, JSON.stringify(outcomes), now(), p.id);
 
     // All or nothing. Re-resolve (the account may have moved since the proposal was made) and validate every
     // change with Google before writing any; reads and validation run all at once, writes one at a time, in order.
-    const pending = pendingOf(changes);
-    const checked = await mapLimited(changes, (c) => resolveChange(this.ads, p.customer_id, p.login_customer_id, c, pending)
-      .then((r) => (r.operations.length ? this.ads.mutate(p.customer_id, r.service, r.operations, { ...opts, validateOnly: true }) : Promise.resolve(null))
+    const pending = pendingOf(changes as Change[]);
+    const checked = await mapLimited(changes, (c) => this.resolve(p.customer_id, p.login_customer_id, c, pending)
+      .then((r) => (r.operations.length ? this.write(p.customer_id, p.login_customer_id, r, true) : Promise.resolve(null))
         .then(() => ({ r }), (e: Error) => ({ e, describe: r.describe })), (e: Error) => ({ e, describe: c.type as string })));
     if (checked.some((x) => "e" in x)) {
       const outcomes = checked.map((x): Outcome => ("e" in x
@@ -776,12 +781,11 @@ export class UserSession {
     const outcomes: Outcome[] = [];
     let failed: { at: number; error: string } | undefined;
     for (const [i, x] of checked.entries()) {
-      const r = (x as { r: ResolvedChange }).r;
+      const r = (x as { r: AnyResolved }).r;
       if (!r.operations.length) { outcomes.push({ describe: `${r.describe} (already in place)`, ok: true }); continue; }
       try {
-        const res = await this.ads.mutate(p.customer_id, r.service, r.operations, opts);
-        const names = (res.results ?? []).map((n) => n.resourceName).filter((n): n is string => !!n);
-        outcomes.push({ describe: r.describe, ok: true, inverse: inverseAfterApply(r, names) });
+        const w = await this.write(p.customer_id, p.login_customer_id, r);
+        outcomes.push({ describe: r.describe, ok: true, inverse: w.inverse, ...(w.note ? { note: w.note } : {}) });
       } catch (e) {
         failed = { at: i, error: (e as Error).message };
         outcomes.push({ describe: r.describe, ok: false, error: failed.error });
@@ -800,15 +804,15 @@ export class UserSession {
     for (const o of outcomes.slice(0, -1).reverse()) {
       if (!o.inverse) { if (!o.describe.endsWith("(already in place)")) o.error = "applied, and can't be rolled back"; continue; }
       try {
-        const r = await resolveChange(this.ads, p.customer_id, p.login_customer_id, o.inverse);
-        if (r.operations.length) await this.ads.mutate(p.customer_id, r.service, r.operations, opts);
+        const r = await this.resolve(p.customer_id, p.login_customer_id, o.inverse, pendingOf([]));
+        if (r.operations.length) await this.write(p.customer_id, p.login_customer_id, r);
         Object.assign(o, { ok: false, error: "rolled back", inverse: undefined });
       } catch (e) {
         o.error = `applied, and rolling it back failed: ${(e as Error).message}`;
       }
     }
     for (const x of checked.slice(failed.at + 1)) {
-      outcomes.push({ describe: (x as { r: ResolvedChange }).r.describe, ok: false, error: "not applied: an earlier change failed" });
+      outcomes.push({ describe: (x as { r: AnyResolved }).r.describe, ok: false, error: "not applied: an earlier change failed" });
     }
     const stuck = outcomes.some((o) => o.ok && o.inverse);
     save(outcomes.some((o) => o.ok && !o.describe.endsWith("(already in place)")) ? "applied" : "failed", outcomes);
@@ -820,6 +824,23 @@ export class UserSession {
     };
   }
 
+  /** Read what a change would do against the live account (Google Ads) or property (Google Analytics). */
+  private resolve(target: string, login: string | null, c: AnyChange, pending: ReturnType<typeof pendingOf>): Promise<AnyResolved> {
+    return target === GA_TARGET ? resolveGaChange(this.ga, c as GaChange) : resolveChange(this.ads, target, login, c as Change, pending);
+  }
+
+  /** Write a resolved change; `validateOnly` is Google Ads' dry run (GA4 has none: re-resolving is its check). */
+  private async write(target: string, login: string | null, r: AnyResolved, validateOnly = false): Promise<{ inverse?: AnyChange; note?: string }> {
+    if (r.service === "ga4") {
+      if (validateOnly) return {};
+      const res = await writeGa(this.ga, r.operations);
+      return { inverse: gaInverseAfterApply(r, res), note: gaNoteAfterApply(res) };
+    }
+    const res = await this.ads.mutate(target, r.service, r.operations, { loginCustomerId: login, ...(validateOnly ? { validateOnly: true } : {}) });
+    if (validateOnly) return {};
+    return { inverse: inverseAfterApply(r, (res.results ?? []).map((n) => n.resourceName).filter((n): n is string => !!n)) };
+  }
+
   async undo(proposalId: string) {
     const p = this.proposal(proposalId);
     if (p.status !== "applied") throw new Error(`Only applied proposals can be undone (${proposalId} is ${p.status}).`);
@@ -827,7 +848,7 @@ export class UserSession {
       throw new Error(`Proposal ${proposalId} has already been undone.`);
     }
     const outcomes = JSON.parse(p.result ?? "[]") as Outcome[];
-    const inverses = outcomes.map((o) => o.inverse).filter((x): x is Change => !!x).reverse();
+    const inverses = outcomes.map((o) => o.inverse).filter((x): x is AnyChange => !!x).reverse();
     if (!inverses.length) throw new Error("Nothing to undo: none of the changes in that proposal altered the account.");
     return this.propose(p.customer_id, inverses, p.id);
   }

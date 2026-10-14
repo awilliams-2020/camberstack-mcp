@@ -1120,7 +1120,7 @@ function fmtKw(text: string, matchType: string): string {
   return matchType === "EXACT" ? `[${text}]` : matchType === "PHRASE" ? `"${text}"` : text;
 }
 
-export function summarize(resolved: ResolvedChange[]): string {
+export function summarize(resolved: { operations: unknown[]; describe: string }[]): string {
   return resolved.filter((r) => r.operations.length)
     .map((r, i) => `${i + 1}. ${r.describe}`).join("\n");
 }

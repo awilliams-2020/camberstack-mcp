@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import { PublicChangeSchema } from "./changes.js";
 import { landingPages, listProperties, report } from "./ga4.js";
+import { GA_TARGET, PublicGaChangeSchema, gaSetup } from "./ga4-changes.js";
 import { ACCOUNT_WINDOW_DAYS, PlanLimitError } from "./plans.js";
 import { isDemo, type Account, type UserSession } from "./session.js";
 
@@ -286,6 +287,24 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
         + "If Google Analytics isn't part of the connection yet, says so and returns grant_url, a personal link the user opens to add it.",
       annotations: read,
     }, () => listProperties(session().ga));
+
+    tool("analytics_setup", {
+      title: "Google Analytics setup",
+      description: "How a GA4 property is set up: its web streams with their measurement IDs (what the site's tag must use), which events are key events "
+        + "(GA4's conversions), and which Google Ads accounts it's linked to. Check this before proposing setup changes. Changes nothing.",
+      inputSchema: { property_id: propertyId },
+      annotations: read,
+    }, ({ property_id }: { property_id: string }) => gaSetup(session().ga, property_id));
+
+    tool("propose_analytics_changes", {
+      title: "Propose Google Analytics changes (writes nothing)",
+      description: "Checks Google Analytics setup changes against the live property and stores them as a proposal with a plain-English summary; "
+        + "nothing is changed. Show the summary to the user and apply only after they approve, with apply_changes (undo_changes reverses it). "
+        + "Supported: create_ga4_property (a property plus a web stream; the applied result gives the measurement ID and the tag the site needs), "
+        + "mark_key_event / unmark_key_event (GA4's conversions), link_google_ads / unlink_google_ads. Point out any ⚠ line before they approve.",
+      inputSchema: { changes: z.array(PublicGaChangeSchema).min(1).max(20).describe("Changes to propose; several can go in one proposal") },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }, ({ changes }: { changes: unknown[] }) => session().propose(GA_TARGET, changes));
 
     tool("analytics_landing_pages", {
       title: "Google Analytics landing pages",

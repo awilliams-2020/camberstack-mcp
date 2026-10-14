@@ -231,12 +231,34 @@ const stripeFetch: typeof fetch = async (url, init) => {
 
 /** A Google Analytics connection: not granted until the user's stored token is the one the grant returned. */
 const ga = {
-  async properties(userId: string) {
+  async summaries(userId: string) {
     const enc = (db.prepare("SELECT enc_refresh FROM users WHERE id = ?").get(userId) as { enc_refresh: string }).enc_refresh;
     if (decrypt(key, enc) !== "g-refresh-with-analytics") throw new AnalyticsNotGrantedError(gaGrant.link(userId));
-    return [{ property_id: "321", name: "Example", account: "Example Inc" }];
+    return { accounts: [{ account_id: "77", name: "Example Inc" }], properties: [{ property_id: "321", name: "Example", account: "Example Inc", account_id: "77" }] };
   },
   async runReport() { return { row_count: 0, rows: [] }; },
+  /** Property 321's setup, which the changes below alter. */
+  keyEvents: [] as { name: string; eventName: string; countingMethod: string }[],
+  links: [] as { name: string; customerId: string }[],
+  failOn: "",
+  async admin(method: string, path: string, body?: any): Promise<any> {
+    if (this.failOn && path.includes(this.failOn) && method !== "GET") throw new Error(`Google Analytics API 400: refused ${this.failOn}`);
+    if (method === "GET" && path === "properties/321") return { displayName: "Example", timeZone: "America/New_York", currencyCode: "USD" };
+    if (method === "GET" && path.startsWith("properties/321/keyEvents")) return { keyEvents: this.keyEvents };
+    if (method === "GET" && path.startsWith("properties/321/googleAdsLinks")) return { googleAdsLinks: this.links };
+    if (method === "POST" && path === "properties/321/keyEvents") {
+      const k = { name: `properties/321/keyEvents/${this.keyEvents.length + 1}`, eventName: body.eventName, countingMethod: body.countingMethod };
+      this.keyEvents.push(k); return k;
+    }
+    if (method === "POST" && path === "properties/321/googleAdsLinks") {
+      const l = { name: `properties/321/googleAdsLinks/${this.links.length + 1}`, customerId: body.customerId };
+      this.links.push(l); return l;
+    }
+    if (method === "DELETE") {
+      this.keyEvents = this.keyEvents.filter((k) => k.name !== path); this.links = this.links.filter((l) => l.name !== path); return {};
+    }
+    throw new Error(`fake GA: ${method} ${path}`);
+  },
 };
 
 /** Our own Ads account's conversion upload endpoint, plus the operator's token refresh. */
@@ -269,7 +291,7 @@ beforeAll(async () => {
   server.close();
   server = await new Promise<Server>((resolve) => {
     ({ app, billing, relay, gaGrant } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
-      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc, gaFactory: (u) => ({ ...ga, properties: () => ga.properties(u.id) }) }));
+      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc, gaFactory: (u) => ({ summaries: () => ga.summaries(u.id), runReport: () => ga.runReport(), admin: (m, p, b) => ga.admin(m, p, b) }) }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
@@ -715,7 +737,7 @@ describe("OAuth + MCP end to end", () => {
       fetch(`${base}/oauth/google/callback?code=gcode&state=${s.state}`, { redirect: "manual", headers: cookie ? { cookie } : {} });
     const first = await start();
     // Only Analytics is asked for, added to what was granted before, for the account already connected.
-    expect(first.g.searchParams.get("scope")).toBe("openid email https://www.googleapis.com/auth/analytics.readonly");
+    expect(first.g.searchParams.get("scope")).toBe("openid email https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/analytics.edit");
     expect(first.g.searchParams.get("include_granted_scopes")).toBe("true");
     expect(first.g.searchParams.get("login_hint")).toBe("owner@example.com");
 
@@ -737,11 +759,51 @@ describe("OAuth + MCP end to end", () => {
       const done = await back(ok, ok.cookie);
       expect(done.status).toBe(200);
       expect(await done.text()).toContain("Google Analytics is now part of your Camberstack connection");
-      expect((await call(token, "analytics_properties")).json).toEqual({ properties: [{ property_id: "321", name: "Example", account: "Example Inc" }] });
+      expect((await call(token, "analytics_properties")).json.properties).toEqual([{ property_id: "321", name: "Example", account: "Example Inc", account_id: "77" }]);
     } finally {
       googleGrant.scope = googleGrant.scope.replace(" https://www.googleapis.com/auth/analytics.readonly", "");
       googleGrant.refresh = "g-refresh";
     }
+  });
+
+  it("proposes, applies and undoes Google Analytics setup changes, all or nothing", async () => {
+    // Runs after the grant above, so this connection has Google Analytics.
+    const p = await call(token, "propose_analytics_changes", { changes: [
+      { type: "mark_key_event", property_id: "321", event_name: "generate_lead", counting: "ONCE_PER_SESSION" },
+      { type: "link_google_ads", property_id: "321", customer_id: "111-222-3333" }] });
+    if (p.isError) throw new Error(p.text);
+    expect(p.json.summary).toContain('Mark "generate_lead" as a key event in GA4 property "Example" (counted once per session)');
+    expect(p.json.summary).toContain('Link GA4 property "Example" to Google Ads account 111-222-3333');
+    expect(ga.keyEvents).toHaveLength(0);  // proposing writes nothing
+
+    expect((await call(token, "apply_changes", { proposal_id: p.json.proposal_id })).json.status).toBe("applied");
+    expect(ga.keyEvents.map((k) => [k.eventName, k.countingMethod])).toEqual([["generate_lead", "ONCE_PER_SESSION"]]);
+    expect(ga.links.map((l) => l.customerId)).toEqual(["1112223333"]);
+    const again = await call(token, "propose_analytics_changes", { changes: [{ type: "mark_key_event", property_id: "321", event_name: "generate_lead" }] });
+    expect(again.text).toContain("already in place");
+
+    const setup = (await call(token, "analytics_setup", { property_id: "321" }));
+    expect(setup.isError).toBe(true);  // the fake has no data streams; analytics_setup itself is covered in ga4.test.ts
+
+    const u = await call(token, "undo_changes", { proposal_id: p.json.proposal_id });
+    expect(u.json.summary).toContain('Unlink GA4 property "Example" from Google Ads account 111-222-3333');
+    expect(u.json.summary).toContain('Stop counting "generate_lead" as a key event');
+    expect((await call(token, "apply_changes", { proposal_id: u.json.proposal_id })).json.status).toBe("applied");
+    expect([ga.keyEvents.length, ga.links.length]).toEqual([0, 0]);
+
+    // The link fails at write: the key event marked before it is rolled back.
+    const p2 = await call(token, "propose_analytics_changes", { changes: [
+      { type: "mark_key_event", property_id: "321", event_name: "sign_up" },
+      { type: "link_google_ads", property_id: "321", customer_id: "222-333-4444" }] });
+    ga.failOn = "googleAdsLinks";
+    const a2 = (await call(token, "apply_changes", { proposal_id: p2.json.proposal_id })).json;
+    ga.failOn = "";
+    expect(a2.status).toBe("failed");
+    expect(a2.results.map((r: any) => r.error)).toEqual(["rolled back", expect.stringContaining("refused googleAdsLinks")]);
+    expect(ga.keyEvents).toHaveLength(0);
+
+    const h = (await call(token, "change_history", { customer_id: "ga4" })).json;
+    expect(h[0].customer_id).toBe("ga4");
   });
 
   it("undoes a change only once", async () => {

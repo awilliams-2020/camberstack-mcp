@@ -11,8 +11,10 @@ export const adsDateTime = (at: number) => new Date(at * 1000).toISOString().rep
 
 export const ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
 const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
-/** Google Analytics (GA4), read-only. Not in the main consent: asked for separately, when a GA4 tool first needs it (ga4.ts). */
+/** Google Analytics (GA4): reports, and setup changes (properties, key events, Google Ads links). Not in the main consent: asked
+ *  for together, separately, when a GA4 tool first needs them (ga4.ts). */
 export const ANALYTICS_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
+export const ANALYTICS_EDIT_SCOPE = "https://www.googleapis.com/auth/analytics.edit";
 const GOOGLE_SCOPES = ["openid", "email", ADS_SCOPE, SEARCH_CONSOLE_SCOPE];
 export const ADS_API = "https://googleads.googleapis.com/v23";
 
@@ -51,7 +53,7 @@ export function googleAuthUrl(creds: GoogleCreds, redirectUri: string, state: st
 export function googleAnalyticsGrantUrl(creds: GoogleCreds, redirectUri: string, state: string, loginHint: string): string {
   return `${GOOGLE_AUTH}?${new URLSearchParams({
     client_id: creds.clientId, redirect_uri: redirectUri, response_type: "code",
-    scope: `openid email ${ANALYTICS_SCOPE}`, access_type: "offline", prompt: "consent", include_granted_scopes: "true",
+    scope: `openid email ${ANALYTICS_SCOPE} ${ANALYTICS_EDIT_SCOPE}`, access_type: "offline", prompt: "consent", include_granted_scopes: "true",
     login_hint: loginHint, state,
   })}`;
 }

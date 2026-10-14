@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AnalyticsClient, AnalyticsNotGrantedError, DEMO_PROPERTY, DemoAnalytics, landingPages, listProperties, report } from "./ga4.js";
 import { toolCatalog } from "./tools.js";
+import { gaInverseAfterApply, gaNoteAfterApply, gaSetup, resolveGaChange, writeGa } from "./ga4-changes.js";
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
 const client = (f: (url: string, init?: RequestInit) => Response) =>
@@ -9,9 +10,11 @@ const client = (f: (url: string, init?: RequestInit) => Response) =>
 describe("AnalyticsClient", () => {
   it("lists properties across pages of account summaries", async () => {
     const ga = client((u) => (u.includes("pageToken=p2")
-      ? json({ accountSummaries: [{ displayName: "B", propertySummaries: [{ property: "properties/2", displayName: "Shop" }] }] })
-      : json({ accountSummaries: [{ displayName: "A", propertySummaries: [{ property: "properties/1", displayName: "Site" }] }], nextPageToken: "p2" })));
-    expect(await ga.properties()).toEqual([{ property_id: "1", name: "Site", account: "A" }, { property_id: "2", name: "Shop", account: "B" }]);
+      ? json({ accountSummaries: [{ account: "accounts/b2", displayName: "B", propertySummaries: [{ property: "properties/2", displayName: "Shop" }] }] })
+      : json({ accountSummaries: [{ account: "accounts/a1", displayName: "A", propertySummaries: [{ property: "properties/1", displayName: "Site" }] }], nextPageToken: "p2" })));
+    expect(await ga.summaries()).toEqual({
+      accounts: [{ account_id: "a1", name: "A" }, { account_id: "b2", name: "B" }],
+      properties: [{ property_id: "1", name: "Site", account: "A", account_id: "a1" }, { property_id: "2", name: "Shop", account: "B", account_id: "b2" }] });
   });
 
   it("turns GA4's string metrics into numbers and sends the filter and sort", async () => {
@@ -39,7 +42,7 @@ describe("AnalyticsClient", () => {
 
   it("passes other API errors through readably (e.g. the API not enabled)", async () => {
     const ga = client(() => json({ error: { code: 403, message: "Google Analytics Data API has not been used in project 123 before or it is disabled." } }, 403));
-    await expect(ga.properties()).rejects.toThrow(/Google Analytics API 403: Google Analytics Data API has not been used/);
+    await expect(ga.summaries()).rejects.toThrow(/Google Analytics API 403: Google Analytics Data API has not been used/);
   });
 });
 
@@ -65,7 +68,44 @@ describe("demo property", () => {
 describe("rollout", () => {
   it("lists the Google Analytics tools only when they're switched on", () => {
     const names = (on: boolean) => toolCatalog(on).map((t) => t.name).filter((n) => n.startsWith("analytics_"));
-    expect(names(true)).toEqual(["analytics_properties", "analytics_landing_pages", "analytics_report"]);
+    expect(names(true)).toEqual(["analytics_properties", "analytics_setup", "analytics_landing_pages", "analytics_report"]);
     expect(names(false)).toEqual([]);
+  });
+});
+
+describe("create_ga4_property", () => {
+  const made: string[] = [];
+  const ga = {
+    async summaries() { return { accounts: [{ account_id: "77", name: "Example Inc" }],
+      properties: [{ property_id: "1", name: "Old site", account: "Example Inc", account_id: "77" }] }; },
+    async runReport() { return { row_count: 0, rows: [] }; },
+    async admin(method: string, path: string, body?: any) {
+      made.push(`${method} ${path}`);
+      if (path === "properties") return { name: "properties/555", ...body };
+      if (path === "properties/555/dataStreams") return { name: "properties/555/dataStreams/9", webStreamData: { measurementId: "G-ABC123", defaultUri: body.webStreamData.defaultUri } };
+      return {};
+    },
+  };
+  const change = { type: "create_ga4_property" as const, account_id: "77", name: "New site", website_url: "https://www.example.com", time_zone: "America/New_York", currency: "USD" };
+
+  it("creates the property and its web stream, hands back the tag, and undoes by deleting the property", async () => {
+    const r = await resolveGaChange(ga, change);
+    expect(r.describe).toBe('Create GA4 property "New site" in account "Example Inc" (America/New_York, USD) with a web stream for https://www.example.com');
+    const res = await writeGa(ga, r.operations);
+    expect(made).toEqual(["POST properties", "POST properties/555/dataStreams"]);
+    expect(gaNoteAfterApply(res)).toContain("gtag/js?id=G-ABC123");
+    expect(gaInverseAfterApply(r, res)).toEqual({ type: "delete_ga4_property", property_id: "555", name: "New site" });
+  });
+
+  it("refuses a name the account already uses, or an account the login can't see", async () => {
+    await expect(resolveGaChange(ga, { ...change, name: "old SITE" })).rejects.toThrow(/already has a property named/);
+    await expect(resolveGaChange(ga, { ...change, account_id: "88" })).rejects.toThrow(/isn't one this login can see/);
+  });
+});
+
+describe("analytics_setup", () => {
+  it("shows the demo property's stream, key events and links", async () => {
+    expect(await gaSetup(new DemoAnalytics(), DEMO_PROPERTY)).toMatchObject({
+      web_streams: [{ measurement_id: "G-DEMO000001" }], key_events: [{ event_name: "generate_lead" }], google_ads_links: [] });
   });
 });

@@ -10,6 +10,7 @@ import type { UserSession } from "./session.js";
 import { SignIn } from "./signin.js";
 import { appPage, COPY_JS, esc, infoPage } from "./pages.js";
 import { DEMO_CID } from "./demo.js";
+import { GA_TARGET } from "./ga4-changes.js";
 import { ACCOUNT_WINDOW_DAYS, PRO_PRICE_LABEL } from "./plans.js";
 
 export interface AccountDeps {
@@ -39,7 +40,7 @@ const DEFAULT_RANGE = 30;
 const FOLD_LINES = 3;
 const FOLD_CHARS = 280;
 /** Google's dashed form: 386-283-8095 */
-const fmtCid = (c: string) => c === DEMO_CID ? "000-000-0001 (demo, sample data)" : /^\d{10}$/.test(c) ? `${c.slice(0, 3)}-${c.slice(3, 6)}-${c.slice(6)}` : c;
+const fmtCid = (c: string) => c === DEMO_CID ? "000-000-0001 (demo, sample data)" : c === GA_TARGET ? "Google Analytics" : /^\d{10}$/.test(c) ? `${c.slice(0, 3)}-${c.slice(3, 6)}-${c.slice(6)}` : c;
 
 export function mountAccount(app: Express, d: AccountDeps): SignIn {
   const auth = new SignIn(d, "acc_", "cs_account", "/account", 7 * 86400);

@@ -31,6 +31,8 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account at a time wit
 | `search_console_sitemaps` | no | submitted sitemaps: last downloaded, URL count, errors and warnings |
 | `paid_organic_overlap` | no | joins an Ads account's search terms with a site's organic queries: searches paid for that already rank near the top, and page-2+ searches with no ad |
 | `analytics_properties` | no | the Google Analytics 4 properties the login can read; if Analytics isn't granted yet, a personal link that adds it |
+| `analytics_setup` | no | a property's web streams (measurement IDs), key events and Google Ads links |
+| `propose_analytics_changes` | no | like `propose_changes`, for GA4 setup: `create_ga4_property` (with a web stream; the applied result gives the tag), `mark_key_event`/`unmark_key_event`, `link_google_ads`/`unlink_google_ads`. Applied and undone with `apply_changes`/`undo_changes` |
 | `analytics_landing_pages` | no | sessions, users, engagement rate, key events and key event rate per landing page, optionally for one channel (e.g. Paid Search) |
 | `analytics_report` | no | any GA4 Data API report by dimension and metric names, with a contains filter |
 | `propose_changes` | no | resolves changes against the live account, dry-runs them with Google (`validateOnly`), stores a proposal with a plain-English summary |
@@ -45,9 +47,9 @@ The Search Console tools take either `days` or exact `start_date`/`end_date`, an
 days Google is still filling in. Requesting indexing and submitting sitemaps aren't available: Camberstack only holds
 the read-only scope.
 
-The Google Analytics tools need `analytics.readonly`, a sensitive scope that isn't part of connecting: the first call
-without it returns a personal `/connect/analytics` link that adds it to the same Google account (incremental
-authorization). Until Google verifies that scope, they're listed only for `ADMIN_EMAILS`/`PRO_EMAILS`; `GA4_PUBLIC=1`
+The Google Analytics tools need `analytics.readonly` and `analytics.edit`, sensitive scopes that aren't part of connecting:
+the first call without them returns a personal `/connect/analytics` link that adds both to the same Google account
+(incremental authorization, per API rather than per permission). Until Google verifies them, they're listed only for `ADMIN_EMAILS`/`PRO_EMAILS`; `GA4_PUBLIC=1`
 lists them for everyone. The Cloud project needs the Google Analytics Data API and Admin API enabled.
 
 What a proposal can do:
