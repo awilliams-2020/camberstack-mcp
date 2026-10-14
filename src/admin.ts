@@ -137,7 +137,7 @@ const stat = (label: string, value: string, sub = "") => `<div class="stat"><spa
 
 /** Outside dashboards the operator checks alongside this one. */
 const EXTERNAL: [string, string][] = [
-  ["Claude directory", "https://claude.ai/directory/connectors/camberstack"],
+  ["Claude directory", "https://claude.ai/directory/manage/camberstack"],  // submission + Observability; public listing: /directory/connectors/camberstack
   ["Stripe", "https://dashboard.stripe.com/subscriptions"],
   ["Glama", "https://glama.ai/mcp/servers/zwznco/camberstack-mcp"],
   ["MCP registry", "https://registry.modelcontextprotocol.io/v0/servers?search=io.camberstack"],
