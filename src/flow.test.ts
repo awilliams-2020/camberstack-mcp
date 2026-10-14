@@ -12,9 +12,8 @@ import { openDb } from "./db.js";
 import type { Config } from "./config.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { createRelayKey } from "./relay.js";
-import { SearchConsoleNotGrantedError } from "./google.js";
+import { NotGrantedError } from "./google.js";
 import { io } from "./changes.js";
-import { AnalyticsNotGrantedError } from "./ga4.js";
 
 const key = randomBytes(32);
 const idToken = (sub: string, email: string) =>
@@ -158,7 +157,8 @@ class FakeAds {
 
 /** A tiny Search Console: one site whose queries overlap FakeAds' search terms. */
 class FakeSearchConsole {
-  notGranted = false;
+  /** The grant link to hand out as "Search Console not granted", or "" when it is. */
+  notGranted = "";
   /** Site totals (no dimension) returned in call order. */
   totals: any[] = [];
   requests: { site: string; req: any }[] = [];
@@ -166,11 +166,11 @@ class FakeSearchConsole {
   rowsFor?: (req: any) => any[] | undefined;
   inspected: string[] = [];
   async sites() {
-    if (this.notGranted) throw new SearchConsoleNotGrantedError();
+    if (this.notGranted) throw new NotGrantedError("search-console", this.notGranted);
     return [{ siteUrl: "sc-domain:acme.test", permissionLevel: "siteOwner" }, { siteUrl: "https://other.test/", permissionLevel: "siteUnverifiedUser" }];
   }
   async searchAnalytics(site: string, req: any) {
-    if (this.notGranted) throw new SearchConsoleNotGrantedError();
+    if (this.notGranted) throw new NotGrantedError("search-console", this.notGranted);
     this.requests.push({ site, req });
     if (!req.dimensions.length) return [this.totals.shift()!];
     const custom = this.rowsFor?.(req);
@@ -233,7 +233,7 @@ const stripeFetch: typeof fetch = async (url, init) => {
 const ga = {
   async summaries(userId: string) {
     const enc = (db.prepare("SELECT enc_refresh FROM users WHERE id = ?").get(userId) as { enc_refresh: string }).enc_refresh;
-    if (decrypt(key, enc) !== "g-refresh-with-analytics") throw new AnalyticsNotGrantedError(gaGrant.link(userId));
+    if (decrypt(key, enc) !== "g-refresh-with-analytics") throw new NotGrantedError("analytics", grants.link("analytics", userId));
     return { accounts: [{ account_id: "77", name: "Example Inc" }], properties: [{ property_id: "321", name: "Example", account: "Example Inc", account_id: "77" }] };
   },
   async runReport() { return { row_count: 0, rows: [] }; },
@@ -274,7 +274,7 @@ const adsConversionFetch: typeof fetch = async (url, init) => {
 
 let app: ReturnType<typeof createApp>["app"];
 let billing: ReturnType<typeof createApp>["billing"];
-let gaGrant: ReturnType<typeof createApp>["gaGrant"];
+let grants: ReturnType<typeof createApp>["grants"];
 let relay: ReturnType<typeof createApp>["relay"];
 let server: Server;
 let base = "";
@@ -293,7 +293,7 @@ beforeAll(async () => {
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    ({ app, billing, relay, gaGrant } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
+    ({ app, billing, relay, grants } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
       conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc, gaFactory: (u) => ({ summaries: () => ga.summaries(u.id), runReport: () => ga.runReport(), admin: (m, p, b) => ga.admin(m, p, b) }) }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
@@ -355,6 +355,9 @@ async function approve(auth: URL, decision = "approve"): Promise<{ g: URL; conse
 
 /** The sign-in nonce cookie a page's /login set, which its callback needs to see from the same browser. */
 const stateCookie = (login: Response) => login.headers.get("set-cookie")!.split(";")[0]!;
+
+/** The test user's id (everyone here signs in as googleUser). */
+const ownerId = () => (db.prepare("SELECT id FROM users WHERE google_sub = ?").get(googleUser.sub) as { id: string }).id;
 
 /** Google → our shared callback → the page's own callback, which sets its session cookie. */
 async function signIn(google: URL, state: string): Promise<string> {
@@ -1110,16 +1113,41 @@ describe("OAuth + MCP end to end", () => {
       pending: false, index: false, errors: 0, warnings: 2, urls_submitted: 36 }]);
   });
 
-  it("says how to grant Search Console when the connection doesn't include it, and offers the demo site", async () => {
-    sc.notGranted = true;
+  it("hands out a link that adds Search Console when the connection doesn't include it, and offers the demo site", async () => {
+    sc.notGranted = grants.link("search-console", ownerId());
     try {
       const s = (await call(token, "search_console_sites")).json;
       expect(s.sites).toEqual([{ site_url: "sc-domain:northwind-plumbing.example", permission: "demo" }]);
-      expect(s.not_granted).toContain("reconnects Camberstack");
+      expect(s.grant_url).toBe(sc.notGranted);
       const r = await call(token, "search_console_performance", { site_url: "sc-domain:acme.test" });
       expect(r.isError).toBe(true);
-      expect(r.text).toContain("Search Console box ticked");
-    } finally { sc.notGranted = false; }
+      expect(r.text).toContain("/connect/search-console?t=");
+      const go = await fetch(s.grant_url, { redirect: "manual" });
+      expect(new URL(go.headers.get("location")!).searchParams.get("scope")).toBe("openid email https://www.googleapis.com/auth/webmasters.readonly");
+    } finally { sc.notGranted = ""; }
+  });
+
+  it("connects with Search Console only, then adds Google Ads with one link", async () => {
+    const saved = { ...googleGrant };
+    googleGrant.scope = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/webmasters.readonly";
+    const realList = ads.listAccessibleCustomers.bind(ads);
+    try {
+      const scOnly = await connect();  // Google Ads unticked: still connects
+      ads.listAccessibleCustomers = async () => { throw new NotGrantedError("google-ads", grants.link("google-ads", ownerId())); };
+      const l = (await call(scOnly, "list_accounts")).json;
+      expect(l.accounts.map((a: any) => a.customerId)).toEqual(["0000000001"]);
+      expect(l.note).toContain("without Google Ads access");
+      const go = await fetch(l.grant_url, { redirect: "manual" });
+      expect(new URL(go.headers.get("location")!).searchParams.get("scope")).toBe("openid email https://www.googleapis.com/auth/adwords");
+      const state = new URL(go.headers.get("location")!).searchParams.get("state");
+      googleGrant.scope += " https://www.googleapis.com/auth/adwords";
+      const done = await fetch(`${base}/oauth/google/callback?code=gcode&state=${state}`,
+        { redirect: "manual", headers: { cookie: go.headers.get("set-cookie")!.split(";")[0]! } });
+      expect(await done.text()).toContain("Google Ads is now part of your Camberstack connection");
+    } finally {
+      Object.assign(googleGrant, saved);
+      ads.listAccessibleCustomers = realList;
+    }
   });
 
   it("runs the whole flow on the demo account without touching Google or the free allowance", async () => {

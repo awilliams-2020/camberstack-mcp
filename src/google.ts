@@ -10,7 +10,7 @@
 export const adsDateTime = (at: number) => new Date(at * 1000).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "+00:00");
 
 export const ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
-const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 /** Google Analytics (GA4): reports, and setup changes (properties, key events, Google Ads links). Not in the main consent: asked
  *  for together, separately, when a GA4 tool first needs them (ga4.ts). */
 export const ANALYTICS_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
@@ -47,15 +47,41 @@ export function googleAuthUrl(creds: GoogleCreds, redirectUri: string, state: st
 }
 
 /**
- * Add Google Analytics to an existing connection (incremental authorization): Google returns a refresh token covering
- * everything granted before plus Analytics. openid email so the callback can check it's the same Google account.
+ * The Google services a user grants one by one ("à la carte"): any of them at sign-in, or each later through a personal
+ * /connect/<kind> link (grant.ts) when a tool first needs it. `scopes[0]` is the one that must come back granted.
  */
-export function googleAnalyticsGrantUrl(creds: GoogleCreds, redirectUri: string, state: string, loginHint: string): string {
+export const GRANTS = {
+  "google-ads": { label: "Google Ads", scopes: [ADS_SCOPE] },
+  "search-console": { label: "Search Console", scopes: [SEARCH_CONSOLE_SCOPE] },
+  "analytics": { label: "Google Analytics", scopes: [ANALYTICS_SCOPE, ANALYTICS_EDIT_SCOPE] },
+} as const;
+export type GrantKind = keyof typeof GRANTS;
+
+/**
+ * Add one service to an existing connection (incremental authorization): Google returns a refresh token covering
+ * everything granted before plus this. openid email so the callback can check it's the same Google account.
+ */
+export function googleGrantUrl(creds: GoogleCreds, redirectUri: string, state: string, kind: GrantKind, loginHint: string): string {
   return `${GOOGLE_AUTH}?${new URLSearchParams({
     client_id: creds.clientId, redirect_uri: redirectUri, response_type: "code",
-    scope: `openid email ${ANALYTICS_SCOPE} ${ANALYTICS_EDIT_SCOPE}`, access_type: "offline", prompt: "consent", include_granted_scopes: "true",
+    scope: ["openid", "email", ...GRANTS[kind].scopes].join(" "), access_type: "offline", prompt: "consent", include_granted_scopes: "true",
     login_hint: loginHint, state,
   })}`;
+}
+
+/** Google's answer when the token lacks the scope a call needs. */
+export const scopeMissing = (status: number, body: string) =>
+  status === 403 && /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(body);
+
+/** A tool needs a Google service this connection doesn't have yet; `link` adds it (personal, 7 days). */
+export class NotGrantedError extends Error {
+  constructor(readonly kind: GrantKind, readonly link: string | null, edit = false) {
+    const { label } = GRANTS[kind];
+    super(`${edit ? `Changing ${label} needs its edit access, which this connection doesn't have (the box was unticked on Google's consent screen).`
+      : `${label} access isn't part of this Google connection yet.`} `
+      + (link ? `The user adds it here (a personal link, valid 7 days): ${link} . ` : "")
+      + "The other Google tools keep working either way.");
+  }
 }
 
 /** Identity only (openid email), no Ads access and no refresh token: the operator's /admin sign-in. */
@@ -204,6 +230,7 @@ export class AdsClient {
     private accessToken: () => Promise<string>,
     private developerToken?: string,
     private f: FetchLike = fetch,
+    private grantLink: () => string | null = () => null,
   ) {}
 
   private async headers(loginCustomerId?: string | null): Promise<Record<string, string>> {
@@ -216,15 +243,16 @@ export class AdsClient {
   }
 
   /** Response body as text; throws AdsApiError on a non-2xx. */
-  private static async body(res: Response): Promise<string> {
+  private async body(res: Response): Promise<string> {
     const body = await res.text();
+    if (scopeMissing(res.status, body)) throw new NotGrantedError("google-ads", this.grantLink());
     if (!res.ok) throw new AdsApiError(res.status, body);
     return body;
   }
 
   async listAccessibleCustomers(): Promise<string[]> {
     const res = await this.f(`${ADS_API}/customers:listAccessibleCustomers`, { headers: await this.headers() });
-    return ((JSON.parse(await AdsClient.body(res)).resourceNames ?? []) as string[]).map((r) => r.split("/")[1]!);
+    return ((JSON.parse(await this.body(res)).resourceNames ?? []) as string[]).map((r) => r.split("/")[1]!);
   }
 
   async search(customerId: string, query: string, loginCustomerId?: string | null): Promise<any[]> {
@@ -233,7 +261,7 @@ export class AdsClient {
       headers: await this.headers(loginCustomerId),
       body: JSON.stringify({ query }),
     });
-    const batches = JSON.parse(await AdsClient.body(res)) as { results?: any[]; error?: { code?: number } }[];
+    const batches = JSON.parse(await this.body(res)) as { results?: any[]; error?: { code?: number } }[];
     // A stream that fails partway still answers 200, with the error as its last element: never return a short list as if whole.
     const broken = batches.find((b) => b.error);
     if (broken) throw new AdsApiError(broken.error!.code ?? 500, JSON.stringify(broken));
@@ -249,7 +277,7 @@ export class AdsClient {
       headers: await this.headers(loginCustomerId),
       body: JSON.stringify(request),
     });
-    const body = await AdsClient.body(res);
+    const body = await this.body(res);
     return body ? JSON.parse(body) : {};
   }
 
@@ -271,7 +299,7 @@ export class AdsClient {
       body: JSON.stringify({ [cross ? "mutateOperations" : "operations"]: operations, validateOnly: !!opts.validateOnly,
         ...(service === "campaignConversionGoals" ? {} : { partialFailure: false }) }),
     });
-    const body = await AdsClient.body(res);
+    const body = await this.body(res);
     const json = body ? JSON.parse(body) : {};
     if (!cross) return json.results ? json : { results: [] };
     return { results: (json.mutateOperationResponses ?? []).map((r: Record<string, { resourceName?: string }>) =>
@@ -290,7 +318,7 @@ export class AdsClient {
       headers: await this.headers(loginCustomerId),
       body: JSON.stringify({ conversions, partialFailure: true }),
     });
-    const body = await AdsClient.body(res);
+    const body = await this.body(res);
     const json = body ? JSON.parse(body) : {};
     const errors = conversions.map((): string | null => null);
     for (const d of json.partialFailureError?.details ?? []) {
@@ -307,15 +335,6 @@ export class AdsClient {
 const SEARCH_CONSOLE_API = "https://www.googleapis.com/webmasters/v3";
 /** URL Inspection lives on the newer host; webmasters.readonly is enough for it. */
 const URL_INSPECTION_API = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
-
-/** Raised when the user's Google connection doesn't include Search Console (unticked, or connected before it existed). */
-export class SearchConsoleNotGrantedError extends Error {
-  constructor() {
-    super("Search Console access isn't part of this Google connection: it was unticked on Google's consent screen, or Camberstack "
-      + "was connected before Search Console tools existed. To add it, the user reconnects Camberstack in their AI app and leaves "
-      + "the Search Console box ticked. The Google Ads tools keep working either way.");
-  }
-}
 
 export interface SearchAnalyticsRow { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }
 export interface SearchAnalyticsRequest {
@@ -343,7 +362,7 @@ export interface UrlInspection {
 
 /** One user's view of the Search Console API (read-only). */
 export class SearchConsoleClient {
-  constructor(private accessToken: () => Promise<string>, private f: FetchLike = fetch) {}
+  constructor(private accessToken: () => Promise<string>, private grantLink: () => string | null = () => null, private f: FetchLike = fetch) {}
 
   private async get(path: string, init: RequestInit = {}): Promise<any> {
     const res = await this.f(path.startsWith("https://") ? path : `${SEARCH_CONSOLE_API}${path}`, {
@@ -352,7 +371,7 @@ export class SearchConsoleClient {
     });
     const body = await res.text();
     if (!res.ok) {
-      if (res.status === 403 && /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(body)) throw new SearchConsoleNotGrantedError();
+      if (scopeMissing(res.status, body)) throw new NotGrantedError("search-console", this.grantLink());
       let msg = body.slice(0, 300);
       try { msg = JSON.parse(body).error?.message ?? msg; } catch { /* not JSON */ }
       // AIs guess sc-domain:example.com when the user's property is https://www.example.com/ (or the reverse).

@@ -13,6 +13,7 @@ export const SERVER_VERSION = "0.10.1";
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
 Never call apply_changes unless the user has explicitly approved that specific proposal in this conversation. Every applied proposal can be reversed with undo_changes.
+Each Google service is added separately: when a result says one isn't part of the connection, give the user its grant_url (one click adds it); never tell them to reconnect.
 The Free plan covers 1 Google Ads account at a time (Pro covers 10), counted as accounts used in the last 30 days, with one switch to another account every 30 days; undo and change history always work.
 To grow an account, keyword_ideas finds what people search for around a seed or a landing page; keyword_metrics checks volume and bids for a given list. Pass the account's own market: location_ids default to the United States.
 Search Console (read-only): search_console_sites lists the user's websites; search_console_summary gives site totals against the previous period (lead with these: per-query rows leave out rare queries); search_console_performance shows their organic queries and pages; search_console_trend shows what is rising, falling, new and lost between two periods; search_console_opportunities finds near-page-1 queries and weak snippets; search_console_inspect_urls says whether Google has indexed given pages and why not; search_console_sitemaps shows when Google last read each sitemap; paid_organic_overlap joins one site with one Ads account to find searches paid for that already rank organically, and organic searches with no ads. Camberstack can't request indexing or submit sitemaps: the user does that in Search Console.
@@ -115,6 +116,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     const s = session();
     const accounts = await s.accounts({ fresh: true });
     const demo = accounts.some((a) => isDemo(a.customerId));
+    const grantUrl = s.lastUnreadable.find((u) => u.grant_url)?.grant_url;
     // Only a plan at its limit says anything: until then every account is open, and there's nothing to explain.
     const st = s.planState(new Set(accounts.filter((a) => a.manager).map((a) => a.customerId)));
     const counted = (a: Account) => !a.manager && !isDemo(a.customerId);
@@ -129,8 +131,11 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
             + (s.isPro ? "." : ", or on Pro, which covers more (the billing tool has the upgrade link)."),
       } } : {}),
       ...(s.lastUnreadable.length ? { unreadable: s.lastUnreadable } : {}),
+      // Google Ads wasn't granted (connected for Search Console only): one link adds it, nothing to reconnect.
+      ...(grantUrl ? { grant_url: grantUrl, note: `The user IS connected, as ${s.user.email}, but without Google Ads access, so only the demo `
+        + "account (sample data) is offered. Tell the user plainly, and give them grant_url: it adds Google Ads to this connection." }
       // Without "signed in as", models read demo-only as "not signed in" and send the user to reconnect, which changes nothing.
-      ...(demo ? { note: `The user IS connected and signed in, as ${s.user.email}; there is nothing to reconnect. That Google login has no `
+      : demo ? { note: `The user IS connected and signed in, as ${s.user.email}; there is nothing to reconnect. That Google login has no `
         + "readable Google Ads account, so only the demo account (sample data, a fictional business) is offered. Tell the user plainly that "
         + "it is a demo, and if `unreadable` is present, explain why their real accounts are missing. To use a real account: give "
         + `${s.user.email} access in Google Ads (Admin, then Access and security), or disconnect and connect again with the Google login that has it.` } : {}),

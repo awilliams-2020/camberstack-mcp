@@ -12,7 +12,7 @@ import { now, openDb, sweep, type DB } from "./db.js";
 import { deriveKey } from "./crypto.js";
 import { CamberstackProvider, MCP_SCOPE, consentCookie } from "./provider.js";
 import { UserSession, clearGoogleCache, type SessionDeps } from "./session.js";
-import { AnalyticsGrant } from "./ga4.js";
+import { Grants } from "./grant.js";
 import { Relay } from "./relay.js";
 import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
 import { Analytics, BEACON_JS, parseBeacon } from "./analytics.js";
@@ -49,8 +49,8 @@ export interface Service {
   startJobs(): void;
   /** The conversion relay, so tests can flush it. */
   relay: Relay;
-  /** Google Analytics grant links, so tests can follow one. */
-  gaGrant: AnalyticsGrant;
+  /** Links that add one Google service to a connection, so tests can follow one. */
+  grants: Grants;
 }
 
 export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Service {
@@ -71,13 +71,13 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   const provider = new CamberstackProvider(db, {
     baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey, fetch: overrides.fetch,
   });
-  const gaGrant = new AnalyticsGrant({ db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
-    signingKey: deriveKey(cfg.encryptionKey, "analytics-links"), forgetToken: clearGoogleCache, fetch: overrides.fetch });
+  const grants = new Grants({ db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
+    signingKey: deriveKey(cfg.encryptionKey, "grant-links"), forgetToken: clearGoogleCache, fetch: overrides.fetch });
   const deps: SessionDeps = {
     db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
     freeAccounts: cfg.freeAccounts, proAccounts: cfg.proAccounts, proEmails: cfg.proEmails,
     billingLink: (kind, userId) => billing.link(kind, userId), refreshPlan: (userId) => billing.refreshPlan(userId),
-    analyticsLink: (userId) => gaGrant.link(userId), ...overrides,
+    grantLink: (kind, userId) => grants.link(kind, userId), ...overrides,
   };
   const relay = new Relay(deps);
   const mcpUrl = new URL(`${cfg.baseUrl}/mcp`);
@@ -186,8 +186,8 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
       return;
     }
     const state = typeof req.query.state === "string" ? req.query.state : undefined;
-    if (gaGrant.owns(state)) {
-      await gaGrant.finish(req, res, info).catch((e: Error) => res.status(400).type("html").send(errorPage(cfg.baseUrl, e.message)));
+    if (grants.owns(state)) {
+      await grants.finish(req, res, info).catch((e: Error) => res.status(400).type("html").send(errorPage(cfg.baseUrl, e.message)));
       return;
     }
     try {
@@ -306,7 +306,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     brand(`shots/${q.params.file}`, "image/webp")(q, r);
   });
   billing.mount(app, info);
-  gaGrant.mount(app, info);
+  grants.mount(app, info);
   lifecycle.mount(app, info);
 
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
@@ -346,7 +346,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
         .catch((e) => console.error(`IndexNow: ${(e as Error).message}`));
     }
   };
-  return { app, billing, startJobs, relay, gaGrant };
+  return { app, billing, startJobs, relay, grants };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

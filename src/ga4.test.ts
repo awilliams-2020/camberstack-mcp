@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AnalyticsClient, AnalyticsNotGrantedError, DEMO_PROPERTY, DemoAnalytics, landingPages, listProperties, report } from "./ga4.js";
+import { NotGrantedError } from "./google.js";
+import { AnalyticsClient, DEMO_PROPERTY, DemoAnalytics, landingPages, listProperties, report } from "./ga4.js";
 import { toolCatalog } from "./tools.js";
 import { gaInverseAfterApply, gaNoteAfterApply, gaSetup, resolveGaChange, writeGa } from "./ga4-changes.js";
 
@@ -37,7 +38,7 @@ describe("AnalyticsClient", () => {
     const out = await listProperties(ga);
     expect(out.properties[0]!.property_id).toBe(DEMO_PROPERTY);
     expect(out).toMatchObject({ grant_url: "https://camberstack.io/connect/analytics?t=x" });
-    await expect(ga.runReport("9", { startDate: "a", endDate: "b", dimensions: [], metrics: ["sessions"], limit: 1 })).rejects.toBeInstanceOf(AnalyticsNotGrantedError);
+    await expect(ga.runReport("9", { startDate: "a", endDate: "b", dimensions: [], metrics: ["sessions"], limit: 1 })).rejects.toBeInstanceOf(NotGrantedError);
   });
 
   it("passes other API errors through readably (e.g. the API not enabled)", async () => {

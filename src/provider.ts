@@ -23,7 +23,7 @@ import { encrypt, randomToken, sha256 } from "./crypto.js";
 import { consentPage } from "./pages.js";
 import { clearGoogleCache } from "./session.js";
 import {
-  ADS_SCOPE, exchangeGoogleCode, googleAuthUrl, idTokenClaims, type GoogleCreds,
+  ADS_SCOPE, SEARCH_CONSOLE_SCOPE, exchangeGoogleCode, googleAuthUrl, idTokenClaims, type GoogleCreds,
 } from "./google.js";
 
 export const MCP_SCOPE = "ads";
@@ -173,9 +173,11 @@ export class CamberstackProvider implements OAuthServerProvider {
     }
 
     const g = await exchangeGoogleCode(this.opts.google, q.code, this.googleRedirectUri, this.opts.fetch);
-    if (!g.scope.split(" ").includes(ADS_SCOPE)) {
+    // À la carte: either service is enough to connect; a tool that needs the other returns a link that adds it (grant.ts).
+    const granted = g.scope.split(" ");
+    if (!granted.includes(ADS_SCOPE) && !granted.includes(SEARCH_CONSOLE_SCOPE)) {
       back.searchParams.set("error", "access_denied");
-      back.searchParams.set("error_description", "Google Ads access was not granted (the Google Ads box was unticked).");
+      back.searchParams.set("error_description", "Neither Google Ads nor Search Console access was granted (both boxes were unticked).");
       return { to: back.toString() };
     }
     if (!g.id_token) throw new Error("Google did not return an id_token");

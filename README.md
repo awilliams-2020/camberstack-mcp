@@ -78,7 +78,8 @@ what Camberstack itself created; nothing the user built is ever deleted. Search 
 
 Camberstack is an OAuth 2.1 authorization server for MCP clients (dynamic client registration,
 PKCE). Its `/authorize` sends the user to Google for `adwords` + `openid email`, plus `webmasters.readonly`
-(Search Console), which the user may untick: only `adwords` is required. The Google refresh
+(Search Console). Either is enough to connect ("à la carte"): a tool that needs a missing one, or Google Analytics, returns a personal
+`/connect/<google-ads|search-console|analytics>` link that adds just that service to the same Google account. The Google refresh
 token is stored AES-256-GCM encrypted and never leaves the server. The MCP client gets
 Camberstack's own tokens, which are stored only as SHA-256 hashes.
 

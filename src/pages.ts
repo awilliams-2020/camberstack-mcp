@@ -206,7 +206,7 @@ queries and positions, and line them up against your ads:</p>
 <li><strong>Opportunities:</strong> searches just off page 1, and top results with a click-through rate low enough to point at the title.</li>
 <li><strong>Indexing:</strong> whether Google has indexed a page and why not, when it last crawled it, and when it last read your sitemap.</li>
 </ul>
-<p class="muted">Camberstack can't change anything in Search Console. Untick it and every Google Ads tool still works; reconnect later to add it.
+<p class="muted">Camberstack can't change anything in Search Console. Google Ads and Search Console are each optional: untick either one, and when you later ask about it Camberstack gives you a one-click link that adds it.
 The Search Console tools work without a Google Ads account too: <a href="/google-search-console-mcp">Search Console MCP</a>.</p>
 
 <h2 id="setup">Connect</h2>
@@ -308,7 +308,7 @@ With Read only access, ask an account admin to raise it in Google Ads, under <st
 to upgrade, with a personal checkout link, and says when your next switch opens. Undo and change history always work. <a href="/#pricing">Plans</a>.</p>
 <h3>"Search Console access isn't part of this Google connection"</h3>
 <p>The Search Console box was unticked on Google's sign-in screen, or you connected before the Search Console tools existed.
-Connect again and leave the box ticked: ${reAdd}</p>
+The same message comes with a personal link: open it and Google adds Search Console to your connection, no reconnecting. The same goes for Google Ads.</p>
 <h3>"User does not have sufficient permission for site"</h3>
 <p>The website name must match a Search Console property exactly: <code>sc-domain:example.com</code> and
 <code>https://www.example.com/</code> are different properties. Ask <em>"List my Search Console sites"</em> first. If the site isn't
@@ -779,7 +779,7 @@ change your Google Ads account. This policy explains what we access, why, and wh
 <ul>
 <li><strong>Your Google account email and a stable Google account ID</strong> (the <code>openid</code> and <code>email</code> scopes), so the same person gets the same account and change history each time.</li>
 <li><strong>Your Google Ads data</strong> (the <code>https://www.googleapis.com/auth/adwords</code> scope): account and campaign structure, performance metrics, search terms, keywords and conversion settings, read when your AI assistant calls a Camberstack tool.</li>
-<li><strong>Your Search Console data, read-only and optional</strong> (the <code>https://www.googleapis.com/auth/webmasters.readonly</code> scope): the websites you have verified, their Google Search clicks, impressions, queries and positions, Google's index status for pages you ask about, and the sitemaps you have submitted, read when your AI assistant calls a Search Console tool, for example to compare what you pay for with where you already rank. You can untick it on Google's consent screen; the Google Ads tools work without it. Camberstack cannot change anything in Search Console.</li>
+<li><strong>Your Search Console data, read-only and optional</strong> (the <code>https://www.googleapis.com/auth/webmasters.readonly</code> scope): the websites you have verified, their Google Search clicks, impressions, queries and positions, Google's index status for pages you ask about, and the sitemaps you have submitted, read when your AI assistant calls a Search Console tool, for example to compare what you pay for with where you already rank. Google Ads and Search Console are each optional: you can untick either on Google's consent screen and add it later through a link Camberstack gives you. Camberstack cannot change anything in Search Console.</li>
 <li><strong>Your Google Analytics data and setup, optional</strong> (the <code>https://www.googleapis.com/auth/analytics.readonly</code> and <code>https://www.googleapis.com/auth/analytics.edit</code> scopes): the names of the Google Analytics accounts and properties you can access; reports on your properties' traffic, such as sessions, users, engagement, key events (conversions), landing pages and traffic sources; and each property's setup (web streams and their measurement IDs, key events, Google Ads links), read when your AI assistant calls a Google Analytics tool, for example to see whether visitors from your ads convert. With edit access Camberstack can set up tracking for you, <strong>only</strong> when you approve a specific proposal: create a property with a web stream, mark or unmark an event as a key event, and link or unlink a Google Ads account. Every such change is logged and can be undone. Neither scope is part of connecting Camberstack: we ask for both together, separately, only if you use a Google Analytics tool, through a link that adds them to the Google account you already connected.</li>
 </ul>
 <p>We request nothing else from your Google account: no Gmail, Drive, contacts or calendar.</p>
@@ -803,7 +803,7 @@ Humans at Camberstack do not read your Google Ads data unless you ask us to for 
 <tr><td>Google refresh token, encrypted (AES-256-GCM)</td><td>Call Google's APIs (Google Ads, and Search Console or Google Analytics if you granted them) when you use a tool</td><td>You disconnect or revoke access</td></tr>
 <tr><td>A sign-in session for the account page (a cookie; we store only its hash)</td><td>Keep you signed in to camberstack.io/account</td><td>7 days, or until you sign out</td></tr>
 <tr><td>A random value in a cookie while you connect an AI app</td><td>Check that the browser finishing the Google sign-in is the one that approved the connection</td><td>The sign-in finishes, or 1 hour</td></tr>
-<tr><td>A random value in a cookie while you add Google Analytics</td><td>Check that the browser finishing Google's consent is the one that opened your link</td><td>The consent finishes, or 10 minutes</td></tr>
+<tr><td>A random value in a cookie while you add a Google service (Google Ads, Search Console or Google Analytics) to your connection</td><td>Check that the browser finishing Google's consent is the one that opened your link</td><td>The consent finishes, or 10 minutes</td></tr>
 <tr><td>Tokens we issue to your AI app (stored as hashes)</td><td>Authenticate your AI app</td><td>Expiry (1 hour access, 90 days refresh) or disconnect</td></tr>
 <tr><td>Proposals: the changes requested, their summary and results</td><td>Show what changed and let you undo it</td><td>You ask us to delete them</td></tr>
 <tr><td>A usage log: which tool ran, for which Google Ads account ID, when, how long it took and any error message. Never the tool's inputs or results</td><td>Find and fix failures, see which features are used, and count how many Google Ads accounts you use for your plan</td><td>You ask us to delete it</td></tr>

@@ -7,8 +7,8 @@ import type { DB, ProposalRow, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { decrypt } from "./crypto.js";
 import {
-  AdsClient, SearchConsoleClient, SearchConsoleNotGrantedError, micros, refreshGoogleToken, revokeGoogleToken,
-  type GoogleCreds, type SearchAnalyticsRequest, type SearchAnalyticsRow, type UrlInspection,
+  AdsClient, NotGrantedError, SearchConsoleClient, micros, refreshGoogleToken, revokeGoogleToken,
+  type GoogleCreds, type GrantKind, type SearchAnalyticsRequest, type SearchAnalyticsRow, type UrlInspection,
 } from "./google.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError, accountsLabel } from "./plans.js";
 import { AnalyticsClient, DemoAnalytics, routedAnalytics, type Analytics } from "./ga4.js";
@@ -35,7 +35,9 @@ const tokenCache = new Map<string, { token: string; exp: number }>();
  * Each user's account list, shared across requests. A UserSession lives for one MCP request, so a cache on the
  * instance never hit and every account-scoped tool paid ~1s re-listing accounts before doing its own work.
  */
-const accountsCache = new Map<string, { at: number; list: Account[]; unreadable: { customerId: string; error: string }[] }>();
+/** An account (or the whole login) Google refused to read, and why; `grant_url` when Google Ads isn't granted yet. */
+type Unreadable = { customerId: string; error: string; grant_url?: string };
+const accountsCache = new Map<string, { at: number; list: Account[]; unreadable: Unreadable[] }>();
 const ACCOUNTS_TTL_MS = 10 * 60_000;
 /** Drop a user's cached Google token and account list: on disconnect, and on reconnect (the old token may be revoked). */
 export function clearGoogleCache(userId: string): void {
@@ -85,8 +87,8 @@ export interface SessionDeps {
   adsFactory?: (user: UserRow) => AdsClient;
   scFactory?: (user: UserRow) => SearchConsole;
   gaFactory?: (user: UserRow) => Analytics;
-  /** The personal link that adds Google Analytics to this user's connection (ga4.ts AnalyticsGrant). */
-  analyticsLink?: (userId: string) => string | null;
+  /** The personal link that adds one Google service to this user's connection (grant.ts). */
+  grantLink?: (kind: GrantKind, userId: string) => string | null;
 }
 
 class NotConnectedError extends Error {}
@@ -140,14 +142,15 @@ export class UserSession {
   readonly sc: SearchConsole;
   readonly ga: Analytics;
   /** Accounts the login can see but Google refused to read, from the last accounts() call. */
-  lastUnreadable: { customerId: string; error: string }[] = [];
+  lastUnreadable: Unreadable[] = [];
 
   constructor(private deps: SessionDeps, readonly user: UserRow) {
-    const google = deps.adsFactory?.(user) ?? new AdsClient(() => this.googleAccessToken(), deps.google.developerToken);
+    const link = (kind: GrantKind) => () => deps.grantLink?.(kind, user.id) ?? null;
+    const google = deps.adsFactory?.(user) ?? new AdsClient(() => this.googleAccessToken(), deps.google.developerToken, fetch, link("google-ads"));
     this.ads = routed(google, new DemoAds(deps.db, user.id));
-    this.sc = routedSc(deps.scFactory?.(user) ?? new SearchConsoleClient(() => this.googleAccessToken()), new DemoSearchConsole());
+    this.sc = routedSc(deps.scFactory?.(user) ?? new SearchConsoleClient(() => this.googleAccessToken(), link("search-console")), new DemoSearchConsole());
     this.ga = routedAnalytics(deps.gaFactory?.(user)
-      ?? new AnalyticsClient(() => this.googleAccessToken(), () => deps.analyticsLink?.(user.id) ?? null), new DemoAnalytics());
+      ?? new AnalyticsClient(() => this.googleAccessToken(), link("analytics")), new DemoAnalytics());
   }
 
   static load(deps: SessionDeps, userId: string): UserSession {
@@ -316,14 +319,14 @@ export class UserSession {
       return hit.list;
     }
     const out = new Map<string, Account>();
-    const unreadable: { customerId: string; error: string }[] = [];
+    const unreadable: Unreadable[] = [];
     let roots: string[] = [];
     try {
       roots = await this.ads.listAccessibleCustomers();
     } catch (e) {
-      // A login with no Google Ads at all (NOT_ADS_USER) gets the demo account instead of a dead end.
+      // A login with no Google Ads at all (NOT_ADS_USER), or that didn't grant Google Ads, gets the demo account instead of a dead end.
       if (e instanceof NotConnectedError) throw e;
-      unreadable.push({ customerId: "this Google login", error: (e as Error).message });
+      unreadable.push({ customerId: "this Google login", error: (e as Error).message, ...(e instanceof NotGrantedError && e.link ? { grant_url: e.link } : {}) });
     }
     // All roots at once; merged below in Google's order, so the result is the same as reading them one by one.
     const perRoot = await Promise.all(roots.map((root) => this.ads.search(root, `SELECT customer_client.id, customer_client.descriptive_name,
@@ -490,9 +493,9 @@ export class UserSession {
     try {
       sites = (await this.sc.sites()).filter((x) => x.permissionLevel !== "siteUnverifiedUser");
     } catch (e) {
-      if (!(e instanceof SearchConsoleNotGrantedError)) throw e;
-      return { sites: [{ site_url: DEMO_SITE, permission: "demo" }], not_granted: e.message,
-        note: "Only the demo site is available until the user grants Search Console access. Say so plainly." };
+      if (!(e instanceof NotGrantedError)) throw e;
+      return { sites: [{ site_url: DEMO_SITE, permission: "demo" }], not_granted: e.message, ...(e.link ? { grant_url: e.link } : {}),
+        note: "Only the demo site is available until the user adds Search Console. Say so plainly and give them grant_url." };
     }
     if (sites.length) return { sites: sites.map((x) => ({ site_url: x.siteUrl, permission: x.permissionLevel })) };
     return { sites: [{ site_url: DEMO_SITE, permission: "demo" }],
@@ -636,7 +639,7 @@ export class UserSession {
     const results: Record<string, unknown>[] = await mapLimited(urls, (url) => this.sc.inspect(site, url).then(
       (r) => inspectionRow(url, r),
       (e: Error) => {
-        if (e instanceof SearchConsoleNotGrantedError) throw e;
+        if (e instanceof NotGrantedError) throw e;
         return { url, error: e.message };
       }), 10);
     const tally: Record<string, number> = {};

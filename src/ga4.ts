@@ -1,34 +1,16 @@
 /**
- * Google Analytics 4, read-only: what happened on the site after the click. Its scope (analytics.readonly) is
- * sensitive, so it isn't part of the main Google consent: the first GA4 tool call without it returns a personal link
- * (/connect/analytics) that adds it to the user's existing connection (incremental authorization). Google Ads and
- * Search Console work the same either way.
+ * Google Analytics 4: reports (what happened on the site after the click) and the property reads the setup changes
+ * (ga4-changes.ts) need. Its scopes are sensitive, so they aren't in the main Google consent: the first call without
+ * them returns a personal /connect/analytics link (grant.ts) that adds them to the user's existing connection.
  *
  * The demo property (DEMO_PROPERTY) answers the same calls with sample data, like the demo Ads account and site.
  */
-import type { Express, Request, Response } from "express";
-import type { DB, UserRow } from "./db.js";
-import { now } from "./db.js";
-import { encrypt, randomToken, safeEqual, sign } from "./crypto.js";
-import { readCookie } from "./http.js";
-import { ANALYTICS_SCOPE, exchangeGoogleCode, googleAnalyticsGrantUrl, idTokenClaims, type GoogleCreds } from "./google.js";
-import { esc } from "./pages.js";
+import { NotGrantedError, scopeMissing } from "./google.js";
 
 const ADMIN_API = "https://analyticsadmin.googleapis.com/v1beta";
 const DATA_API = "https://analyticsdata.googleapis.com/v1beta";
 export const DEMO_PROPERTY = "000000001";
 const DEMO_NOTE = "Sample data from Camberstack's demo Google Analytics property (a fictional plumbing business), not a real property.";
-
-/** Raised when the user's Google connection doesn't include Google Analytics yet (or, for a change, its edit access). */
-export class AnalyticsNotGrantedError extends Error {
-  constructor(readonly link: string | null, edit = false) {
-    super((edit
-      ? "Changing Google Analytics needs its edit access, which this connection doesn't have (the box was unticked on Google's consent screen). "
-      : "Google Analytics access isn't part of this Google connection yet. ")
-      + (link ? `The user adds it here (a personal link, valid 7 days): ${link} . ` : "")
-      + "Google Ads and Search Console keep working either way; the demo property (000000001) works without it.");
-  }
-}
 
 export interface Property { property_id: string; name: string; account: string; account_id: string }
 export interface GaAccount { account_id: string; name: string }
@@ -66,9 +48,7 @@ export class AnalyticsClient implements Analytics {
     });
     const text = await res.text();
     if (!res.ok) {
-      if (res.status === 403 && /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(text)) {
-        throw new AnalyticsNotGrantedError(this.grantLink(), method !== "GET" && url.startsWith(ADMIN_API));  // a report is a POST too
-      }
+      if (scopeMissing(res.status, text)) throw new NotGrantedError("analytics", this.grantLink(), method !== "GET" && url.startsWith(ADMIN_API));  // a report is a POST too
       let msg = text.slice(0, 300);
       try { msg = JSON.parse(text).error?.message ?? msg; } catch { /* not JSON */ }
       throw new Error(`Google Analytics API ${res.status}: ${msg}`);
@@ -164,7 +144,7 @@ export async function listProperties(ga: Analytics) {
       : "This Google login has no Google Analytics account. The user creates one at analytics.google.com (Google requires accepting its "
         + "terms there); Camberstack can then add the property. Until then only the demo property (sample data) is offered: say so." };
   } catch (e) {
-    if (!(e instanceof AnalyticsNotGrantedError)) throw e;
+    if (!(e instanceof NotGrantedError)) throw e;
     return { properties: demo, not_granted: e.message, ...(e.link ? { grant_url: e.link } : {}),
       note: "Only the demo property is available until the user adds Google Analytics. Say so plainly and give them grant_url." };
   }
@@ -259,89 +239,5 @@ export class DemoAnalytics implements Analytics {
       .filter((r) => q.metrics.some((m) => Number(r[m]) > 0))
       .sort((a, b) => Number(b[by]) - Number(a[by]));
     return { row_count: rows.length, rows: rows.slice(0, q.limit) };
-  }
-}
-
-// ---------------------------------------------------------------- adding Analytics to a connection
-
-const LINK_TTL = 7 * 86400;
-const PREFIX = "ga_";
-const STATE_COOKIE = "cs_ga_state";
-
-export interface AnalyticsGrantDeps {
-  db: DB;
-  baseUrl: string;
-  google: GoogleCreds;
-  encryptionKey: Buffer;
-  /** Signs grant links; derived from ENCRYPTION_KEY so no new secret is needed. */
-  signingKey: Buffer;
-  /** Drops the user's cached Google token, so the next call uses the new one (session.ts). */
-  forgetToken: (userId: string) => void;
-  fetch?: typeof fetch;
-}
-
-/**
- * The personal link that adds Google Analytics to someone's existing Google connection. It must come back as the
- * same Google account the user connected (the token replaces theirs), and the browser that followed the link
- * must be the one that finishes (a nonce cookie), so a forwarded callback can't attach someone else's Analytics.
- */
-export class AnalyticsGrant {
-  private readonly redirectUri: string;
-  constructor(private d: AnalyticsGrantDeps) { this.redirectUri = `${d.baseUrl}/oauth/google/callback`; }
-
-  link(userId: string): string {
-    const payload = `${userId}.${now() + LINK_TTL}`;
-    return `${this.d.baseUrl}/connect/analytics?t=${payload}.${sign(this.d.signingKey, `analytics:${payload}`)}`;
-  }
-
-  private verify(t: unknown): string | null {
-    const [userId, exp, sig] = String(t ?? "").split(".");
-    if (!userId || !exp || !sig) return null;
-    return safeEqual(sign(this.d.signingKey, `analytics:${userId}.${exp}`), sig) && Number(exp) >= now() ? userId : null;
-  }
-
-  owns(state: unknown): boolean { return typeof state === "string" && state.startsWith(PREFIX); }
-
-  mount(app: Express, page: (title: string, body: string) => string): void {
-    app.get("/connect/analytics", (req: Request, res: Response) => {
-      const userId = this.verify(req.query.t);
-      const u = userId ? this.d.db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined : undefined;
-      if (!u) {
-        res.status(400).type("html").send(page("Link expired", "<p>This link has expired or is not valid. Ask your AI assistant to run a Google Analytics tool again for a fresh one.</p>"));
-        return;
-      }
-      const id = PREFIX + randomToken(24), nonce = randomToken(16);
-      this.d.db.prepare("INSERT INTO pending_auth (id, client_id, params, created_at) VALUES (?, '__ga', ?, ?)").run(id, JSON.stringify({ userId, nonce }), now());
-      res.append("Set-Cookie", `${STATE_COOKIE}=${nonce}; Path=/oauth/; HttpOnly; SameSite=Lax; Max-Age=600${this.d.baseUrl.startsWith("https://") ? "; Secure" : ""}`);
-      res.redirect(302, googleAnalyticsGrantUrl(this.d.google, this.redirectUri, id, u.email));
-    });
-  }
-
-  /** Google came back to the shared callback with one of our states. */
-  async finish(req: Request, res: Response, page: (title: string, body: string) => string): Promise<void> {
-    const fail = (msg: string) => res.status(400).type("html").send(page("Google Analytics not added", `<p>${esc(msg)}</p>`));
-    const state = String(req.query.state);
-    const row = this.d.db.prepare("SELECT params, created_at FROM pending_auth WHERE id = ? AND client_id = '__ga'").get(state) as
-      { params: string; created_at: number } | undefined;
-    this.d.db.prepare("DELETE FROM pending_auth WHERE id = ?").run(state);
-    const p = row ? JSON.parse(row.params) as { userId: string; nonce: string } : null;
-    if (!row || !p || row.created_at < now() - 600 || !safeEqual(p.nonce, readCookie(req, STATE_COOKIE) ?? "")) {
-      return void fail("This sign-in expired or was started in another browser. Open the link from your AI assistant again.");
-    }
-    if (typeof req.query.code !== "string") return void fail("Google Analytics access was not granted. Nothing changed; Google Ads and Search Console work as before.");
-    const u = this.d.db.prepare("SELECT * FROM users WHERE id = ?").get(p.userId) as UserRow | undefined;
-    if (!u) return void fail("This Camberstack account no longer exists.");
-    const g = await exchangeGoogleCode(this.d.google, req.query.code, this.redirectUri, this.d.fetch);
-    const who = g.id_token ? idTokenClaims(g.id_token) : null;
-    if (!who || who.sub !== u.google_sub) {
-      return void fail(`That was a different Google account. Add Google Analytics with the account Camberstack is connected to (${u.email}).`);
-    }
-    if (!g.scope.split(" ").includes(ANALYTICS_SCOPE)) return void fail("The Google Analytics box was unticked. Nothing changed.");
-    if (!g.refresh_token) return void fail("Google didn't return a new token. Try the link again.");
-    this.d.db.prepare("UPDATE users SET enc_refresh = ? WHERE id = ?").run(encrypt(this.d.encryptionKey, g.refresh_token), u.id);
-    this.d.forgetToken(u.id);
-    res.append("Set-Cookie", `${STATE_COOKIE}=; Path=/oauth/; Max-Age=0; SameSite=Lax`);
-    res.status(200).type("html").send(page("Google Analytics added", "<p><strong>Google Analytics is now part of your Camberstack connection.</strong></p>"
-      + "<p>Go back to your AI assistant and ask again. Camberstack only reads Analytics; it can't change anything there.</p>"));
   }
 }
