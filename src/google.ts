@@ -278,6 +278,21 @@ export class AdsClient {
     return batches.flatMap((b) => b.results ?? []);
   }
 
+  /** Google's field catalog (GoogleAdsFieldService) for this API version: not tied to any account. */
+  async searchFields(query: string): Promise<any[]> {
+    const out: any[] = [];
+    let pageToken: string | undefined;
+    do {
+      const res = await this.f(`${ADS_API}/googleAdsFields:search`, {
+        method: "POST", headers: await this.headers(), body: JSON.stringify({ query, pageSize: 10000, ...(pageToken ? { pageToken } : {}) }),
+      });
+      const j = JSON.parse(await this.body(res));
+      out.push(...(j.results ?? []));
+      pageToken = j.nextPageToken;
+    } while (pageToken && out.length < 50_000);
+    return out;
+  }
+
   /** Keyword Planner (KeywordPlanIdeaService). Read-only: needs Basic access or above on the developer token. */
   async keywordPlan(
     customerId: string, method: "generateKeywordIdeas" | "generateKeywordHistoricalMetrics", request: object, loginCustomerId?: string | null,

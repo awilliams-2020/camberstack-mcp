@@ -157,10 +157,24 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       + "every field used in WHERE or ORDER BY must also be in SELECT; fields can only come from the FROM resource or resources it is "
       + "compatible with (if Google says a resource is incompatible, query that resource directly instead); "
       + "campaign_budget fields (e.g. campaign_budget.amount_micros) can only be selected FROM campaign or FROM campaign_budget; "
-      + "a campaign's dates are campaign.start_date_time and campaign.end_date_time, not campaign.start_date or campaign.end_date.",
+      + "a campaign's dates are campaign.start_date_time and campaign.end_date_time, not campaign.start_date or campaign.end_date. "
+      + "Unsure of a field's name or whether it fits this FROM? Look it up with gaql_fields first.",
     inputSchema: { customer_id: customerId, query: z.string().describe("A GAQL SELECT statement") },
     annotations: read,
   }, ({ customer_id, query }: { customer_id: string; query: string }) => session().runQuery(customer_id, query));
+
+  tool("gaql_fields", {
+    title: "Look up GAQL fields",
+    description: "Looks fields up in Google's own field catalog for the API version run_gaql uses, so queries name real fields. "
+      + "With resource (e.g. campaign, ad_group, keyword_view, bidding_strategy): that resource's fields, the resources whose fields can also be "
+      + "selected FROM it, and the metrics and segments it takes. With search alone: matching field names anywhere, e.g. search=\"cpc_bid_ceiling\". "
+      + "search narrows a resource's lists too (any of its words). Use it before run_gaql whenever unsure of a name. No account needed.",
+    inputSchema: {
+      resource: z.string().max(100).optional().describe("A resource to query FROM, e.g. campaign"),
+      search: z.string().max(200).optional().describe("Words that must appear in the field name, e.g. \"bidding target\""),
+    },
+    annotations: read,
+  }, ({ resource, search }: { resource?: string; search?: string }) => session().gaqlFields({ resource, search }));
 
   tool("keyword_ideas", {
     title: "Keyword ideas (Keyword Planner)",

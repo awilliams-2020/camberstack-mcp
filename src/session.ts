@@ -14,6 +14,7 @@ import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError
 import { AnalyticsClient, DemoAnalytics, routedAnalytics, type Analytics } from "./ga4.js";
 import { GA_TARGET, GaChangeSchema, gaInverseAfterApply, gaNoteAfterApply, resolveGaChange, writeGa, type GaChange, type GaOp, type GaResolved } from "./ga4-changes.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
+import { CATALOG_QUERY, catalog, checkGaql, lookupFields } from "./gaql.js";
 import {
   ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, pendingOf, resolveChange, summarize,
   type Change, type ResolvedChange,
@@ -94,7 +95,7 @@ export interface SessionDeps {
 class NotConnectedError extends Error {}
 
 /** The Google Ads calls the tools make; the demo account answers the same ones. */
-type Ads = Pick<AdsClient, "listAccessibleCustomers" | "search" | "mutate" | "keywordPlan">;
+type Ads = Pick<AdsClient, "listAccessibleCustomers" | "search" | "mutate" | "keywordPlan"> & Partial<Pick<AdsClient, "searchFields">>;
 
 /** Sends the demo account's calls to the demo and everything else to Google. */
 function routed(google: Ads, demo: DemoAds): Ads {
@@ -103,6 +104,7 @@ function routed(google: Ads, demo: DemoAds): Ads {
     search: (cid, query, login) => (cid === DEMO_CID ? demo.search(cid, query) : google.search(cid, query, login)),
     mutate: (cid, service, ops, opts) => (cid === DEMO_CID ? demo.mutate(cid, service, ops, opts) : google.mutate(cid, service, ops, opts)),
     keywordPlan: (cid, method, req, login) => (cid === DEMO_CID ? demo.keywordPlan(cid, method, req) : google.keywordPlan(cid, method, req, login)),
+    ...(google.searchFields ? { searchFields: (q: string) => google.searchFields!(q) } : {}),
   };
 }
 
@@ -429,14 +431,38 @@ export class UserSession {
         break;
       } catch (e) {
         const missing = e instanceof AdsApiError ? missingSelectFields(e.body).filter((f) => !added.includes(f)) : [];
-        if (!missing.length || added.length >= 5) throw e;
+        if (!missing.length || added.length >= 5) {
+          // Google's own message is often vague ("Unrecognized field"); add what its field catalog says, by name.
+          const found = e instanceof AdsApiError ? await this.gaqlCheck(q) : [];
+          if (found.length) (e as Error).message += `\nGoogle's field catalog: ${found.join(" ")}`;
+          throw e;
+        }
         added.push(...missing);
         q = q.replace(/^\s*select\s+/i, `SELECT ${missing.join(", ")}, `);
       }
     }
+    // A finding on a query Google ran is a bug in the check, not in the query: log it, never show it.
+    void this.gaqlCheck(q).then((found) => { if (found.length) console.error(`gaql check false positive: ${found.join(" ")} | ${q.slice(0, 300)}`); });
     return { ...demoNote(a.customerId), ...(rewrote.length ? { rewritten: `Google only accepts LAST_7/14/30_DAYS, so ran ${rewrote.join(", ")} (dates in UTC)` } : {}),
       ...(added.length ? { added_to_select: `Google requires fields used in WHERE or ORDER BY to be selected too, so added ${added.join(", ")} to SELECT` } : {}),
       rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
+  }
+
+  /** What Google's field catalog finds wrong with a query; empty when nothing, or when the catalog can't be had. */
+  private async gaqlCheck(query: string): Promise<string[]> {
+    const cat = await this.fieldCatalog();
+    return cat ? checkGaql(query, cat) : [];
+  }
+
+  private fieldCatalog() {
+    const fetch = this.ads.searchFields;
+    return fetch ? catalog(() => fetch(CATALOG_QUERY)) : Promise.resolve(null);
+  }
+
+  async gaqlFields(o: { resource?: string; search?: string }) {
+    const cat = await this.fieldCatalog();
+    if (!cat) throw new Error("Google's field catalog isn't reachable right now. Try again in a few minutes.");
+    return lookupFields(cat, o);
   }
 
   /** Keyword Planner ideas from seed keywords and/or a URL, biggest first, flagged where the account already has them. */

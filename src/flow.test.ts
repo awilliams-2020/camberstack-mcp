@@ -5,6 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createApp } from "./server.js";
@@ -45,11 +46,17 @@ class FakeAds {
   campaignStatus = "ENABLED";
   campaignEnd: string | undefined;
   async listAccessibleCustomers() { return ["1112223333"]; }
+  /** Google's field catalog: a trimmed real v23 snapshot. */
+  async searchFields() { return JSON.parse(readFileSync(new URL("./fixtures/gaql-catalog.json", import.meta.url), "utf8")); }
   async search(_cid: string, q: string): Promise<any[]> {
     // Google's rule: a field in WHERE or ORDER BY must be in SELECT too.
     if (q.includes("ORDER BY campaign.status") && !/^SELECT[^]*campaign\.status[^]*FROM/.test(q)) {
       throw new AdsApiError(400, JSON.stringify({ error: { details: [{ errors: [{ errorCode: { queryError: "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE" },
         message: "The following field must be present in SELECT clause: 'campaign.status'." }] }] } }));
+    }
+    if (q.includes("maximize_clicks")) {
+      throw new AdsApiError(400, JSON.stringify({ error: { details: [{ errors: [{ errorCode: { queryError: "UNRECOGNIZED_FIELD" },
+        message: "Unrecognized field in the query: 'campaign.maximize_clicks.cpc_bid_ceiling_micros'." }] }] } }));
     }
     if (q.includes("FROM customer_client")) {
       return [{ customerClient: { id: "1112223333", descriptiveName: "Acme", currencyCode: "USD", timeZone: "Europe/London", manager: false, level: 0 } }];
@@ -492,6 +499,16 @@ describe("OAuth + MCP end to end", () => {
       expect(typeof t.annotations?.readOnlyHint, t.name).toBe("boolean");
       if (!t.annotations.readOnlyHint) expect(typeof t.annotations.destructiveHint, t.name).toBe("boolean");
     }
+  });
+
+  it("looks fields up in Google's catalog, and names the real ones when Google rejects a guessed field", async () => {
+    const f = await call(token, "gaql_fields", { resource: "campaign", search: "cpc_bid_ceiling" });
+    expect(f.json.fields.names.join(" ")).toContain("campaign.target_spend.cpc_bid_ceiling_micros");
+    const bad = await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT campaign.id, campaign.maximize_clicks.cpc_bid_ceiling_micros FROM campaign" });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain("UNRECOGNIZED_FIELD");   // Google's own words stay
+    expect(bad.text).toContain("Google's field catalog: campaign.maximize_clicks.cpc_bid_ceiling_micros doesn't exist");
+    expect(bad.text).toContain("campaign.target_spend.cpc_bid_ceiling_micros");
   });
 
   it("reads an account overview", async () => {
