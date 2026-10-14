@@ -175,6 +175,8 @@ export function openDb(dataDir: string): DB {
   if (!cols.has("email_opt_out")) db.exec("ALTER TABLE users ADD COLUMN email_opt_out INTEGER NOT NULL DEFAULT 0");
   // IANA zone of the Google Ads account they use (session.ts); lifecycle.ts sends in their morning.
   if (!cols.has("time_zone")) db.exec("ALTER TABLE users ADD COLUMN time_zone TEXT");
+  // Google scopes on their token as Google last reported them (sign-in, /connect, every refresh); NULL = not seen yet.
+  if (!cols.has("google_scopes")) db.exec("ALTER TABLE users ADD COLUMN google_scopes TEXT");
   // relay_conversions shipped in 0.6.0 without order_id (and its UNIQUE). Still empty then, so rebuild.
   const rc = new Set((db.prepare("PRAGMA table_info(relay_conversions)").all() as { name: string }[]).map((c) => c.name));
   if (!rc.has("order_id")) {
@@ -197,6 +199,7 @@ export interface UserRow {
   stripe_customer?: string | null;
   stripe_sub?: string | null;
   time_zone?: string | null;
+  google_scopes?: string | null;
 }
 
 export interface ProposalRow {

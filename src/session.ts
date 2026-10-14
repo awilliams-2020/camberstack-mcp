@@ -168,6 +168,11 @@ export class UserSession {
     try {
       const t = await refreshGoogleToken(this.deps.google, decrypt(this.deps.encryptionKey, this.user.enc_refresh));
       tokenCache.set(this.user.id, { token: t.access_token, exp: Date.now() + t.expires_in * 1000 });
+      // Keeps the admin's view of their permissions current, e.g. one service revoked at myaccount.google.com.
+      if (t.scope && t.scope !== this.user.google_scopes) {
+        this.deps.db.prepare("UPDATE users SET google_scopes = ? WHERE id = ?").run(t.scope, this.user.id);
+        this.user.google_scopes = t.scope;
+      }
       return t.access_token;
     } catch (e) {
       if ((e as { revoked?: boolean }).revoked) {

@@ -87,7 +87,7 @@ export class Grants {
     if (!who || who.sub !== u.google_sub) return fail(`That was a different Google account. Add ${label} with the account Camberstack is connected to (${u.email}).`);
     if (!g.scope.split(" ").includes(GRANTS[p.kind].scopes[0])) return fail(`The ${label} box was unticked. Nothing changed.`);
     if (!g.refresh_token) return fail("Google didn't return a new token. Try the link again.");
-    this.d.db.prepare("UPDATE users SET enc_refresh = ? WHERE id = ?").run(encrypt(this.d.encryptionKey, g.refresh_token), u.id);
+    this.d.db.prepare("UPDATE users SET enc_refresh = ?, google_scopes = ? WHERE id = ?").run(encrypt(this.d.encryptionKey, g.refresh_token), g.scope, u.id);
     this.d.forgetToken(u.id);
     res.append("Set-Cookie", `${STATE_COOKIE}=; Path=/oauth/; Max-Age=0; SameSite=Lax`);
     res.status(200).type("html").send(page(`${label} added`, `<p><strong>${label} is now part of your Camberstack connection.</strong></p>`

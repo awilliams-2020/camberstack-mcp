@@ -6,6 +6,7 @@
 import type { DB } from "./db.js";
 import { DEMO_CID } from "./demo.js";
 import { now } from "./db.js";
+import { ADS_SCOPE, ANALYTICS_EDIT_SCOPE, ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "./google.js";
 
 export interface ReportOptions {
   days: number;
@@ -39,9 +40,10 @@ export function buildReport(db: DB, o: ReportOptions) {
     excluded: ex.length,
     funnel: { window: stage(since), all: stage(0) },
     activeInWindow: n("SELECT count(DISTINCT c.user_id) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE c.at >= ? AND c.ok = 1", since),
-    users: q<{ email: string; plan: string; created_at: number; last_seen_at: number | null; connected: number;
-               calls: number; errors: number; applied: number; client: string | null }>(
-      `SELECT u.email, u.plan, u.created_at, u.last_seen_at, u.enc_refresh IS NOT NULL connected,
+    users: q<{ id: string; email: string; plan: string; created_at: number; last_seen_at: number | null; connected: number;
+               google_scopes: string | null; paying: number; calls: number; errors: number; applied: number; client: string | null }>(
+      `SELECT u.id, u.email, u.plan, u.created_at, u.last_seen_at, u.enc_refresh IS NOT NULL connected, u.google_scopes,
+         coalesce(u.stripe_sub, '') != '' paying,
          (SELECT count(*) FROM tool_calls c WHERE c.user_id = u.id) calls,
          (SELECT count(*) FROM tool_calls c WHERE c.user_id = u.id AND c.ok = 0) errors,
          (SELECT count(*) FROM proposals p WHERE p.user_id = u.id AND p.status = 'applied') applied,
@@ -67,6 +69,10 @@ export function buildReport(db: DB, o: ReportOptions) {
       `SELECT count(*) recorded, count(a.uploaded_at) uploaded, sum(a.uploaded_at IS NULL AND a.error IS NOT NULL) failing,
          (SELECT error FROM ad_conversions WHERE error IS NOT NULL ORDER BY at DESC LIMIT 1) last_error
        FROM ad_conversions a JOIN {U} u ON u.id = a.user_id`)[0],
+    /** Connected users holding each Google service (as last reported by Google; NULL scopes = not seen yet). */
+    permissions: Object.fromEntries(Object.entries(SCOPE_LABELS).map(([scope, label]) => [label,
+      n("SELECT count(*) n FROM {U} u WHERE enc_refresh IS NOT NULL AND (' ' || google_scopes || ' ') LIKE ?", `% ${scope} %`)])) as Record<string, number>,
+    permissionsUnknown: n("SELECT count(*) n FROM {U} u WHERE enc_refresh IS NOT NULL AND google_scopes IS NULL"),
     recent: q<{ at: number; email: string; tool: string; customer_id: string | null; ok: number; error: string | null; ms: number; client: string }>(
       `SELECT c.at, u.email, c.tool, c.customer_id, c.ok, substr(c.error, 1, 160) error, c.ms, ${client} client
        FROM tool_calls c JOIN {U} u ON u.id = c.user_id LEFT JOIN clients cl ON cl.client_id = c.client_id
@@ -75,6 +81,50 @@ export function buildReport(db: DB, o: ReportOptions) {
 }
 
 export type Report = ReturnType<typeof buildReport>;
+
+/** Google scope → the service it is, in the order the admin shows them. openid/email are left out. */
+export const SCOPE_LABELS: Record<string, string> = {
+  [ADS_SCOPE]: "Google Ads",
+  [SEARCH_CONSOLE_SCOPE]: "Search Console",
+  [ANALYTICS_SCOPE]: "GA4 read",
+  [ANALYTICS_EDIT_SCOPE]: "GA4 edit",
+};
+export const permissionLabels = (scopes: string | null | undefined): string[] | null => {
+  if (scopes == null) return null;
+  const have = new Set(scopes.split(" "));
+  return Object.entries(SCOPE_LABELS).filter(([s]) => have.has(s)).map(([, l]) => l);
+};
+
+/** Everything about one user for the admin's user page. Null when there's no such user. */
+export function userDetail(db: DB, id: string) {
+  const user = db.prepare(`SELECT id, email, plan, created_at, last_seen_at, enc_refresh IS NOT NULL connected, google_scopes,
+    stripe_customer, stripe_sub, time_zone, email_opt_out FROM users WHERE id = ?`).get(id) as {
+      id: string; email: string; plan: string; created_at: number; last_seen_at: number | null; connected: number; google_scopes: string | null;
+      stripe_customer: string | null; stripe_sub: string | null; time_zone: string | null; email_opt_out: number } | undefined;
+  if (!user) return null;
+  const all = <T>(sql: string) => db.prepare(sql).all(id) as T[];
+  const client = "coalesce(json_extract(cl.info, '$.client_name'), c.client_id, 'unknown')";
+  return {
+    user,
+    totals: db.prepare("SELECT count(*) calls, coalesce(sum(ok = 0), 0) errors, cast(coalesce(avg(ms), 0) AS int) avg_ms FROM tool_calls WHERE user_id = ?").get(id) as
+      { calls: number; errors: number; avg_ms: number },
+    accounts: all<{ customer_id: string; calls: number; first: number; last: number }>(
+      `SELECT customer_id, count(*) calls, min(at) first, max(at) last FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL
+       GROUP BY 1 ORDER BY last DESC`),
+    clients: all<{ client: string; calls: number; last: number }>(
+      `SELECT ${client} client, count(*) calls, max(c.at) last FROM tool_calls c LEFT JOIN clients cl ON cl.client_id = c.client_id
+       WHERE c.user_id = ? GROUP BY 1 ORDER BY calls DESC`),
+    tools: all<{ tool: string; calls: number; errors: number }>(
+      "SELECT tool, count(*) calls, sum(ok = 0) errors FROM tool_calls WHERE user_id = ? GROUP BY 1 ORDER BY calls DESC"),
+    proposals: all<{ id: string; customer_id: string; summary: string; status: string; undo_of: string | null; created_at: number; applied_at: number | null }>(
+      "SELECT id, customer_id, summary, status, undo_of, created_at, applied_at FROM proposals WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"),
+    emails: all<{ kind: string; sent_at: number }>("SELECT kind, sent_at FROM email_log WHERE user_id = ? ORDER BY sent_at"),
+    recent: all<{ at: number; tool: string; customer_id: string | null; ok: number; error: string | null; ms: number; client: string }>(
+      `SELECT c.at, c.tool, c.customer_id, c.ok, substr(c.error, 1, 300) error, c.ms, ${client} client
+       FROM tool_calls c LEFT JOIN clients cl ON cl.client_id = c.client_id WHERE c.user_id = ? ORDER BY c.id DESC LIMIT 100`),
+  };
+}
+export type UserDetail = NonNullable<ReturnType<typeof userDetail>>;
 
 /** {U} expands to a subquery with one placeholder per excluded email; bind those in order. No literal "?" in the SQL. */
 function bind(sql: string, ex: string[], params: unknown[]): unknown[] {

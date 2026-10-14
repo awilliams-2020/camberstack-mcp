@@ -1277,6 +1277,20 @@ describe("OAuth + MCP end to end", () => {
     const html = await page.text();
     expect(html).toContain("account_overview");
     expect(html).toContain("owner@example.com");
+    // The other pages, and a user's own page with their Google permissions.
+    const users = await (await fetch(`${admin}/users?days=30&internal=1`, { headers: { cookie } })).text();
+    expect(users).toContain("owner@example.com");
+    const id = users.match(/href="\/users\/([^"?]+)/)![1]!;
+    const one = await fetch(`${admin}/users/${id}?internal=1`, { headers: { cookie } });
+    expect(one.status).toBe(200);
+    const detail = await one.text();
+    expect(detail).toContain("Google permissions");
+    expect(detail).toContain(`<span class="chip on">Google Ads</span>`);  // recorded from the scopes Google granted at sign-in
+    expect(detail).toContain("account_overview");
+    expect((await fetch(`${admin}/users/nope`, { headers: { cookie } })).status).toBe(404);
+    expect(await (await fetch(`${admin}/activity?days=30&internal=1`, { headers: { cookie } })).text()).toContain("account_overview");
+    expect((await fetch(`${admin}/revenue`, { headers: { cookie } })).status).toBe(200);
+    expect((await fetch(`${admin}/users`, { redirect: "manual" })).status).toBe(302);  // every page is behind sign-in
     // The operator's own account is internal: hidden unless asked for.
     const json = await (await fetch(`${admin}/?format=json`, { headers: { cookie } })).json();
     expect(json.funnel.all.connected).toBe(0);

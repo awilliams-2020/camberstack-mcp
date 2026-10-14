@@ -118,7 +118,7 @@ export async function exchangeGoogleCode(
 
 export async function refreshGoogleToken(
   creds: Pick<GoogleCreds, "clientId" | "clientSecret">, refreshToken: string, f: FetchLike = fetch,
-): Promise<{ access_token: string; expires_in: number }> {
+): Promise<{ access_token: string; expires_in: number; scope?: string }> {
   const res = await postForm(f, GOOGLE_TOKEN, {
     refresh_token: refreshToken, client_id: creds.clientId, client_secret: creds.clientSecret,
     grant_type: "refresh_token",
@@ -129,7 +129,7 @@ export async function refreshGoogleToken(
     if (body.includes("invalid_grant")) (err as Error & { revoked?: boolean }).revoked = true;
     throw err;
   }
-  return (await res.json()) as { access_token: string; expires_in: number };
+  return (await res.json()) as { access_token: string; expires_in: number; scope?: string };
 }
 
 export async function revokeGoogleToken(token: string, f: FetchLike = fetch): Promise<void> {

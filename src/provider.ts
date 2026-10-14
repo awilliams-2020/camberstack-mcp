@@ -182,7 +182,7 @@ export class CamberstackProvider implements OAuthServerProvider {
     }
     if (!g.id_token) throw new Error("Google did not return an id_token");
     const { sub, email } = idTokenClaims(g.id_token);
-    const { user, created } = this.upsertUser(sub, email, g.refresh_token);
+    const { user, created } = this.upsertUser(sub, email, g.refresh_token, g.scope);
 
     const code = randomToken();
     this.db.prepare(`INSERT INTO auth_codes
@@ -194,19 +194,19 @@ export class CamberstackProvider implements OAuthServerProvider {
     return { to: back.toString(), userId: user.id, created };
   }
 
-  private upsertUser(sub: string, email: string, refreshToken?: string): { user: UserRow; created: boolean } {
+  private upsertUser(sub: string, email: string, refreshToken?: string, scope?: string): { user: UserRow; created: boolean } {
     const existing = this.db.prepare("SELECT * FROM users WHERE google_sub = ?").get(sub) as UserRow | undefined;
     const enc = refreshToken ? encrypt(this.opts.encryptionKey, refreshToken) : null;
     if (existing) {
-      this.db.prepare("UPDATE users SET email = ?, enc_refresh = COALESCE(?, enc_refresh), last_seen_at = ? WHERE id = ?")
-        .run(email, enc, now(), existing.id);
+      this.db.prepare("UPDATE users SET email = ?, enc_refresh = COALESCE(?, enc_refresh), google_scopes = COALESCE(?, google_scopes), last_seen_at = ? WHERE id = ?")
+        .run(email, enc, enc ? scope ?? null : null, now(), existing.id);
       if (enc) clearGoogleCache(existing.id);
       return { user: { ...existing, email, enc_refresh: enc ?? existing.enc_refresh }, created: false };
     }
     if (!enc) throw new Error("Google did not return a refresh token; remove Camberstack at myaccount.google.com/permissions and connect again.");
     const id = randomUUID();
-    this.db.prepare("INSERT INTO users (id, google_sub, email, enc_refresh, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(id, sub, email, enc, now(), now());
+    this.db.prepare("INSERT INTO users (id, google_sub, email, enc_refresh, google_scopes, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, sub, email, enc, scope ?? null, now(), now());
     return { user: this.db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow, created: true };
   }
 
