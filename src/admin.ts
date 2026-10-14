@@ -187,7 +187,7 @@ h1{font-size:18px;font-weight:600;margin:0;letter-spacing:-.2px}h2{font-size:13p
 .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:16px;min-width:0}
 .card>header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
 .card>header small{color:var(--dim);font-size:12px}.card>.pad{padding:14px}
-.tbl{overflow-x:auto}table{border-collapse:collapse;width:100%}
+.mfoot{display:none}.tbl{overflow-x:auto}table{border-collapse:collapse;width:100%}
 th{font-weight:500;color:var(--muted);font-size:12px;text-align:left;padding:7px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:7px 14px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--hover)}
 .r{text-align:right}td.wrap{white-space:normal;min-width:280px}.empty{color:var(--dim);padding:14px;margin:0}
@@ -202,7 +202,9 @@ td{padding:7px 14px;border-bottom:1px solid var(--line);white-space:nowrap;verti
 dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 20px;margin:0;padding:14px}dt{color:var(--muted)}dd{margin:0;min-width:0;overflow-wrap:anywhere}
 button{font:inherit;font-size:12px;background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:3px 10px;cursor:pointer}button:hover{color:var(--fg)}
 @media (max-width:760px){.app{display:block}aside{position:sticky;top:0;z-index:2;height:auto;flex-direction:row;align-items:center;gap:8px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px 12px;background:var(--bg)}
-.brand{padding:4px 4px}.brand span{display:none}aside nav{display:flex;gap:2px}aside nav a{white-space:nowrap;gap:6px}.who,.ext{display:none}main{padding:16px}.grid2{grid-template-columns:1fr}
+.brand{padding:4px 4px}.brand span{display:none}aside nav{display:flex;gap:2px}aside nav a{white-space:nowrap;gap:6px}.who,.ext{display:none}main{padding:16px}
+.mfoot{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:24px;padding-top:16px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+.mfoot span{flex-basis:100%;color:var(--dim);font-size:12px}.mfoot button{border:0;padding:0;color:var(--dim)}.grid2{grid-template-columns:1fr}
 .top{margin-bottom:14px}h1{font-size:16px}
 table.users thead{display:none}table.users tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:10px 14px;border-bottom:1px solid var(--line)}
 table.users tr:last-child{border-bottom:0}table.users td{padding:0;border:0}table.users td:first-child{flex-basis:100%}
@@ -217,6 +219,8 @@ table.users td:nth-child(5){margin-left:auto;color:var(--dim);font-size:12px}}
 <span class="seg">${[1, 7, 30, 90].map((d) => `<a class="${d === v.days ? "on" : ""}" href="?${qs(v, { days: d }).slice(1)}">${d === 1 ? "24h" : `${d}d`}</a>`).join("")}</span>
 <a class="toggle ${v.all ? "on" : ""}" href="${qs(v, { all: !v.all })}" title="Include the operator's and testers' accounts (ADMIN_EMAILS, PRO_EMAILS)">${v.all ? "showing" : "hiding"} internal</a></div></div>
 ${body}
+<footer class="mfoot">${EXTERNAL.map(([l, href]) => `<a href="${href}" target="_blank" rel="noopener">${l} ↗</a>`).join("")}
+<span>${esc(who)} · <form method="post" action="/logout" style="display:inline"><button>Sign out</button></form></span></footer>
 </main></div></body></html>`;
 }
 
