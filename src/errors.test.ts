@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AdsApiError, AdsClient } from "./google.js";
-import { expandDuring } from "./session.js";
+import { expandDuring, missingSelectFields } from "./session.js";
 
 /** Google's error body for one GAQL error, as the REST API returns it. */
 const body = (code: Record<string, string>, message: string, field?: string) => JSON.stringify({
@@ -60,5 +60,23 @@ describe("AdsClient.search", () => {
   it("throws when the stream fails partway instead of returning a short list", async () => {
     const broken = client([{ results: [1] }, { error: { code: 503, message: "The service is currently unavailable.", status: "UNAVAILABLE" } }]);
     await expect(broken.search("1", "SELECT x")).rejects.toThrow(/unavailable/i);
+  });
+});
+
+describe("missingSelectFields", () => {
+  it("reads the field Google wants selected, from each such error", () => {
+    const two = JSON.stringify({ error: { details: [{ errors: [
+      { errorCode: { queryError: "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE" }, message: "The following field must be present in SELECT clause: 'campaign.status'." },
+      { errorCode: { queryError: "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE" }, message: "The following field must be present in SELECT clause: 'segments.device'." },
+    ] }] } });
+    expect(missingSelectFields(two)).toEqual(["campaign.status", "segments.device"]);
+    // searchStream wraps it in an array.
+    expect(missingSelectFields(`[${body({ queryError: "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE" }, "The following field must be present in SELECT clause: 'ad_group.id'.")}]`)).toEqual(["ad_group.id"]);
+  });
+
+  it("ignores other errors and anything that isn't a field name", () => {
+    expect(missingSelectFields(body({ queryError: "UNRECOGNIZED_FIELD" }, "Unrecognized field in the query: 'campaign.start_date'."))).toEqual([]);
+    expect(missingSelectFields(body({ queryError: "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE" }, "The following field must be present in SELECT clause: 'x FROM y'."))).toEqual([]);
+    expect(missingSelectFields("not json")).toEqual([]);
   });
 });

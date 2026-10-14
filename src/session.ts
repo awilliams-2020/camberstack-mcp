@@ -7,7 +7,7 @@ import type { DB, ProposalRow, UserRow } from "./db.js";
 import { now } from "./db.js";
 import { decrypt } from "./crypto.js";
 import {
-  AdsClient, NotGrantedError, SearchConsoleClient, micros, refreshGoogleToken, revokeGoogleToken,
+  AdsApiError, AdsClient, NotGrantedError, SearchConsoleClient, micros, refreshGoogleToken, revokeGoogleToken,
   type GoogleCreds, type GrantKind, type SearchAnalyticsRequest, type SearchAnalyticsRow, type UrlInspection,
 } from "./google.js";
 import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError, accountsLabel } from "./plans.js";
@@ -412,9 +412,25 @@ export class UserSession {
   async runQuery(customerId: string, query: string) {
     if (!/^\s*select\b/i.test(query)) throw new Error("Only SELECT (read-only GAQL) queries are allowed. Use propose_changes to change anything.");
     const a = await this.account(customerId);
-    const { query: q, rewrote } = expandDuring(query);
-    const rows = await this.ads.search(a.customerId, q, a.loginCustomerId);
+    const { query: expanded, rewrote } = expandDuring(query);
+    let q = expanded;
+    // Models filter or sort on a field they didn't select despite the rule in run_gaql's description. Google names the
+    // field, so select it and rerun rather than spend the model's turn on the retry.
+    const added: string[] = [];
+    let rows: any[];
+    for (;;) {
+      try {
+        rows = await this.ads.search(a.customerId, q, a.loginCustomerId);
+        break;
+      } catch (e) {
+        const missing = e instanceof AdsApiError ? missingSelectFields(e.body).filter((f) => !added.includes(f)) : [];
+        if (!missing.length || added.length >= 5) throw e;
+        added.push(...missing);
+        q = q.replace(/^\s*select\s+/i, `SELECT ${missing.join(", ")}, `);
+      }
+    }
     return { ...demoNote(a.customerId), ...(rewrote.length ? { rewritten: `Google only accepts LAST_7/14/30_DAYS, so ran ${rewrote.join(", ")} (dates in UTC)` } : {}),
+      ...(added.length ? { added_to_select: `Google requires fields used in WHERE or ORDER BY to be selected too, so added ${added.join(", ")} to SELECT` } : {}),
       rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
   }
 
@@ -1070,6 +1086,20 @@ export function expandDuring(query: string): { query: string; rewrote: string[] 
     return r;
   });
   return { query: q, rewrote };
+}
+
+/** Fields Google says a GAQL query must also SELECT (EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE), from its error body. */
+export function missingSelectFields(body: string): string[] {
+  try {
+    const j = JSON.parse(body);
+    const e = Array.isArray(j) ? j[0]?.error : j.error;
+    return (e?.details ?? []).flatMap((d: any) => d.errors ?? [])
+      .filter((d: any) => d.errorCode?.queryError === "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE")
+      .map((d: any) => /'([a-z_]+(?:\.[a-z0-9_]+)+)'/.exec(String(d.message ?? ""))?.[1])
+      .filter((f: string | undefined): f is string => !!f);
+  } catch {
+    return [];
+  }
 }
 
 /** Google's "try again" answers (503 UNAVAILABLE): retried once, after a second, when `safe` says repeating can't duplicate anything. */

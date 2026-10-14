@@ -12,7 +12,7 @@ import { openDb } from "./db.js";
 import type { Config } from "./config.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { createRelayKey } from "./relay.js";
-import { NotGrantedError } from "./google.js";
+import { AdsApiError, NotGrantedError } from "./google.js";
 import { io } from "./changes.js";
 
 const key = randomBytes(32);
@@ -46,6 +46,11 @@ class FakeAds {
   campaignEnd: string | undefined;
   async listAccessibleCustomers() { return ["1112223333"]; }
   async search(_cid: string, q: string): Promise<any[]> {
+    // Google's rule: a field in WHERE or ORDER BY must be in SELECT too.
+    if (q.includes("ORDER BY campaign.status") && !/^SELECT[^]*campaign\.status[^]*FROM/.test(q)) {
+      throw new AdsApiError(400, JSON.stringify({ error: { details: [{ errors: [{ errorCode: { queryError: "EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE" },
+        message: "The following field must be present in SELECT clause: 'campaign.status'." }] }] } }));
+    }
     if (q.includes("FROM customer_client")) {
       return [{ customerClient: { id: "1112223333", descriptiveName: "Acme", currencyCode: "USD", timeZone: "Europe/London", manager: false, level: 0 } }];
     }
@@ -1618,6 +1623,12 @@ describe("OAuth + MCP end to end", () => {
     expect(db.prepare("SELECT uploaded_at FROM ad_conversions").get()).toMatchObject({ uploaded_at: expect.any(Number) });
     // Nothing about the user travels with it.
     expect(JSON.stringify(conversionUploads)).not.toContain("new@example.com");
+  });
+
+  it("selects a field Google says WHERE or ORDER BY needs, and reruns", async () => {
+    const r = await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT campaign.name FROM campaign ORDER BY campaign.status" });
+    expect(r.isError).toBeFalsy();
+    expect(r.json.added_to_select).toContain("campaign.status");
   });
 
   it("refuses write GAQL", async () => {
