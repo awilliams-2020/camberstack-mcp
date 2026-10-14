@@ -182,6 +182,10 @@ function adsErrorFix(code: string, message: string, field: string): string | nul
         + "can't be created). Do it in Google Ads. For a locked shared bid strategy, set_bidding_strategy can still move campaigns off it.";
     case "UNRECOGNIZED_FIELD":
       if (/campaign\.(start|end)_date'/.test(message)) return "campaign dates are campaign.start_date_time and campaign.end_date_time.";
+      if (/maximize_clicks/.test(message)) {
+        return "Maximize clicks is target_spend in the API: campaign.target_spend.cpc_bid_ceiling_micros (bidding_strategy_type TARGET_SPEND), "
+          + "or bidding_strategy.target_spend.cpc_bid_ceiling_micros for a shared strategy.";
+      }
       if (/'recommendation\.impact\./.test(message)) {
         return "recommendation.impact is selected whole: SELECT recommendation.impact (its base_metrics and potential_metrics come back inside it).";
       }
