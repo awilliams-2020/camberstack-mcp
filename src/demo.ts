@@ -287,7 +287,7 @@ export class DemoAds {
         return { resourceName: op.remove };
       }
       // Targeting, conversion settings, bids, URL suffixes and bid strategies are simulated like builds:
-      // accepted, but the sample reports don't change. Only status, budget and end date are tracked.
+      // accepted, but the sample reports don't change. Only status, budget, end date and bids are tracked.
       if (op.create) return { resourceName: `customers/${DEMO_CID}/${service}/${s.nextId++}` };
       if (op.remove) return { resourceName: op.remove as string };
       const u = op.update;

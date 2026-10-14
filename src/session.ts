@@ -241,10 +241,7 @@ export class UserSession {
     const mine = inFlight.get(this.user.id) ?? new Map<string, number>();
     inFlight.set(this.user.id, mine);
     mine.set(cid, (mine.get(cid) ?? 0) + 1);
-    let done = false;
     return () => {
-      if (done) return;
-      done = true;
       const n = (mine.get(cid) ?? 1) - 1;
       if (n > 0) mine.set(cid, n); else mine.delete(cid);
       if (!mine.size && inFlight.get(this.user.id) === mine) inFlight.delete(this.user.id);
@@ -252,19 +249,19 @@ export class UserSession {
   }
 
   private refuse(cid: string, st: ReturnType<UserSession["planState"]>): never {
-    const window = `in the last ${ACCOUNT_WINDOW_DAYS} days`;
+    const used = `${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(st.used.length)} in the last ${ACCOUNT_WINDOW_DAYS} days`;
+    const rule = `covers ${this.accountLimit} at a time (active: ${st.active.join(", ")}), with one switch per ${ACCOUNT_WINDOW_DAYS} days, `
+      + `already used; the next opens ${st.switchOpens}.`;
     const common = { plan: this.isPro ? "pro" : "free", accounts_in_use: st.used, active_accounts: st.active,
       accounts_included: this.accountLimit, window_days: ACCOUNT_WINDOW_DAYS, refused_account: cid,
       switching: `one switch per ${ACCOUNT_WINDOW_DAYS} days, already used; the next opens ${st.switchOpens}`,
       still_available: ["the active accounts", "undo_changes", "change_history", "billing"] };
     if (this.isPro) {
-      throw new PlanLimitError(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(st.used.length)} ${window}; Pro covers ${this.deps.proAccounts}.`,
+      throw new PlanLimitError(`${used}; Pro ${rule}`,
         { error: "plan_limit", ...common, contact: "adam@camberstack.io" });
     }
     const url = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
-    throw new PlanLimitError(`${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(st.used.length)} ${window} (${st.used.join(", ")}); `
-      + `the Free plan covers ${this.deps.freeAccounts} at a time (active: ${st.active.join(", ")}), with one switch per ${ACCOUNT_WINDOW_DAYS} days, `
-      + `already used; the next opens ${st.switchOpens}.`,
+    throw new PlanLimitError(`${used} (${st.used.join(", ")}); the Free plan ${rule}`,
       { error: "plan_limit", ...common,
         upgrade: { plan: "pro", price: PRO_PRICE_LABEL, accounts_included: this.deps.proAccounts, cancel: "any time",
           upgrade_url: url, upgrade_url_expires: url ? "7 days; personal to this user" : null,
