@@ -3,8 +3,9 @@
  *   first_steps    connected 2–14 days ago and never asked anything real → the first question to ask, and the demo
  *   limit_reached  a tool refused a second Google Ads account (the Free plan's limit), still free 3+ days later → one note: what Pro covers, the upgrade link
  *   check_in       first applied a change to a real account 2–14 days ago → a personal note from Adam asking how it went (replies go to him)
- *   pro_welcome    on Pro with a Stripe subscription → what Pro adds, where billing lives. Transactional: sent within a
- *                  minute (transactional(), every minute), not held for the morning
+ *   welcome        signed up (still Free) → the first question to ask, the demo, the plans
+ *   pro_welcome    on Pro with a Stripe subscription → what Pro adds, where billing lives
+ * Those two are transactional: sent within a minute (transactional(), every minute), not held for the morning.
  * The first three go out in the user's morning (SEND_HOURS in the time zone of their Google Ads account, or FALLBACK_TZ),
  * so being due only holds it until the next hourly run inside that window.
  * Never sent to internal accounts (ADMIN_EMAILS, PRO_EMAILS) or anyone who unsubscribed; first_steps and limit_reached
@@ -51,7 +52,11 @@ function localHour(at: Date, tz: string | null | undefined): number {
   const fmt = (zone: string) => Number(new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", hourCycle: "h23" }).format(at));
   try { return fmt(tz || FALLBACK_TZ); } catch { return fmt(FALLBACK_TZ); }
 }
-type Kind = "first_steps" | "limit_reached" | "check_in" | "pro_welcome";
+type Kind = "first_steps" | "limit_reached" | "check_in" | "welcome" | "pro_welcome";
+/** welcome shipped at this time (2026-10-14); everyone who signed up before it never gets one. */
+const WELCOME_SINCE = 1792001873;
+/** A welcome that hasn't gone out a day after signup (mail down that long) is dropped, not sent late. */
+const WELCOME_WITHIN = DAY;
 /** Tools that mean someone has asked Camberstack something real (not just listed accounts or sites). */
 const USED_TOOLS = "('account_overview','run_gaql','keyword_ideas','keyword_metrics','propose_changes','paid_organic_overlap',"
   + "'search_console_summary','search_console_performance','search_console_trend','search_console_opportunities',"
@@ -109,7 +114,8 @@ export class Lifecycle {
   }
 
   /**
-   * Every minute: pro_welcome to anyone on Pro through Stripe who hasn't had it. Polling the plan, not hooking the
+   * Every minute. welcome: a Free user who connected in the last day (Pro gets pro_welcome instead).
+   * pro_welcome: anyone on Pro through Stripe who hasn't had it. Polling the plan, not hooking the
    * upgrade, covers every way someone becomes Pro (/upgraded, the paywall's refreshPlan, the hourly sweep).
    * PRO_EMAILS users have no stripe_sub, so they never get it.
    */
@@ -119,7 +125,12 @@ export class Lifecycle {
       AND u.email_opt_out = 0 AND NOT EXISTS (SELECT 1 FROM email_log e WHERE e.user_id = u.id AND e.kind = 'pro_welcome')`)
       .all() as { id: string; email: string }[])
       .filter((u) => !this.d.internalEmails.has(u.email.toLowerCase()));
-    return this.deliver(pros.map((u) => ({ ...u, kind: "pro_welcome" as const, days: 0 })), () => proWelcome(this.d.baseUrl));
+    const fresh = (this.d.db.prepare(`SELECT u.id, u.email FROM users u WHERE u.plan = 'free' AND u.enc_refresh IS NOT NULL
+      AND u.created_at >= ? AND u.email_opt_out = 0 AND NOT EXISTS (SELECT 1 FROM email_log e WHERE e.user_id = u.id AND e.kind = 'welcome')`)
+      .all(Math.max(WELCOME_SINCE, now() - WELCOME_WITHIN)) as { id: string; email: string }[])
+      .filter((u) => !this.d.internalEmails.has(u.email.toLowerCase()));
+    return await this.deliver(fresh.map((u) => ({ ...u, kind: "welcome" as const, days: 0 })), () => welcome(this.d.baseUrl))
+      + await this.deliver(pros.map((u) => ({ ...u, kind: "pro_welcome" as const, days: 0 })), () => proWelcome(this.d.baseUrl));
   }
 
   /** Logs before sending (at most once, even if a send is retried by a crash); a failed send is unlogged to retry. */
@@ -164,6 +175,7 @@ export class Lifecycle {
     await this.send(to, firstSteps(3), "preview");
     await this.send(to, limitReached(this.d.baseUrl, `${this.d.baseUrl}/account?upgrade=1`), "preview");
     await this.send(to, checkInEmail(), "preview");
+    await this.send(to, welcome(this.d.baseUrl), "preview");
     await this.send(to, proWelcome(this.d.baseUrl), "preview");
   }
 
@@ -258,6 +270,33 @@ camberstack.io`,
       + p("Two quick questions, if you have a minute:")
       + `<ol style="margin:0 0 14px;padding-left:22px">${qs.map((q) => `<li>${q}</li>`).join("")}</ol>`
       + p("I read every reply and fix things quickly, so even one line helps.") + p("Thanks,<br>Adam<br>camberstack.io")),
+  };
+}
+
+/** Transactional: right after signup. Doesn't name Google Ads as connected: someone can sign up with only Search Console. */
+function welcome(base: string) {
+  const ask = "How did each of my Google Ads campaigns do last month?";
+  return {
+    subject: "Welcome to Camberstack",
+    text: `Hi,
+
+You're connected. You can now use Camberstack in Claude or ChatGPT.
+
+A good first question: "${ask}" From there, ask about search terms, keywords and budgets. Nothing changes until you approve it, and every change can be undone from ${base}/account
+
+Want to try it on sample data first? Ask: "Show me Camberstack's demo account."
+
+Free covers one Google Ads account; Pro (${PRO_PRICE_LABEL}) covers up to 10.
+
+If anything doesn't work, just reply. I read every email.
+
+Adam
+Camberstack`,
+    html: wrap(p("Hi,") + p("You're connected. You can now use Camberstack in Claude or ChatGPT.")
+      + p(`A good first question: <em>“${ask}”</em> From there, ask about search terms, keywords and budgets. Nothing changes until you approve it, and every change can be undone from <a href="${base}/account">your account page</a>.`)
+      + p(`Want to try it on sample data first? Ask: <em>“Show me Camberstack's demo account.”</em>`)
+      + p(`Free covers one Google Ads account; Pro (${PRO_PRICE_LABEL}) covers up to 10.`)
+      + p("If anything doesn't work, just reply. I read every email.") + p("Adam<br>Camberstack")),
   };
 }
 

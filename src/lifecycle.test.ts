@@ -152,7 +152,7 @@ describe("pro_welcome (transactional)", () => {
     pro(db, "comp", "comp@example.com", null);          // Pro through PRO_EMAILS, no subscription
     pro(db, "me", "me@example.com", "sub_2");           // internal
     pro(db, "quiet", "quiet@example.com", "sub_3", 1);  // unsubscribed
-    user("free", "free@example.com", 0);
+    user("free", "free@example.com", 3);              // signed up before welcome shipped
     expect(await lc.transactional()).toBe(1);
     expect(sent.map((m) => m.to[0])).toEqual(["paid@example.com"]);
     const m = sent[0];
@@ -175,5 +175,35 @@ describe("pro_welcome (transactional)", () => {
     (lc as any).d.fetch = real;
     expect(await lc.transactional()).toBe(1);
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe("welcome (transactional)", () => {
+  it("goes once to a Free user who just signed up, never to earlier signups, Pro, internal or disconnected users", async () => {
+    const { db, lc, sent, user } = setup(() => new Date("2026-10-14T03:00:00Z"));  // any hour
+    user("new", "new@example.com", 0);
+    user("old", "old@example.com", 3);                 // before welcome shipped: no backfill
+    user("paid", "paid@example.com", 0, "pro");        // gets pro_welcome only if Stripe; never welcome
+    user("me", "me@example.com", 0);                   // internal
+    user("gone", "gone@example.com", 0);
+    db.prepare("UPDATE users SET enc_refresh = NULL WHERE id = 'gone'").run();
+    expect(await lc.transactional()).toBe(1);
+    expect(sent.map((m) => m.to[0])).toEqual(["new@example.com"]);
+    const m = sent[0];
+    expect(m.subject).toBe("Welcome to Camberstack");
+    expect(m.text).toContain("How did each of my Google Ads campaigns do last month?");
+    expect(m.text).toContain("demo account");
+    expect(m.text).toContain("https://camberstack.io/account");
+    expect(m.text).toContain("$15/month");
+    expect(await lc.transactional()).toBe(0);  // never twice
+  });
+
+  it("a Free user who then upgrades gets both, welcome first", async () => {
+    const { db, lc, sent, user } = setup();
+    user("u", "u@example.com", 0);
+    expect(await lc.transactional()).toBe(1);
+    db.prepare("UPDATE users SET plan = 'pro', stripe_sub = 'sub_1' WHERE id = 'u'").run();
+    expect(await lc.transactional()).toBe(1);
+    expect(sent.map((m) => m.subject)).toEqual(["Welcome to Camberstack", "You're on Camberstack Pro"]);
   });
 });
