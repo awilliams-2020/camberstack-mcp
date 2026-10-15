@@ -204,6 +204,10 @@ function adsErrorFix(code: string, message: string, field: string): string | nul
         return "Maximize clicks is target_spend in the API: campaign.target_spend.cpc_bid_ceiling_micros (bidding_strategy_type TARGET_SPEND), "
           + "or bidding_strategy.target_spend.cpc_bid_ceiling_micros for a shared strategy.";
       }
+      if (/campaign\.url_expansion_opt_out/.test(message)) {
+        return "Final URL expansion moved to SELECT campaign.asset_automation_settings (selected whole): it's the entry whose "
+          + "asset_automation_type is FINAL_URL_EXPANSION_TEXT_ASSET_AUTOMATION, with asset_automation_status OPTED_IN or OPTED_OUT.";
+      }
       if (/'recommendation\.impact\./.test(message)) {
         return "recommendation.impact is selected whole: SELECT recommendation.impact (its base_metrics and potential_metrics come back inside it).";
       }
