@@ -25,6 +25,10 @@ describe("AdsApiError fix hints", () => {
     [{ policyFindingError: "POLICY_FINDING" }, "The resource has been disapproved since the policy summary includes policy topics of type PROHIBITED.", "ad", "repeated punctuation"],
     [{ policyViolationError: "POLICY_ERROR" }, "A policy was violated. See PolicyViolationDetails for more detail.", "mutate_operations.ad_group_criterion_operation.create.keyword.text", "Drop or reword that keyword"],
     [{ fieldError: "IMMUTABLE_FIELD" }, "The field attempted to be mutated is immutable.", "operations.update.counting_type", "conversion_action.type"],
+    [{ queryError: "UNRECOGNIZED_FIELD" }, "Unrecognized fields in the query: 'conversion_action.tracking_status', 'conversion_action.last_received_request_time'.", undefined, "metrics.conversion_last_received_request_date_time"],
+    [{ queryError: "PROHIBITED_SEGMENT_IN_SELECT_OR_WHERE_CLAUSE" }, "Cannot select or filter on the following segments: 'segments.geo_target_city'(could not support requested resources: 'CAMPAIGN'), since segment is incompatible with the resource in the FROM clause or other selected segmenting resources", undefined, "FROM geographic_view"],
+    [{ queryError: "BAD_ENUM_CONSTANT" }, "Invalid enum values cannot be included in WHERE clause: 'LOCATION', 'AFFILIATE_LOCATION'.", undefined, "FROM campaign_asset_set"],
+    [{ queryError: "BAD_ENUM_CONSTANT" }, "Invalid enum value cannot be included in WHERE clause: 'ACTIVE'.", undefined, "UPPER_CASE"],
     [{ imageError: "ASPECT_RATIO_NOT_ALLOWED" }, "The aspect ratio of the image does not match the expected aspect ratios provided in the asset spec.", "logo_images", "1.91:1"],
   ])("%j → hint", (code, message, field, hint) => {
     const e = new AdsApiError(400, body(code, message, field));

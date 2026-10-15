@@ -176,12 +176,29 @@ function adsErrorFix(code: string, message: string, field: string): string | nul
       return "that resource can't be selected with this FROM: drop it and query it in its own query, FROM that resource "
         + "(or FROM campaign if it's a campaign-level resource).";
     case "PROHIBITED_SEGMENT_IN_SELECT_OR_WHERE_CLAUSE":
+      if (/segments\.geo_target_/.test(message)) {
+        return "location segments come FROM geographic_view (or user_location_view), which can also select campaign and ad_group fields: "
+          + "SELECT campaign.name, segments.geo_target_city, metrics.clicks FROM geographic_view WHERE segments.date DURING LAST_30_DAYS. "
+          + "They return geoTargetConstants/ID; get names with SELECT geo_target_constant.canonical_name FROM geo_target_constant "
+          + "WHERE geo_target_constant.resource_name IN ('geoTargetConstants/ID', …).";
+      }
       return "that resource or segment can't be combined with this FROM: query it directly, in its own query.";
+    case "BAD_ENUM_CONSTANT":
+      if (/'(AFFILIATE_)?LOCATION'/.test(message)) {
+        return "location assets aren't a field_type: they're asset sets. SELECT campaign.name, asset_set.name, asset_set.type FROM campaign_asset_set "
+          + "(asset_set.type LOCATION_SYNC is the Business Profile link; affiliate locations are asset_set.location_set.location_ownership_type AFFILIATE).";
+      }
+      return "that value isn't one this field takes. Enum values are UPPER_CASE names; look them up with gaql_fields.";
     case "MUTATE_NOT_ALLOWED":
       return "Google doesn't allow this change through the API (some legacy or system-managed items are locked, and some campaign types "
         + "can't be created). Do it in Google Ads. For a locked shared bid strategy, set_bidding_strategy can still move campaigns off it.";
     case "UNRECOGNIZED_FIELD":
       if (/campaign\.(start|end)_date'/.test(message)) return "campaign dates are campaign.start_date_time and campaign.end_date_time.";
+      if (/conversion_action\.(tracking_status|last_received|last_conversion)/.test(message)) {
+        return "whether a conversion action is recording is in metrics, FROM conversion_action: metrics.conversion_last_received_request_date_time "
+          + "and metrics.conversion_last_conversion_date (a 1969/1970 date means never). The account-wide setting is "
+          + "customer.conversion_tracking_setting.conversion_tracking_status.";
+      }
       if (/maximize_clicks/.test(message)) {
         return "Maximize clicks is target_spend in the API: campaign.target_spend.cpc_bid_ceiling_micros (bidding_strategy_type TARGET_SPEND), "
           + "or bidding_strategy.target_spend.cpc_bid_ceiling_micros for a shared strategy.";

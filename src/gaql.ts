@@ -20,14 +20,19 @@ export interface FieldMeta {
   filterable?: boolean;
   sortable?: boolean;
   isRepeated?: boolean;
-  /** RESOURCE only: resources whose attributes can be selected FROM this one, and the metrics and segments it takes. */
+  /** ENUM fields: every value Google accepts. */
+  enumValues?: string[];
+  /**
+   * RESOURCE only: resources whose attributes can be selected FROM this one, and the metrics and segments it takes.
+   * `segments` also lists bare resource names ("campaign"): segmenting resources, whose attributes can be selected too.
+   */
   attributeResources?: string[];
   metrics?: string[];
   segments?: string[];
 }
 export type Catalog = Map<string, FieldMeta>;
 
-export const CATALOG_QUERY = "SELECT name, category, data_type, selectable, filterable, sortable, is_repeated, attribute_resources, metrics, segments";
+export const CATALOG_QUERY = "SELECT name, category, data_type, selectable, filterable, sortable, is_repeated, attribute_resources, metrics, segments, enum_values";
 const TTL = 24 * 3600_000;
 /** After a failed fetch, wait this long before trying again (a check is optional, so it mustn't hammer Google). */
 const RETRY = 10 * 60_000;
@@ -97,6 +102,24 @@ export function checkGaql(query: string, cat: Catalog): string[] {
       if (!usable(f)) issues.push(`${name} can't be used FROM ${p.from}${whereFrom(f, cat)}.`);
     }
   }
+  return [...issues, ...enumIssues(query, cat)];
+}
+
+/** An enum literal in WHERE that isn't one of the field's values (Google only says BAD_ENUM_CONSTANT): name the values it takes. */
+function enumIssues(query: string, cat: Catalog): string[] {
+  const where = /\bWHERE\b([\s\S]*?)(?:\bORDER BY\b|\bLIMIT\b|\bPARAMETERS\b|$)/i.exec(query)?.[1] ?? "";
+  const issues: string[] = [];
+  const COND = /\b([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)\s*(?:!=|=|NOT\s+IN|IN)\s*(\([^)]*\)|'[^']*'|"[^"]*"|[A-Z][A-Z0-9_]*)/gi;
+  for (const [, name, rhs] of where.matchAll(COND)) {
+    const values = cat.get(name!)?.enumValues;
+    if (!values?.length) continue;
+    const given = (rhs!.match(/'[^']*'|"[^"]*"|[A-Za-z][A-Za-z0-9_]*/g) ?? []).map((v) => v.replace(/^['"]|['"]$/g, ""));
+    const bad = given.filter((v) => !values.includes(v));
+    if (!bad.length) continue;
+    const valid = values.filter((v) => v !== "UNKNOWN" && v !== "UNSPECIFIED");
+    issues.push(`${bad.map((v) => `'${v}'`).join(", ")} ${bad.length > 1 ? "aren't values" : "isn't a value"} of ${name}. It takes: `
+      + `${valid.slice(0, 40).join(", ")}${valid.length > 40 ? ", …" : ""}.`);
+  }
   return issues;
 }
 
@@ -105,7 +128,7 @@ function fromAllows(from: FieldMeta, f: FieldMeta): boolean {
   if (f.category === "METRIC") return (from.metrics ?? []).includes(f.name);
   if (f.category === "SEGMENT") return (from.segments ?? []).includes(f.name);
   const res = f.name.split(".")[0]!;
-  return res === from.name || (from.attributeResources ?? []).includes(res);
+  return res === from.name || (from.attributeResources ?? []).includes(res) || (from.segments ?? []).includes(res);
 }
 
 /** ": query it FROM x" — the resources that can use this field, the field's own resource first. */
@@ -176,8 +199,8 @@ export function lookupFields(cat: Catalog, o: { resource?: string; search?: stri
   return {
     resource: r.name,
     fields: capped(own.map((f) => `${f.name} ${f.dataType ?? ""}${f.isRepeated ? "[]" : ""}${f.filterable === false ? " (not filterable)" : ""}`.trim())),
-    also_select_from: r.attributeResources ?? [],
+    also_select_from: [...(r.attributeResources ?? []), ...(r.segments ?? []).filter((s) => !s.includes("."))],
     metrics: capped((r.metrics ?? []).filter(hit)),
-    segments: capped((r.segments ?? []).filter(hit)),
+    segments: capped((r.segments ?? []).filter((s) => s.includes(".") && hit(s))),
   };
 }

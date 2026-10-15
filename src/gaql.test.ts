@@ -40,6 +40,24 @@ describe("checkGaql against Google's field catalog", () => {
     expect(parseGaql("SELECT campaign.id FROM")).toBeNull();
     expect(checkGaql("SELECT COUNT(*) FROM campaign", cat)).toEqual([]);
   });
+  it("lets a segmenting resource's fields be selected (campaign FROM campaign_asset), as Google does", () => {
+    expect(checkGaql("SELECT campaign.name, campaign.id, campaign_asset.field_type FROM campaign_asset", cat)).toEqual([]);
+    expect(checkGaql("SELECT campaign.name, segments.geo_target_city, metrics.clicks FROM geographic_view WHERE segments.date DURING LAST_30_DAYS", cat)
+      .filter((i) => !i.includes("metrics.clicks"))).toEqual([]);
+  });
+  it("names the values an enum takes when WHERE uses one it doesn't (2026-10-15: field_type IN ('LOCATION', 'AFFILIATE_LOCATION'))", () => {
+    const issues = checkGaql("SELECT campaign.name, campaign_asset.field_type FROM campaign_asset WHERE campaign_asset.field_type IN ('LOCATION', 'AFFILIATE_LOCATION') AND campaign_asset.status = 'ENABLED'", cat);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("'LOCATION', 'AFFILIATE_LOCATION' aren't values of campaign_asset.field_type");
+    expect(issues[0]).toContain("SITELINK");
+    expect(issues[0]).not.toContain("UNSPECIFIED");
+    expect(checkGaql("SELECT campaign.id FROM campaign WHERE campaign.status = PAUSED", cat)).toEqual([]);
+    expect(checkGaql("SELECT campaign.id FROM campaign WHERE campaign.status != 'DELETED'", cat)[0]).toContain("'DELETED' isn't a value of campaign.status");
+  });
+  it("points a city segment FROM campaign at geographic_view", () => {
+    expect(checkGaql("SELECT campaign.name, segments.geo_target_city FROM campaign", cat)[0])
+      .toMatch(/segments\.geo_target_city can't be used FROM campaign; query it FROM .*geographic_view/);
+  });
   it("names an unknown FROM", () => {
     expect(checkGaql("SELECT campaign.id FROM campaigns", cat)[0]).toContain("Closest: campaign");
   });
@@ -50,6 +68,9 @@ describe("gaql_fields lookup", () => {
     const r = lookupFields(cat, { resource: "campaign", search: "ceiling" }) as any;
     expect(r.fields.names.join(" ")).toContain("campaign.target_spend.cpc_bid_ceiling_micros");
     expect(r.also_select_from).toContain("campaign_budget");
+    const a = lookupFields(cat, { resource: "campaign_asset" }) as any;
+    expect(a.also_select_from).toEqual(expect.arrayContaining(["asset", "customer", "campaign", "ad_group"]));
+    expect(a.segments.names.every((s: string) => s.includes("."))).toBe(true);
     expect(r.metrics.names).toEqual([]);
   });
   it("searches every resource with search alone", () => {

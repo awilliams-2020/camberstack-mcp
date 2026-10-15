@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   tool         TEXT NOT NULL,
   customer_id  TEXT,
   ok           INTEGER NOT NULL,
-  error        TEXT,            -- first 300 chars of the message shown to the AI
+  error        TEXT,            -- first 1000 chars of the message shown to the AI (300 before 2026-10-15)
   ms           INTEGER NOT NULL,
   bytes        INTEGER NOT NULL -- size of the result text
 );

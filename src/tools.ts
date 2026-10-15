@@ -90,7 +90,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       try {
         log({
           tool: name, customerId: typeof cid === "string" ? cid.replace(/-/g, "") : null,
-          ok: !("isError" in out), error: "isError" in out ? out.content[0]!.text.slice(7, 307) : null,
+          ok: !("isError" in out), error: "isError" in out ? out.content[0]!.text.slice(7, 1007) : null,
           ms: Date.now() - t0, bytes: out.content[0]!.text.length,
         });
       } catch { /* logging must never break a tool */ }
