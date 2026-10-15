@@ -259,6 +259,8 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   });
 
   // Stamped before bearer + body parsing, so a slow request's log line splits auth/upload time (pre) from handling.
+  const noteToolList = db.prepare(`INSERT INTO client_tools (user_id, client_id, version, fetched_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT (user_id, client_id) DO UPDATE SET version = excluded.version, fetched_at = excluded.fetched_at`);
   const stampStart = (_req: express.Request, res: express.Response, next: express.NextFunction) => { res.locals.t0 = Date.now(); next(); };
   app.post("/mcp", stampStart, bearer, express.json({ limit: "1mb" }), async (req, res) => {
     const t0 = res.locals.t0 as number;
@@ -276,7 +278,14 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
       const status = outcome === "finish" ? String(res.statusCode) : "aborted";
       console.warn(`mcp ${status} ms=${ms} pre=${tHandler - t0} leg=${leg} method=${method ?? "?"} protocol=${req.get("mcp-protocol-version") ?? "-"} accept=${req.get("accept") ?? "-"} ua=${req.get("user-agent") ?? "-"}`);
     };
-    res.on("finish", () => diagnose("finish"));
+    res.on("finish", () => {
+      diagnose("finish");
+      // A served tools/list is the tool set this app now holds (client_tools in db.ts).
+      const msgs = [req.body].flat() as { method?: string }[];
+      if (res.statusCode === 200 && msgs.some((m) => m?.method === "tools/list") && req.auth?.clientId) {
+        noteToolList.run(String(req.auth.extra?.userId ?? ""), req.auth.clientId, SERVER_VERSION, now());
+      }
+    });
     res.on("close", () => { if (!res.writableFinished) diagnose("close"); });
     try {
       leg = (await isLegacyRequest(await toWebRequest(req, req.body), req.body)) ? "legacy" : "modern";

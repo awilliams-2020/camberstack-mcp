@@ -516,6 +516,9 @@ describe("OAuth + MCP end to end", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     const tools = (await res.json()).result.tools;
+    // Recorded as the tool set this user's app now holds (the admin's "tool list").
+    await new Promise((r) => setTimeout(r, 20));  // written on the response's finish
+    expect(db.prepare("SELECT version FROM client_tools").all()).toEqual([{ version: SERVER_VERSION }]);
     expect(tools.map((t: any) => t.name)).toEqual(expect.arrayContaining(["list_accounts", "account_overview", "keyword_ideas", "keyword_metrics", "propose_changes", "apply_changes", "undo_changes"]));
     // The AI sees what each change field means, and never the undo-only change type.
     const propose = JSON.stringify(tools.find((t: any) => t.name === "propose_changes").inputSchema);

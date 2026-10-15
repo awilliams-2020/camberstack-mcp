@@ -121,6 +121,10 @@ export function userDetail(db: DB, id: string) {
     clients: all<{ client: string; calls: number; last: number }>(
       `SELECT ${client} client, count(*) calls, max(c.at) last FROM tool_calls c LEFT JOIN clients cl ON cl.client_id = c.client_id
        WHERE c.user_id = ? GROUP BY 1 ORDER BY calls DESC`),
+    /** Each app's latest tool-list fetch and our version then (client_tools; recorded from 2026-10-15). */
+    toolLists: all<{ client: string; version: string; fetched_at: number }>(
+      `SELECT ${client.replaceAll("c.client_id", "ct.client_id")} client, ct.version, ct.fetched_at
+       FROM client_tools ct LEFT JOIN clients cl ON cl.client_id = ct.client_id WHERE ct.user_id = ? ORDER BY ct.fetched_at DESC`),
     tools: all<{ tool: string; calls: number; errors: number }>(
       "SELECT tool, count(*) calls, sum(ok = 0) errors FROM tool_calls WHERE user_id = ? GROUP BY 1 ORDER BY calls DESC"),
     proposals: all<{ id: string; customer_id: string; summary: string; status: string; undo_of: string | null; created_at: number; applied_at: number | null }>(

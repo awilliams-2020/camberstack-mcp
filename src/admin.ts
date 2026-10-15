@@ -11,6 +11,7 @@ import { buildReport, permissionLabels, SCOPE_LABELS, userDetail, type Report, t
 import { now } from "./db.js";
 import { esc } from "./pages.js";
 import { PRO_PRICE_LABEL } from "./plans.js";
+import { SERVER_VERSION } from "./tools.js";
 import { FEEDBACK_KINDS, feedbackCount, recentFeedback, type FeedbackRow } from "./feedback.js";
 import { AUDIENCES, PRESETS, render as renderAnnouncement, type Announcements, type Preset, type SendState } from "./announce.js";
 
@@ -350,7 +351,8 @@ ${card("Account", `<dl>
 ${card("Ads accounts used", table(["account", ["calls", "r"], "first", "last"], x.accounts.map((a) => [cid(a.customer_id) + (a.customer_id === "0000000001" ? ` <span class="chip">demo</span>` : ""), num(a.calls), when(a.first), when(a.last)])))}
 </div>
 <div class="grid2">
-${card("AI apps", table(["app", ["calls", "r"], "last"], x.clients.map((c) => [esc(c.client), num(c.calls), when(c.last)])))}
+${card("AI apps", table(["app", ["calls", "r"], "last", "tool list"], x.clients.map((c) => [esc(c.client), num(c.calls), when(c.last), toolList(x, c.client)])),
+    `<small>tool list: our version when the app last fetched it</small>`)}
 ${card("Tools", table(["tool", ["calls", "r"], ["errors", "r"]], x.tools.map((t) => [`<code>${esc(t.tool)}</code>`, num(t.calls), bad(t.errors)])))}
 </div>
 ${card("Proposals", table(["id", "account", "status", "summary", "created"], x.proposals.map((p) => [`<code>${esc(p.id)}</code>`, cid(p.customer_id),
@@ -358,6 +360,14 @@ ${card("Proposals", table(["id", "account", "status", "summary", "created"], x.p
     `<span class="muted">${esc(p.summary).replace(/\n/g, "<br>")}</span>`, when(p.created_at)]), "No proposals.").replaceAll("<td><span class=\"muted\">", "<td class=\"wrap\"><span class=\"muted\">"))}
 ${card("Emails sent", table(["email", "sent"], x.emails.map((e) => [`<code>${esc(e.kind)}</code>`, `${date(e.sent_at)} UTC`]), "None sent."))}
 ${card("Recent calls", callsTable(x.recent.map((c) => ({ ...c, email: null }))), `<small>last ${x.recent.length}</small>`)}`;
+}
+
+/** The tool set an app holds: our version when it last fetched the list. Apps keep it until they fetch again. */
+function toolList(x: UserDetail, client: string): string {
+  const t = x.toolLists.find((l) => l.client === client);  // newest first
+  if (!t) return `<span class="dim" title="Hasn't fetched the tool list since 2026-10-15, when this started being recorded">unknown</span>`;
+  const stale = t.version !== SERVER_VERSION;
+  return `<span class="${stale ? "bad" : "ok"}" title="Fetched ${date(t.fetched_at)} UTC${stale ? `; current is ${SERVER_VERSION}` : ""}">${esc(t.version)}</span> <span class="dim">${ago(t.fetched_at)}</span>`;
 }
 
 function callsTable(rows: { at: number; email: string | null; id?: string; tool: string; customer_id: string | null; ok: number; error: string | null; ms: number; client: string }[], v?: View): string {

@@ -22,6 +22,17 @@ CREATE TABLE IF NOT EXISTS clients (
   created_at  INTEGER NOT NULL
 );
 
+-- When each user's AI app last fetched the tool list, and the SERVER_VERSION live then: clients keep the
+-- list they fetched (ChatGPT until the user refreshes the connector), so this is the tool set they have.
+-- Per user and client, since one OAuth client can serve many users.
+CREATE TABLE IF NOT EXISTS client_tools (
+  user_id     TEXT NOT NULL,
+  client_id   TEXT NOT NULL,
+  version     TEXT NOT NULL,
+  fetched_at  INTEGER NOT NULL,
+  PRIMARY KEY (user_id, client_id)
+);
+
 -- An MCP client's /authorize request, parked while the user is at Google.
 CREATE TABLE IF NOT EXISTS pending_auth (
   id          TEXT PRIMARY KEY,  -- also the Google 'state'
