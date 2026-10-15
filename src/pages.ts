@@ -177,7 +177,20 @@ changes only after you approve each one.</p>
 <li>Changes range from negative keywords and budgets to bids, targeting and whole new Search, Performance Max, Display and YouTube campaigns. Each applied change can be undone.</li>
 <li>Optional, read-only Search Console: see where you already rank, and which searches you may be paying for twice.</li>
 </ul>
-<p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;Free plan, no card</span></p>
+<p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;Free plan, no card. Or <a href="#demo">try it on a demo account</a> first.</span></p>
+
+<h2 id="example">What a change looks like</h2>
+<p>From the demo account, a sample plumbing business:</p>
+<div class="convo">
+<p class="who">You</p><p class="said">Which search terms are wasting money in Emergency Plumbing?</p>
+<p class="who">Your AI</p><p><em>"plumber jobs near me"</em> cost $84.60 and <em>"plumber salary"</em> $41.20, with no conversions: people looking for work, not a plumber. I can add "jobs" and "salary" as negative keywords.</p>
+<div class="change"><div class="change-top"><strong>Proposal</strong><span class="pill proposed">proposed</span></div>
+<ul><li>Add 2 negative keyword(s) to campaign "Emergency Plumbing – Search": "jobs", "salary"</li></ul>
+<div class="change-foot">Checked with Google, nothing changed yet</div></div>
+<p class="who">You</p><p class="said">Apply it.</p>
+<p class="who">Your AI</p><p><span class="pill applied">applied</span>&nbsp; Done. If it blocks searches you wanted, ask me to undo it: that removes exactly these two negatives.</p>
+</div>
+<p class="muted">Nothing changes until you approve the proposal, and it's listed with its undo on your <a href="/account">account page</a>.</p>
 
 <h2 id="changes">What it can change</h2>
 <table>
@@ -233,7 +246,7 @@ ${cmd(`claude mcp add --transport http camberstack ${mcpUrl}`)}
 <h3>Cursor, VS Code, others</h3>
 ${cmd(`{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }`)}
 <p class="muted">Your AI app handles sign-in. Google shows exactly what Camberstack asks for before anything is shared: your Google Ads, and (optional, read-only) Search Console.</p>
-<h3>Want to look first?</h3>
+<h3 id="demo">Want to look first?</h3>
 <p>Connect, then ask <em>"Show me Camberstack's demo account"</em>. It's a sample plumbing business with six months of
 campaigns and search terms, so you can try questions, proposals, applying and undo without touching a real account.
 Changes there never reach Google, and the demo doesn't count as one of your plan's accounts. A Google login with no Google Ads access gets the demo automatically.</p>
