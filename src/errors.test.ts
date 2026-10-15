@@ -23,12 +23,24 @@ describe("AdsApiError fix hints", () => {
     [{ fieldError: "INVALID_VALUE" }, "The input has an invalid value.", "geo_target_constants", "FROM geo_target_constant"],
     [{ queryError: "PROHIBITED_RESOURCE_TYPE_IN_SELECT_CLAUSE" }, "Cannot select fields from the following resource: 'CAMPAIGN_BUDGET', since the resource is incompatible with the resource in FROM clause.", undefined, "FROM campaign_budget"],
     [{ policyFindingError: "POLICY_FINDING" }, "The resource has been disapproved since the policy summary includes policy topics of type PROHIBITED.", "ad", "repeated punctuation"],
+    [{ policyViolationError: "POLICY_ERROR" }, "A policy was violated. See PolicyViolationDetails for more detail.", "mutate_operations.ad_group_criterion_operation.create.keyword.text", "Drop or reword that keyword"],
+    [{ fieldError: "IMMUTABLE_FIELD" }, "The field attempted to be mutated is immutable.", "operations.update.counting_type", "conversion_action.type"],
     [{ imageError: "ASPECT_RATIO_NOT_ALLOWED" }, "The aspect ratio of the image does not match the expected aspect ratios provided in the asset spec.", "logo_images", "1.91:1"],
   ])("%j → hint", (code, message, field, hint) => {
     const e = new AdsApiError(400, body(code, message, field));
     expect(e.message).toContain(message);   // Google's own words stay
     expect(e.message).toContain(`→ `);
     expect(e.message).toContain(hint);
+  });
+
+  it("names the policy and the flagged text from PolicyViolationDetails", () => {
+    const e = new AdsApiError(400, JSON.stringify({ error: { details: [{ errors: [{
+      errorCode: { policyViolationError: "POLICY_ERROR" }, message: "A policy was violated. See PolicyViolationDetails for more detail.",
+      location: { fieldPathElements: [{ fieldName: "keyword" }, { fieldName: "text" }] },
+      details: { policyViolationDetails: { externalPolicyName: "Alcohol", key: { policyName: "ALCOHOL", violatingText: "borrel" }, isExemptible: true } },
+    }] }] } }));
+    expect(e.message).toContain('[policy Alcohol flagged "borrel", exemptible]');
+    expect(e.message).toContain("→ ");
   });
 
   it("adds nothing for errors it has no fix for", () => {

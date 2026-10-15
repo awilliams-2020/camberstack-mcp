@@ -199,6 +199,17 @@ function adsErrorFix(code: string, message: string, field: string): string | nul
       return "Google's ad policy check rejected the ad text, images or video. Common causes: repeated punctuation (\"!!\"), "
         + "ALL CAPS, symbols or emoji used for emphasis, phone numbers in headlines, or a video or landing page that breaks policy. "
         + "Reword the ad and propose again; the full reasons show under Policy in Google Ads.";
+    case "POLICY_ERROR":
+      return /keyword\.text$/.test(field)
+        ? "Google's policy check refused a keyword (the policy and the words it flagged are above). Drop or reword that keyword "
+          + "and propose again. If it is compliant, add it in Google Ads, where an exemption can be requested."
+        : null;
+    case "IMMUTABLE_FIELD":
+      return /counting_type$/.test(field)
+        ? "Google fixes the counting of some conversion actions (imports such as GA4 or Firebase, and Google-managed actions). "
+          + "Check it with SELECT conversion_action.name, conversion_action.type FROM conversion_action, and change the counting where "
+          + "the action comes from (in GA4 for a GA4 import), or count with a different conversion action."
+        : null;
     case "ASPECT_RATIO_NOT_ALLOWED":
       return "an image has the wrong shape for its slot: marketing images 1.91:1, square images and square logos 1:1, landscape logos 4:1.";
     case "INVALID_VALUE":
@@ -225,7 +236,11 @@ export class AdsApiError extends Error {
         const code = d.errorCode ? Object.values(d.errorCode)[0] : "";
         const field = d.location?.fieldPathElements?.map((p: any) => p.fieldName).join(".");
         const fix = adsErrorFix(String(code), String(d.message ?? ""), field ?? "");
-        return [code, d.message, field ? `(field ${field})` : "", fix ? `→ ${fix}` : ""].filter(Boolean).join(" ");
+        // POLICY_ERROR's message only says "see PolicyViolationDetails"; the policy and flagged text are in there.
+        const pv = d.details?.policyViolationDetails;
+        const policy = pv ? `[policy ${pv.externalPolicyName ?? pv.key?.policyName}` + (pv.key?.violatingText ? ` flagged "${pv.key.violatingText}"` : "")
+          + (pv.isExemptible ? ", exemptible" : "") + "]" : "";
+        return [code, d.message, field ? `(field ${field})` : "", policy, fix ? `→ ${fix}` : ""].filter(Boolean).join(" ");
       });
       return `Google Ads API ${status}: ${msgs.length ? msgs.join("; ") : e?.message ?? body.slice(0, 300)}`;
     } catch {
