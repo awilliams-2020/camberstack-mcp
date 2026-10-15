@@ -191,7 +191,7 @@ const EXTERNAL: [string, string][] = [
 
 function shell(path: string, who: string, v: View, body: string, heading?: string): string {
   // Counts as of page load (no live polling): users all time, tool errors in the window (red), Pro users.
-  const errs = v.report.errors.reduce((a, e) => a + e.n, 0);
+  const errs = v.report.errorsInWindow;
   const nav: [string, string, string][] = [
     ["/", "Overview", ""],
     ["/users", "Users", String(v.report.funnel.all.connected)],
@@ -281,7 +281,7 @@ function overviewPage(v: View): string {
     return byDay.get(day) ?? { day, calls: 0, users: 0, errors: 0 };
   });
   const maxCalls = Math.max(1, ...daily.map((x) => x.calls));
-  const errs = r.errors.reduce((a, e) => a + e.n, 0);
+  const errs = r.errorsInWindow;
   const paying = r.users.filter((u) => u.paying).length;
   const callsInWindow = r.daily.reduce((a, x) => a + x.calls, 0);
   return `<div class="stats">
@@ -370,7 +370,7 @@ ${card("Tools", table(["tool", ["calls", "r"], ["users", "r"], ["errors", "r"], 
 ${card("AI apps", table(["app", ["calls", "r"], ["users", "r"]], r.clients.map((c) => [esc(c.client), num(c.calls), num(c.users)]), "No calls in this window."), `<small>last ${w}</small>`)}
 </div>
 ${card("Errors", table(["tool", "error", ["count", "r"], "last"], r.errors.map((e) => [`<code>${esc(e.tool)}</code>`, `<span class="bad">${esc(e.error)}</span>`, num(e.n), when(e.last)]), "No errors in this window.")
-    .replaceAll('<td><span class="bad">', '<td class="wrap"><span class="bad">'), `<small>last ${w}, grouped</small>`)}
+    .replaceAll('<td><span class="bad">', '<td class="wrap"><span class="bad">'), `<small>last ${w}, grouped, newest first</small>`)}
 ${card("Recent calls", callsTable(r.recent.map((c) => ({ ...c, id: r.users.find((u) => u.email === c.email)?.id })), v), "<small>last 50, any window</small>")}`;
 }
 

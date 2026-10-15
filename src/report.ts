@@ -40,6 +40,8 @@ export function buildReport(db: DB, o: ReportOptions) {
     excluded: ex.length,
     funnel: { window: stage(since), all: stage(0) },
     activeInWindow: n("SELECT count(DISTINCT c.user_id) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE c.at >= ? AND c.ok = 1", since),
+    // Counted on its own: summing `errors` would stop at its 15 groups and undercount wide windows.
+    errorsInWindow: n("SELECT count(*) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE c.at >= ? AND c.ok = 0", since),
     users: q<{ id: string; email: string; plan: string; created_at: number; last_seen_at: number | null; connected: number;
                google_scopes: string | null; paying: number; calls: number; errors: number; applied: number; client: string | null }>(
       `SELECT u.id, u.email, u.plan, u.created_at, u.last_seen_at, u.enc_refresh IS NOT NULL connected, u.google_scopes,
@@ -57,9 +59,10 @@ export function buildReport(db: DB, o: ReportOptions) {
       `SELECT ${client} client, count(*) calls, count(DISTINCT c.user_id) users
        FROM tool_calls c JOIN {U} u ON u.id = c.user_id LEFT JOIN clients cl ON cl.client_id = c.client_id
        WHERE at >= ? GROUP BY 1 ORDER BY calls DESC`, since),
+    /** The 15 most recently seen error groups, newest first (by count, a wide window buried today's errors). */
     errors: q<{ tool: string; error: string; n: number; last: number }>(
       `SELECT tool, substr(error, 1, 160) error, count(*) n, max(at) last FROM tool_calls c JOIN {U} u ON u.id = c.user_id
-       WHERE at >= ? AND ok = 0 GROUP BY 1, 2 ORDER BY n DESC LIMIT 15`, since),
+       WHERE at >= ? AND ok = 0 GROUP BY 1, 2 ORDER BY last DESC LIMIT 15`, since),
     daily: q<{ day: string; calls: number; users: number; errors: number }>(
       `SELECT date(at, 'unixepoch') day, count(*) calls, count(DISTINCT c.user_id) users, sum(ok = 0) errors
        FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE at >= ? GROUP BY 1 ORDER BY 1`, since),

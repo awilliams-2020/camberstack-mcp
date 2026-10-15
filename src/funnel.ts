@@ -19,4 +19,4 @@ for (const k of Object.keys(r.funnel.all) as (keyof typeof r.funnel.all)[]) {
 console.log(`  active in window (≥1 ok call): ${r.activeInWindow}`);
 console.log(`\n## Tools, last ${r.days}d`); console.table(r.tools);
 console.log(`## MCP clients, last ${r.days}d`); console.table(r.clients);
-console.log(`## Top errors, last ${r.days}d`); console.table(r.errors);
+console.log(`## Recent errors, last ${r.days}d`); console.table(r.errors);
