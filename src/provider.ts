@@ -76,7 +76,7 @@ export class CamberstackProvider implements OAuthServerProvider {
 
   constructor(
     private db: DB,
-    private opts: { baseUrl: string; google: GoogleCreds; encryptionKey: Buffer; fetch?: typeof fetch },
+    private opts: { baseUrl: string; google: GoogleCreds; encryptionKey: Buffer; fetch?: typeof fetch; allowedEmails?: Set<string> },
   ) {
     this.clientsStore = new ClientsStore(db);
   }
@@ -182,6 +182,12 @@ export class CamberstackProvider implements OAuthServerProvider {
     }
     if (!g.id_token) throw new Error("Google did not return an id_token");
     const { sub, email } = idTokenClaims(g.id_token);
+    const allowed = this.opts.allowedEmails;
+    if (allowed?.size && !allowed.has(email.toLowerCase())) {
+      back.searchParams.set("error", "access_denied");
+      back.searchParams.set("error_description", "This Camberstack server is private. Connect https://camberstack.io/mcp instead.");
+      return { to: back.toString() };
+    }
     const { user, created } = this.upsertUser(sub, email, g.refresh_token, g.scope);
 
     const code = randomToken();

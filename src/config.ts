@@ -45,6 +45,8 @@ export interface Config {
   openaiAppsChallenge?: string;
   /** Google Analytics (GA4) measurement ID for our own public pages (G-…), loaded through /e.js; unset = no GA tag. */
   ga4MeasurementId?: string;
+  /** ALLOWED_EMAILS: the only Google accounts that may connect (dev.camberstack.io); empty = anyone. */
+  allowedEmails?: Set<string>;
   /** NOINDEX=1: a non-production origin (dev.camberstack.io). robots.txt disallows everything and IndexNow is never pinged. */
   noindex?: boolean;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
@@ -84,6 +86,7 @@ export function loadConfig(): Config {
     adminEmails: emails(process.env.ADMIN_EMAILS),
     ga4Public: process.env.GA4_PUBLIC === "1",
     noindex: process.env.NOINDEX === "1",
+    allowedEmails: emails(process.env.ALLOWED_EMAILS),
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
     feedbackTo: process.env.FEEDBACK_TO || undefined,
     openaiAppsChallenge: process.env.OPENAI_APPS_CHALLENGE || undefined,

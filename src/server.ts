@@ -74,7 +74,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   const info = (title: string, body: string) => infoPage(cfg.baseUrl, title, body);
 
   const provider = new CamberstackProvider(db, {
-    baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey, fetch: overrides.fetch,
+    baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey, fetch: overrides.fetch, allowedEmails: cfg.allowedEmails,
   });
   const grants = new Grants({ db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
     signingKey: deriveKey(cfg.encryptionKey, "grant-links"), forgetToken: clearGoogleCache, fetch: overrides.fetch });

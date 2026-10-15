@@ -307,12 +307,14 @@ let base = "";
 const ads = new FakeAds();
 const sc = new FakeSearchConsole();
 const db = openDb(":memory:");
+/** ALLOWED_EMAILS: empty (anyone may connect) except inside the test that fills it. */
+const allowedEmails = new Set<string>();
 
 beforeAll(async () => {
   const cfg: Config = {
     baseUrl: "http://localhost", port: 0, dataDir: ":memory:", encryptionKey: key,
     google: { clientId: "gid", clientSecret: "gsecret" },
-    freeAccounts: 1, proAccounts: 10, stripe: { secretKey: "sk_test_x", proPriceId: "price_pro" }, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), gitSha: "test", gitCommitDate: "",
+    freeAccounts: 1, proAccounts: 10, stripe: { secretKey: "sk_test_x", proPriceId: "price_pro" }, proEmails: new Set(), adminEmails: new Set(["owner@example.com"]), allowedEmails, gitSha: "test", gitCommitDate: "",
   };
   // Bind first so baseUrl (the OAuth issuer) is the real test origin.
   server = await new Promise<Server>((resolve) => { const s = createApp(cfg, db).app.listen(0, () => resolve(s)); });
@@ -415,6 +417,32 @@ describe("OAuth + MCP end to end", () => {
     const res = await fetch(`${base}/mcp`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     expect(res.status).toBe(401);
     expect(res.headers.get("www-authenticate")).toContain("resource_metadata");
+  });
+
+  it("turns away a Google account not on ALLOWED_EMAILS, and stores nothing for it", async () => {
+    allowedEmails.add("owner@example.com");
+    googleUser.sub = "google-sub-stranger"; googleUser.email = "stranger@example.com";
+    try {
+      const redirect = "http://localhost:9999/callback";
+      const client = await (await fetch(`${base}/register`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ redirect_uris: [redirect], client_name: "Test AI", token_endpoint_auth_method: "none",
+          grant_types: ["authorization_code", "refresh_token"], response_types: ["code"] }),
+      })).json();
+      const auth = new URL(`${base}/authorize`);
+      auth.search = new URLSearchParams({ client_id: client.client_id, redirect_uri: redirect, response_type: "code",
+        code_challenge: "x".repeat(43), code_challenge_method: "S256", state: "s1", scope: "ads" }).toString();
+      const { g, consent } = await approve(auth);
+      const back = await fetch(`${base}/oauth/google/callback?code=gcode&state=${g.searchParams.get("state")}`,
+        { redirect: "manual", headers: { cookie: consent } });
+      const cb = new URL(back.headers.get("location")!);
+      expect(cb.searchParams.get("error")).toBe("access_denied");
+      expect(cb.searchParams.get("code")).toBeNull();
+      expect(db.prepare("SELECT 1 FROM users WHERE google_sub = ?").get("google-sub-stranger")).toBeUndefined();
+    } finally {
+      allowedEmails.clear();
+      googleUser.sub = "google-sub-1"; googleUser.email = "Owner@Example.com";
+    }
   });
 
   it("connects through Google and stores the Google refresh token encrypted", async () => {
