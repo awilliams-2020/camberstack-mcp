@@ -27,6 +27,11 @@ describe("checkGaql against Google's field catalog", () => {
     expect(checkGaql("SELECT ad_group.id, metrics.search_budget_lost_impression_share FROM ad_group", cat)[0])
       .toContain("metrics.search_budget_lost_impression_share can't be used FROM ad_group; query it FROM campaign");
   });
+  it("points a metric FROM a resource that is also a segment at the resources that split by it (2026-10-15)", () => {
+    expect(checkGaql("SELECT conversion_action.name, metrics.conversions FROM conversion_action", cat)[0])
+      .toBe("metrics.conversions can't be used FROM conversion_action; to split it by conversion_action, "
+        + "query it FROM customer or FROM campaign with segments.conversion_action in SELECT.");
+  });
   it("finds nothing wrong with valid queries, including literals that look like fields", () => {
     for (const q of [
       "SELECT campaign.id, campaign.name, campaign_budget.amount_micros, metrics.clicks FROM campaign WHERE segments.date DURING LAST_30_DAYS ORDER BY metrics.clicks DESC LIMIT 10",

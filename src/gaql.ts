@@ -99,7 +99,7 @@ export function checkGaql(query: string, cat: Catalog): string[] {
       if (clause === "SELECT" && f.selectable === false) issues.push(`${name} can't be selected.`);
       if (clause === "WHERE" && f.filterable === false) issues.push(`${name} can't be used in WHERE.`);
       if (clause === "ORDER BY" && f.sortable === false) issues.push(`${name} can't be used in ORDER BY.`);
-      if (!usable(f)) issues.push(`${name} can't be used FROM ${p.from}${whereFrom(f, cat)}.`);
+      if (!usable(f)) issues.push(`${name} can't be used FROM ${p.from}${whereFrom(f, cat, p.from)}.`);
     }
   }
   return [...issues, ...enumIssues(query, cat)];
@@ -131,10 +131,25 @@ function fromAllows(from: FieldMeta, f: FieldMeta): boolean {
   return res === from.name || (from.attributeResources ?? []).includes(res) || (from.segments ?? []).includes(res);
 }
 
-/** ": query it FROM x" — the resources that can use this field, the field's own resource first. */
-function whereFrom(f: FieldMeta, cat: Catalog): string {
+/** Account-wide resources first: they answer "per X" questions without splitting by ad group too. */
+const BROAD = ["customer", "campaign"];
+
+/**
+ * ": query it FROM x" — the resources that can use this field, the field's own resource first. When the query's FROM
+ * is also a segment (segments.conversion_action), the resources that take both come first, since splitting by it is
+ * what that query wanted: `metrics.conversions FROM conversion_action` was pointed at ad_group (catalog order), not
+ * at customer or campaign with segments.conversion_action (2026-10-15).
+ */
+function whereFrom(f: FieldMeta, cat: Catalog, from?: string): string {
   const own = f.category === "ATTRIBUTE" ? f.name.split(".")[0]! : null;
   const ok = [...cat.values()].filter((r) => r.category === "RESOURCE" && fromAllows(r, f)).map((r) => r.name);
+  const seg = from && cat.get(`segments.${from}`)?.category === "SEGMENT" ? `segments.${from}` : null;
+  const split = seg ? ok.filter((r) => (cat.get(r)!.segments ?? []).includes(seg)) : [];
+  if (split.length) {
+    const broad = BROAD.filter((r) => split.includes(r));
+    const pick = broad.length ? broad : split.slice(0, 4);
+    return `; to split it by ${from}, query it FROM ${pick.join(" or FROM ")} with ${seg} in SELECT`;
+  }
   const pick = [...(own && ok.includes(own) ? [own] : []), ...ok.filter((r) => r !== own)].slice(0, 4);
   return pick.length ? `; query it FROM ${pick.join(" or FROM ")}` : "";
 }
