@@ -173,6 +173,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   const account = mountAccount(app, {
     db, google: cfg.google, baseUrl: cfg.baseUrl, fetch: overrides.fetch,
     session: (userId) => UserSession.load(deps, userId), billingLink: (kind, userId) => billing.link(kind, userId),
+    adminUrl: cfg.adminUrl,
   });
   const feedback = mountFeedback(app, {
     db, google: cfg.google, baseUrl: cfg.baseUrl, fetch: overrides.fetch, mailFetch: overrides.mailFetch,

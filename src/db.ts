@@ -209,6 +209,9 @@ export function openDb(dataDir: string): DB {
   if (!cols.has("time_zone")) db.exec("ALTER TABLE users ADD COLUMN time_zone TEXT");
   // Google scopes on their token as Google last reported them (sign-in, /connect, every refresh); NULL = not seen yet.
   if (!cols.has("google_scopes")) db.exec("ALTER TABLE users ADD COLUMN google_scopes TEXT");
+  // The admin's email on an /account session opened through "Log in as user" (account.ts); NULL = the user's own.
+  const ws = new Set((db.prepare("PRAGMA table_info(web_sessions)").all() as { name: string }[]).map((c) => c.name));
+  if (!ws.has("impersonator")) db.exec("ALTER TABLE web_sessions ADD COLUMN impersonator TEXT");
   // relay_conversions shipped in 0.6.0 without order_id (and its UNIQUE). Still empty then, so rebuild.
   const rc = new Set((db.prepare("PRAGMA table_info(relay_conversions)").all() as { name: string }[]).map((c) => c.name));
   if (!rc.has("order_id")) {

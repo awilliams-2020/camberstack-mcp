@@ -5,6 +5,8 @@
  */
 import express, { type Express, type Request } from "express";
 import type { DB, UserRow } from "./db.js";
+import { now } from "./db.js";
+import { randomToken, sha256 } from "./crypto.js";
 import type { GoogleCreds } from "./google.js";
 import type { UserSession } from "./session.js";
 import { SignIn } from "./signin.js";
@@ -20,6 +22,25 @@ export interface AccountDeps {
   fetch?: typeof fetch;
   session: (userId: string) => UserSession;
   billingLink: (kind: "upgrade" | "billing", userId: string) => string | null;
+  /** The admin site's origin: where ending a "Log in as user" session returns to. */
+  adminUrl?: string;
+}
+
+/** A "Log in as user" handoff link works once, within this many seconds. */
+const LOGIN_AS_TTL = 60;
+/** How long the admin's session as that user lasts. */
+const LOGIN_AS_SESSION = 3600;
+
+/**
+ * "Log in as user" from the admin site (admin.ts), which is on another host and so can't set the /account cookie
+ * itself: it stores a one-use token here (hash only, in pending_auth) and sends the browser to /account/lau with it.
+ */
+export function startLoginAs(db: DB, baseUrl: string, userId: string, admin: string): string {
+  const t = randomToken();
+  db.prepare("INSERT INTO pending_auth (id, client_id, params, created_at) VALUES (?, '__lau', ?, ?)")
+    .run(sha256(t), JSON.stringify({ userId, admin }), now());
+  console.log(`login-as: ${admin} -> ${userId}`);
+  return `${baseUrl}/account/lau?t=${t}`;
 }
 
 /** "Oct 1, 19:44 UTC" */
@@ -44,9 +65,11 @@ const fmtCid = (c: string) => c === DEMO_CID ? "000-000-0001 (demo, sample data)
 
 export function mountAccount(app: Express, d: AccountDeps): SignIn {
   const auth = new SignIn(d, "acc_", "cs_account", "/account", 7 * 86400);
-  const user = (req: Request): UserRow | undefined => {
-    const id = auth.subject(req);
-    return id ? d.db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined : undefined;
+  /** The signed-in user; `by` is the admin's email when an admin is logged in as them. */
+  const signedIn = (req: Request): { u: UserRow; by: string | null } | undefined => {
+    const s = auth.session(req);
+    const u = s && d.db.prepare("SELECT * FROM users WHERE id = ?").get(s.subject) as UserRow | undefined;
+    return u ? { u, by: s.impersonator } : undefined;
   };
   const page = (title: string, body: string) => infoPage(d.baseUrl, title, body);
   const shell = (title: string, body: string) => appPage(d.baseUrl, title, "/account", body);
@@ -89,11 +112,34 @@ ${COPY_JS}`));
     res.redirect(302, who.next === "/account?upgrade=1" ? who.next : "/account");
   });
 
-  app.post("/account/logout", (req, res) => { auth.close(req, res); res.redirect(303, "/"); });
+  app.post("/account/logout", (req, res) => {
+    const s = signedIn(req);
+    auth.close(req, res);
+    // Ending a "Log in as user" session goes back to that user on the admin site.
+    res.redirect(303, s?.by && d.adminUrl ? `${d.adminUrl}/users/${encodeURIComponent(s.u.id)}` : "/");
+  });
+
+  // The admin site's "Log in as user" handoff (startLoginAs): one use, LOGIN_AS_TTL seconds.
+  app.get("/account/lau", (req, res) => {
+    const id = sha256(String(req.query.t ?? ""));
+    const row = d.db.prepare("SELECT params, created_at FROM pending_auth WHERE id = ? AND client_id = '__lau'").get(id) as
+      { params: string; created_at: number } | undefined;
+    d.db.prepare("DELETE FROM pending_auth WHERE id = ?").run(id);
+    const p = row && row.created_at >= now() - LOGIN_AS_TTL ? JSON.parse(row.params) as { userId: string; admin: string } : null;
+    if (!p || !d.db.prepare("SELECT 1 FROM users WHERE id = ?").get(p.userId)) {
+      res.status(400).type("html").send(page("Link expired", "<p>That link was already used or has expired. Start again from the admin site.</p>"));
+      return;
+    }
+    auth.open(res, p.userId, { impersonator: p.admin, ttl: LOGIN_AS_SESSION });
+    res.redirect(302, "/account");
+  });
 
   app.post("/account/disconnect", express.urlencoded({ extended: false, limit: "1kb" }), async (req, res) => {
-    const u = user(req);
-    if (!u) { res.redirect(303, "/account"); return; }
+    const s = signedIn(req);
+    if (!s) { res.redirect(303, "/account"); return; }
+    // Revoking someone's Google grant is theirs to do, never an admin's from their account page.
+    if (s.by) { res.status(403).type("html").send(page("Not while logged in as this user", "<p>Only the user can disconnect their account.</p>")); return; }
+    const u = s.u;
     if (req.body?.confirm !== "yes") { res.redirect(303, "/account#disconnect"); return; }
     await d.session(u.id).disconnect();
     auth.close(req, res);
@@ -103,12 +149,13 @@ Your AI app can no longer use Camberstack until you connect again.</p>
   });
 
   app.get("/account", (req, res) => {
-    const u = user(req);
+    const me = signedIn(req);
+    const u = me?.u, by = me?.by ?? null;
     // "Upgrade to Pro" on the pricing section lands on /account?upgrade=1. Signed in: a free user goes
     // straight to Stripe Checkout. Signed out: the sign-in link carries the intent through Google (in
     // the sign-in's own state, so an abandoned click can't hijack a later, ordinary sign-in).
     const wantsUpgrade = req.query.upgrade === "1";
-    if (u && wantsUpgrade) {
+    if (u && wantsUpgrade && !by) {
       const p = d.session(u.id).plan();
       if ("upgrade_url" in p && p.upgrade_url) { res.redirect(303, p.upgrade_url); return; }
     }
@@ -141,14 +188,14 @@ Your AI app can no longer use Camberstack until you connect again.</p>
     const planCard = plan.plan === "pro"
       ? `<div class="card"><p class="label">Plan</p><p class="big">Pro${"complimentary" in plan ? ` <span class="chip">complimentary</span>` : ""}</p>
 <p class="muted">${plan.accounts_in_use.length} of ${plan.accounts_included} Google Ads accounts in use (last ${ACCOUNT_WINDOW_DAYS} days).${"complimentary" in plan ? " No subscription on this account, so nothing to manage or cancel." : ""}</p>
-${"manage_billing" in plan && plan.manage_billing ? `<a class="btn" href="${esc(plan.manage_billing)}">Manage billing</a>` : ""}</div>`
+${!by && "manage_billing" in plan && plan.manage_billing ? `<a class="btn" href="${esc(plan.manage_billing)}">Manage billing</a>` : ""}</div>`
       : (() => {
         const used = plan.accounts_in_use;
         return `<div class="card"><p class="label">Plan</p><p class="big">Free</p>
 <p class="muted">Every tool, with unlimited applied changes, on ${plan.accounts_included} Google Ads account.
 ${used.length ? `In use (last ${ACCOUNT_WINDOW_DAYS} days): <strong style="color:var(--fg)">${used.map((c) => esc(fmtCid(c))).join(", ")}</strong>.` : "Not used on an account yet."}
 Pro covers up to 10.</p>
-${"upgrade_url" in plan && plan.upgrade_url ? `<a class="btn" href="${esc(plan.upgrade_url)}">Upgrade to Pro · ${PRO_PRICE_LABEL}</a>` : ""}</div>`;
+${!by && "upgrade_url" in plan && plan.upgrade_url ? `<a class="btn" href="${esc(plan.upgrade_url)}">Upgrade to Pro · ${PRO_PRICE_LABEL}</a>` : ""}</div>`;
       })();
 
     const connCard = `<div class="card"><p class="label">Connection</p>
@@ -187,7 +234,12 @@ ${canUndo ? `<div class="change-foot"><span>To reverse it, paste this into your 
       `<a href="/account?days=${n}#changes"${n === days ? ` aria-current="page"` : ""}>${n === 1 ? "24h" : rangeName(n)}</a>`).join("")}</nav>`;
     const countLine = `<p class="muted range-note">${entries.length} change${entries.length === 1 ? "" : "s"}${days ? ` in the last ${rangeName(days)}` : ""}${days && all.length > entries.length ? ` · ${all.length} in total` : ""}</p>`;
 
+    // An admin logged in as this user: say so on every view, and leave out what only the user may do (checkout, the
+    // billing portal, disconnect), whose links are bearer links to the user's own Stripe and Google.
+    const banner = by ? `<form method="post" action="/account/logout" class="card impersonating"><strong>Logged in as ${esc(u.email)}</strong>
+<span class="muted">as admin ${esc(by)}. Billing and disconnect are hidden.</span> <button class="linkish">End</button></form>` : "";
     res.type("html").send(shell("Your account", `<div class="acct">
+${banner}
 <div class="acct-head"><h1>Your account</h1><form method="post" action="/account/logout" class="who muted">${esc(u.email)} · <button class="linkish">Sign out</button></form></div>
 <div class="grid">${planCard}${connCard}</div>
 <h2 id="changes">Changes</h2>
@@ -197,7 +249,7 @@ ${!all.length ? `<div class="card"><p class="muted">No changes yet. Ask your AI 
   : `<div class="card"><p class="muted">No changes in the last ${rangeName(days)}. <a href="/account?days=0#changes">See all ${all.length}</a>.</p></div>`}
 <p class="muted">Something wrong, missing or confusing? <a href="/feedback">Send feedback</a>.</p>
 <h2 id="disconnect">Disconnect</h2>
-${u.enc_refresh ? `<form method="post" action="/account/disconnect" class="danger"><p>Revokes Camberstack's Google access and deletes the stored credentials. Your AI app stops working with Camberstack until you connect again. Your change history stays here.</p>
+${by ? `<p class="muted">Only the user can disconnect.</p>` : u.enc_refresh ? `<form method="post" action="/account/disconnect" class="danger"><p>Revokes Camberstack's Google access and deletes the stored credentials. Your AI app stops working with Camberstack until you connect again. Your change history stays here.</p>
 <label><input type="checkbox" name="confirm" value="yes" required> I want to disconnect</label><button class="btn-danger">Disconnect Google Ads</button></form>`
   : `<p class="muted">Already disconnected.</p>`}
 </div>

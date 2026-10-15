@@ -65,21 +65,29 @@ export class SignIn {
     return c?.emailVerified ? { sub: c.sub, email: c.email, ...(typeof p.next === "string" ? { next: p.next } : {}) } : null;
   }
 
-  /** Start a session for `subject` (an email for /admin, a user id for /account). */
-  open(res: Response, subject: string): void {
-    const token = randomToken();
-    this.d.db.prepare("INSERT INTO web_sessions (token_hash, kind, subject, expires_at) VALUES (?, ?, ?, ?)")
-      .run(sha256(token), this.prefix, subject, now() + this.ttl);
-    this.cookie(res, token, this.ttl);
+  /**
+   * Start a session for `subject` (an email for /admin, a user id for /account). `impersonator` marks one an admin
+   * opened through "Log in as user" (account.ts), usually with a shorter `ttl`.
+   */
+  open(res: Response, subject: string, o: { impersonator?: string; ttl?: number } = {}): void {
+    const token = randomToken(), ttl = o.ttl ?? this.ttl;
+    this.d.db.prepare("INSERT INTO web_sessions (token_hash, kind, subject, expires_at, impersonator) VALUES (?, ?, ?, ?, ?)")
+      .run(sha256(token), this.prefix, subject, now() + ttl, o.impersonator ?? null);
+    this.cookie(res, token, ttl);
   }
 
   /** The signed-in subject, or null. */
   subject(req: Request): string | null {
+    return this.session(req)?.subject ?? null;
+  }
+
+  /** The signed-in subject and, for an admin's "Log in as user" session, the admin's email. */
+  session(req: Request): { subject: string; impersonator: string | null } | null {
     const t = readCookie(req, this.cookieName);
     if (!t) return null;
-    const row = this.d.db.prepare("SELECT subject, expires_at FROM web_sessions WHERE token_hash = ? AND kind = ?").get(sha256(t), this.prefix) as
-      { subject: string; expires_at: number } | undefined;
-    return row && row.expires_at > now() ? row.subject : null;
+    const row = this.d.db.prepare("SELECT subject, expires_at, impersonator FROM web_sessions WHERE token_hash = ? AND kind = ?").get(sha256(t), this.prefix) as
+      { subject: string; expires_at: number; impersonator: string | null } | undefined;
+    return row && row.expires_at > now() ? { subject: row.subject, impersonator: row.impersonator } : null;
   }
 
   close(req: Request, res: Response): void {

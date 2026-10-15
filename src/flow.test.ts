@@ -1418,6 +1418,56 @@ describe("OAuth + MCP end to end", () => {
     expect(await (await fetch(`${base}/account`, { headers: { cookie: "cs_account=forged" } })).text()).toContain("Sign in with Google");
   });
 
+  it("lets an admin log in as a user from the admin site, without billing or disconnect", async () => {
+    const admin = base.replace("localhost", "127.0.0.1");
+    const alogin = await fetch(`${admin}/login`, { redirect: "manual" });
+    const acookie = await signIn(new URL(alogin.headers.get("location")!), stateCookie(alogin));
+    const id = ownerId();
+    expect(await (await fetch(`${admin}/users/${id}`, { headers: { cookie: acookie } })).text()).toContain(`action="/users/${id}/login-as"`);
+    const loginAs = (origin = new URL(admin).origin, cookie = acookie, who = id) =>
+      fetch(`${admin}/users/${who}/login-as`, { method: "POST", redirect: "manual", headers: { cookie, origin } });
+    // Only from the admin site's own pages, signed in, for a real user.
+    expect((await loginAs("https://evil.test")).status).toBe(403);
+    expect((await loginAs(undefined, "")).headers.get("location")).toBe("/login");
+    expect((await loginAs(undefined, acookie, "nope")).status).toBe(404);
+
+    const go = await loginAs();
+    expect(go.status).toBe(303);
+    const link = go.headers.get("location")!;
+    expect(link).toMatch(new RegExp(`^${base}/account/lau\\?t=`));
+    const hop = await fetch(link, { redirect: "manual" });
+    expect(hop.status).toBe(302);
+    expect(hop.headers.get("location")).toBe("/account");
+    const cookie = hop.headers.get("set-cookie")!.split(";")[0]!;
+    expect(cookie).toMatch(/^cs_account=/);
+    expect(hop.headers.get("set-cookie")).toContain("Max-Age=3600");
+    // The link works once.
+    expect((await fetch(link, { redirect: "manual" })).status).toBe(400);
+
+    const html = await (await fetch(`${base}/account`, { headers: { cookie } })).text();
+    expect(html).toContain("Logged in as owner@example.com");
+    expect(html).toContain("as admin owner@example.com");
+    expect(html).toContain('class="pill undone"');   // the user's own page, changes and all
+    expect(html).not.toContain("Disconnect Google Ads");
+    expect(html).not.toMatch(/\/(upgrade|billing)\?t=/);
+    // No checkout either, and the disconnect POST is refused outright.
+    expect((await fetch(`${base}/account?upgrade=1`, { headers: { cookie }, redirect: "manual" })).status).toBe(200);
+    const before = db.prepare("SELECT enc_refresh FROM users WHERE id = ?").get(id);
+    const disc = await fetch(`${base}/account/disconnect`, { method: "POST", redirect: "manual",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: "confirm=yes" });
+    expect(disc.status).toBe(403);
+    expect(db.prepare("SELECT enc_refresh FROM users WHERE id = ?").get(id)).toEqual(before);
+    // Ending it returns to that user on the admin site and ends the session.
+    const end = await fetch(`${base}/account/logout`, { method: "POST", headers: { cookie }, redirect: "manual" });
+    expect(end.headers.get("location")).toBe(`${admin}/users/${id}`);
+    expect(await (await fetch(`${base}/account`, { headers: { cookie } })).text()).toContain("Sign in with Google");
+
+    // A link older than a minute is refused.
+    const stale = new URL((await loginAs()).headers.get("location")!);
+    db.prepare("UPDATE pending_auth SET created_at = created_at - 61 WHERE client_id = '__lau'").run();
+    expect((await fetch(stale, { redirect: "manual" })).status).toBe(400);
+  });
+
   it("takes feedback at /feedback from a signed-in Google account, and lists it on the admin site", async () => {
     // Public page; sending needs a sign-in, and a POST without one stores nothing.
     const open = await (await fetch(`${base}/feedback`)).text();

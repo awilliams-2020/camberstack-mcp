@@ -88,6 +88,7 @@ ol.steps>li{margin-bottom:28px}
 .tool h3{margin:0;font-size:18px}.tool p{margin:8px 0 0}.tool table{margin-top:10px;font-size:14px}.tool td:first-child{white-space:nowrap}
 .danger{border:1px solid color-mix(in srgb,#c2412d 40%,var(--line));border-radius:10px;padding:16px}
 .danger p{margin:0 0 12px}.danger label{display:block;margin-bottom:12px}
+.impersonating{border:1px solid color-mix(in srgb,#d97706 60%,var(--line));margin-bottom:16px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
 .btn-danger{font:inherit;font-weight:600;background:#c2412d;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
 .signin{max-width:440px;margin:72px auto 96px;text-align:center}.signin .card{display:flex;flex-direction:column;gap:16px;align-items:center;padding:36px 32px}.signin .btn{align-self:center}
 .fb{max-width:600px;margin:56px auto 80px}.fb .card{padding:28px}.fb h1{font-size:28px;margin:0 0 8px}.fb .lede{margin:0;color:var(--muted)}

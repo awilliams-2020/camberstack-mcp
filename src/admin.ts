@@ -7,6 +7,7 @@ import express, { type Express, type Request } from "express";
 import type { DB } from "./db.js";
 import type { GoogleCreds } from "./google.js";
 import { SignIn } from "./signin.js";
+import { startLoginAs } from "./account.js";
 import { buildReport, permissionLabels, SCOPE_LABELS, userDetail, type Report, type UserDetail } from "./report.js";
 import { now } from "./db.js";
 import { esc } from "./pages.js";
@@ -93,17 +94,23 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
       d.internalEmails.has(u.user.email.toLowerCase()) ? ` <span class="chip">internal</span>` : ""}`;
     res.type("html").send(shell("/users", who, v, userPage(u, v), heading));
   });
+  const form = express.urlencoded({ extended: false, limit: "4kb" });
+  // POSTs must come from this site's own pages: the cookie is SameSite=Lax, and this checks the Origin as well.
+  const post = (path: string, h: (req: Request, res: express.Response, who: string) => unknown) =>
+    site.post(path, form, async (req, res) => {
+      const who = email(req);
+      if (!who) { res.redirect(303, "/login"); return; }
+      if (req.get("origin") !== new URL(d.adminUrl!).origin) { res.status(403).send("Cross-site request refused."); return; }
+      try { await h(req, res, who); } catch (e) { res.status(400).send(esc((e as Error).message)); }
+    });
+  // "Log in as user": the user's /account page, opened as them in this browser (account.ts startLoginAs).
+  post("/users/:id/login-as", (req, res, who) => {
+    const id = String(req.params.id);
+    if (!d.db.prepare("SELECT 1 FROM users WHERE id = ?").get(id)) { res.status(404).send("No such user."); return; }
+    res.redirect(303, startLoginAs(d.db, d.baseUrl, id, who));
+  });
   const ann = d.announcements;
   if (ann) {
-    const form = express.urlencoded({ extended: false, limit: "4kb" });
-    // POSTs must come from this site's own pages: the cookie is SameSite=Lax, and this checks the Origin as well.
-    const post = (path: string, h: (req: Request, res: express.Response, who: string) => unknown) =>
-      site.post(path, form, async (req, res) => {
-        const who = email(req);
-        if (!who) { res.redirect(303, "/login"); return; }
-        if (req.get("origin") !== new URL(d.adminUrl!).origin) { res.status(403).send("Cross-site request refused."); return; }
-        try { await h(req, res, who); } catch (e) { res.status(400).send(esc((e as Error).message)); }
-      });
     site.get("/announcements", (req, res) => {
       const who = email(req);
       if (!who) { res.redirect(302, "/login"); return; }
@@ -347,7 +354,8 @@ ${card("Account", `<dl>
 <dt>Stripe</dt><dd>${stripe}${u.stripe_sub ? ` <code class="dim">${esc(u.stripe_sub)}</code>` : ""}</dd>
 <dt>Emails</dt><dd>${u.email_opt_out ? `<span class="bad">unsubscribed</span>` : "subscribed"}</dd>
 <dt>User id</dt><dd><code>${esc(u.id)}</code></dd>
-</dl>`)}
+</dl>
+<form method="post" action="/users/${encodeURIComponent(u.id)}/login-as" target="_blank"><button>Log in as user ↗</button></form>`)}
 ${card("Ads accounts used", table(["account", ["calls", "r"], "first", "last"], x.accounts.map((a) => [cid(a.customer_id) + (a.customer_id === "0000000001" ? ` <span class="chip">demo</span>` : ""), num(a.calls), when(a.first), when(a.last)])))}
 </div>
 <div class="grid2">
