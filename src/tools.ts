@@ -6,6 +6,7 @@ import { landingPages, listProperties, report } from "./ga4.js";
 import { GA_TARGET, PublicGaChangeSchema, gaSetup } from "./ga4-changes.js";
 import { ACCOUNT_WINDOW_DAYS, PlanLimitError } from "./plans.js";
 import { isDemo, type Account, type UserSession } from "./session.js";
+import { isUnexpected, reportError } from "./sentry.js";
 
 const SERVER_NAME = "camberstack";
 export const SERVER_VERSION = "0.11.0";
@@ -82,7 +83,10 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       try {
         if (GATED.has(name) && typeof cid === "string") release = await session().checkAccount(cid);
         out = ok(await fn(a));
-      } catch (e) { out = fail(e); }
+      } catch (e) {
+        out = fail(e);
+        if (isUnexpected(e)) reportError(e, name);
+      }
       try {
         log({
           tool: name, customerId: typeof cid === "string" ? cid.replace(/-/g, "") : null,

@@ -26,6 +26,7 @@ import { CHANGELOG } from "./changelog.js";
 import { aboutPage, changelogPage, docsPage, errorPage, infoPage, homePage, chatgptGuidePage, claudeGuidePage, geminiGuidePage, llmsTxt, privacyPage, robotsTxt, searchConsolePage, SITEMAP_PATHS, sitemapXml, termsPage, toolsPage } from "./pages.js";
 import { indexNowKey, pageDates, pingIndexNow } from "./lastmod.js";
 import { readCookie } from "./http.js";
+import { initErrorReporting, reportError } from "./sentry.js";
 const DRAIN_FILE = "/tmp/drain";
 
 /** brand/ sits beside src/ and dist/ at the package root. */
@@ -265,6 +266,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
     } catch (e) {
+      reportError(e, "mcp");
       if (!res.headersSent) res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: (e as Error).message }, id: null });
     }
   });
@@ -345,9 +347,11 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   });
 
   app.use((_req, res) => { res.status(404).type("html").send(errorPage(cfg.baseUrl, "Page not found.")); });
+  // A route that threw: report it, then let express answer 500 as before.
+  app.use((e: unknown, _req: express.Request, _res: express.Response, next: express.NextFunction) => { reportError(e, "http"); next(e); });
 
   const every = (ms: number, name: string, job: () => unknown) => {
-    const run = async () => { try { await job(); } catch (e) { console.error(`${name}: ${(e as Error).message}`); } };
+    const run = async () => { try { await job(); } catch (e) { console.error(`${name}: ${(e as Error).message}`); reportError(e, name); } };
     setInterval(run, ms).unref();
     return run;
   };
@@ -370,6 +374,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const cfg = loadConfig();
+  initErrorReporting(cfg.gitSha);
   const { app, startJobs } = createApp(cfg, openDb(cfg.dataDir));
   startJobs();
   app.listen(cfg.port, () => console.log(`camberstack-mcp ${SERVER_VERSION} on :${cfg.port} (${cfg.baseUrl})`));

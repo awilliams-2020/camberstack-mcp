@@ -92,7 +92,7 @@ export interface SessionDeps {
   grantLink?: (kind: GrantKind, userId: string) => string | null;
 }
 
-class NotConnectedError extends Error {}
+export class NotConnectedError extends Error {}
 
 /** The Google Ads calls the tools make; the demo account answers the same ones. */
 type Ads = Pick<AdsClient, "listAccessibleCustomers" | "search" | "mutate" | "keywordPlan"> & Partial<Pick<AdsClient, "searchFields">>;
