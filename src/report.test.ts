@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest";
+import { openDb, now } from "./db.js";
+import { buildReport } from "./report.js";
+
+describe("buildReport", () => {
+  const seed = () => {
+    const db = openDb(":memory:");
+    const user = db.prepare("INSERT INTO users (id, google_sub, email, plan, stripe_sub, created_at) VALUES (?, ?, ?, ?, ?, ?)");
+    user.run("paid", "g1", "paid@example.com", "pro", "sub_live", now() - 86400);
+    // billing.ts's sweep drops a lapsed subscription to free but leaves stripe_sub behind.
+    user.run("lapsed", "g2", "lapsed@example.com", "free", "sub_gone", now() - 86400);
+    const call = db.prepare("INSERT INTO tool_calls (at, user_id, tool, ok, error, ms, bytes) VALUES (?, 'paid', ?, ?, ?, 5, 10)");
+    // 20 distinct, older, repeated errors, then 2 one-off errors in the last hour: by count, the newest lose.
+    for (let i = 0; i < 20; i++) for (let k = 0; k < 3; k++) call.run(now() - 3 * 86400 - i * 60, "run_gaql", 0, `old error ${i}`);
+    call.run(now() - 1800, "run_gaql", 0, "UNRECOGNIZED_FIELD");
+    call.run(now() - 1500, "run_gaql", 0, "PROHIBITED_METRIC");
+    call.run(now() - 60, "account_overview", 1, null);
+    return db;
+  };
+
+  it("lists the newest error groups first, so a wide window still shows the latest ones", () => {
+    const r = buildReport(seed(), { days: 7, exclude: [] });
+    expect(r.errors).toHaveLength(15);
+    expect(r.errors.slice(0, 2).map((e) => e.error)).toEqual(["PROHIBITED_METRIC", "UNRECOGNIZED_FIELD"]);
+  });
+
+  it("counts every error in the window, not just the groups it lists", () => {
+    expect(buildReport(seed(), { days: 7, exclude: [] }).errorsInWindow).toBe(62);
+    expect(buildReport(seed(), { days: 1, exclude: [] }).errorsInWindow).toBe(2);
+  });
+
+  it("counts only live subscriptions as paying", () => {
+    const r = buildReport(seed(), { days: 7, exclude: [] });
+    expect(r.paying).toBe(1);
+    expect(r.users.find((u) => u.id === "lapsed")?.paying).toBe(0);
+  });
+});

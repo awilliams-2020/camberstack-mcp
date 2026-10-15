@@ -107,7 +107,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   // Before every public route: the admin host serves only the admin site.
   const admin = mountAdmin(app, {
     db, google: cfg.google, baseUrl: cfg.baseUrl, adminUrl: cfg.adminUrl, adminEmails: cfg.adminEmails,
-    internalEmails, announcements, fetch: overrides.fetch,
+    proEmails: cfg.proEmails, internalEmails, announcements, fetch: overrides.fetch,
   });
 
   // Gemini (Spark custom apps) registers asking for client_secret_post, takes the secret, then its

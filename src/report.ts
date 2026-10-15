@@ -40,12 +40,15 @@ export function buildReport(db: DB, o: ReportOptions) {
     excluded: ex.length,
     funnel: { window: stage(since), all: stage(0) },
     activeInWindow: n("SELECT count(DISTINCT c.user_id) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE c.at >= ? AND c.ok = 1", since),
+    // Paid Pro, counted here rather than from `users` (capped at 200). billing.ts drops a lapsed subscription to
+    // plan 'free' but keeps its stripe_sub, so a stripe_sub alone is not a paying customer.
+    paying: n("SELECT count(*) n FROM {U} u WHERE plan = 'pro' AND coalesce(stripe_sub, '') != ''"),
     // Counted on its own: summing `errors` would stop at its 15 groups and undercount wide windows.
     errorsInWindow: n("SELECT count(*) n FROM tool_calls c JOIN {U} u ON u.id = c.user_id WHERE c.at >= ? AND c.ok = 0", since),
     users: q<{ id: string; email: string; plan: string; created_at: number; last_seen_at: number | null; connected: number;
                google_scopes: string | null; paying: number; calls: number; errors: number; applied: number; client: string | null }>(
       `SELECT u.id, u.email, u.plan, u.created_at, u.last_seen_at, u.enc_refresh IS NOT NULL connected, u.google_scopes,
-         coalesce(u.stripe_sub, '') != '' paying,
+         u.plan = 'pro' AND coalesce(u.stripe_sub, '') != '' paying,
          (SELECT count(*) FROM tool_calls c WHERE c.user_id = u.id) calls,
          (SELECT count(*) FROM tool_calls c WHERE c.user_id = u.id AND c.ok = 0) errors,
          (SELECT count(*) FROM proposals p WHERE p.user_id = u.id AND p.status = 'applied') applied,
@@ -70,7 +73,8 @@ export function buildReport(db: DB, o: ReportOptions) {
       `SELECT e.kind, count(*) sent, sum(e.sent_at >= ?) in_window FROM email_log e JOIN {U} u ON u.id = e.user_id GROUP BY 1 ORDER BY 1`, since),
     adConversions: q<{ recorded: number; uploaded: number; failing: number; last_error: string | null }>(
       `SELECT count(*) recorded, count(a.uploaded_at) uploaded, sum(a.uploaded_at IS NULL AND a.error IS NOT NULL) failing,
-         (SELECT error FROM ad_conversions WHERE error IS NOT NULL ORDER BY at DESC LIMIT 1) last_error
+         (SELECT f.error FROM ad_conversions f JOIN {U} fu ON fu.id = f.user_id WHERE f.uploaded_at IS NULL AND f.error IS NOT NULL
+            ORDER BY f.at DESC LIMIT 1) last_error
        FROM ad_conversions a JOIN {U} u ON u.id = a.user_id`)[0],
     /** Connected users holding each Google service (as last reported by Google; NULL scopes = not seen yet). */
     permissions: Object.fromEntries(Object.entries(SCOPE_LABELS).map(([scope, label]) => [label,

@@ -21,6 +21,8 @@ export interface AdminDeps {
   /** The admin site's origin. */
   adminUrl?: string;
   adminEmails: Set<string>;
+  /** PRO_EMAILS: Pro without a plan row (session.ts isPro), so the users table alone reads them as free. */
+  proEmails?: Set<string>;
   /** Hidden from the numbers by default (operator + testers); the page can include them. */
   internalEmails: Set<string>;
   /** Announcement emails (announce.ts); unset = no Announcements page. */
@@ -61,7 +63,9 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
   const view = (req: Request) => {
     const days = [1, 7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
     const all = req.query.internal === "1";
-    return { days, all, internal: d.internalEmails.size, report: buildReport(d.db, { days, exclude: all ? [] : [...d.internalEmails] }),
+    const report = buildReport(d.db, { days, exclude: all ? [] : [...d.internalEmails] });
+    for (const u of report.users) if (u.plan === "free" && d.proEmails?.has(u.email.toLowerCase())) u.plan = "pro";
+    return { days, all, internal: d.internalEmails.size, report,
       feedback: feedbackCount(d.db, now() - days * 86400) };
   };
   const pages: Record<string, (v: ReturnType<typeof view>) => string> = {
@@ -276,13 +280,15 @@ function overviewPage(v: View): string {
   const top = Math.max(1, r.funnel.all.connected);
   // Every day in the window, zeros included, so the bars are a real time axis.
   const byDay = new Map(r.daily.map((x) => [x.day, x]));
-  const daily = Array.from({ length: v.days }, (_, i) => {
-    const day = new Date((now() - (v.days - 1 - i) * 86400) * 1000).toISOString().slice(0, 10);
+  // One bar per UTC day the window touches, its first one partial: `days` bars alone dropped the oldest
+  // (partial) day, so the bars didn't add up to the calls total beside them (24h showed only today).
+  const daily = Array.from({ length: v.days + 1 }, (_, i) => {
+    const day = new Date((now() - (v.days - i) * 86400) * 1000).toISOString().slice(0, 10);
     return byDay.get(day) ?? { day, calls: 0, users: 0, errors: 0 };
   });
   const maxCalls = Math.max(1, ...daily.map((x) => x.calls));
   const errs = r.errorsInWindow;
-  const paying = r.users.filter((u) => u.paying).length;
+  const paying = r.paying;
   const callsInWindow = r.daily.reduce((a, x) => a + x.calls, 0);
   return `<div class="stats">
 ${stat("Users", num(r.funnel.all.connected), `+${r.funnel.window.connected} in ${w}`)}
@@ -293,7 +299,7 @@ ${stat(`Tool errors · ${w}`, errs ? `<span class="n bad">${errs}</span>` : num(
 </div>
 ${card(`Calls per day`, r.daily.length
     ? `<div class="chart">${daily.map((x) => `<div style="height:${Math.max(1, Math.round((100 * x.calls) / maxCalls))}%" title="${x.day}: ${x.calls} calls · ${x.users} users · ${x.errors} errors"></div>`).join("")}</div>
-<div class="axis"><span>${daily[0]!.day}</span><span>peak ${maxCalls}/day</span><span>${daily.at(-1)!.day}</span></div>`
+<div class="axis"><span>${daily[0]!.day} (from ${date(now() - v.days * 86400).slice(11)} UTC)</span><span>peak ${maxCalls}/day</span><span>${daily.at(-1)!.day}</span></div>`
     : `<p class="empty">No calls in this window.</p>`, `<small>last ${w}</small>`)}
 <div class="grid2">
 ${card("Funnel", table(["stage", ["all time", "r"], "", [`new · ${w}`, "r"]], stages.map((k) => [k.replace(/_/g, " "), num(r.funnel.all[k]),
@@ -314,18 +320,19 @@ ${card("Top tools", table(["tool", ["calls", "r"], ["errors", "r"]], r.tools.sli
 
 function usersPage(v: View): string {
   const r = v.report;
-  return card(`${r.users.length} users`, table(["user", "plan", "Google permissions", "signed up", "last seen", ["calls", "r"], ["errors", "r"], ["applied", "r"], "app"],
+  const shown = r.users.length < r.funnel.all.connected ? `${r.users.length} of ${r.funnel.all.connected} users` : `${r.users.length} users`;
+  return card(shown, table(["user", "plan", "Google permissions", "signed up", "last seen", ["calls", "r"], ["errors", "r"], ["applied", "r"], "app"],
     r.users.map((u) => [userLink(v, u.id, u.email), planBadge(u.plan, u.paying), perms(u.google_scopes, u.connected, { short: true }),
       when(u.created_at), when(u.last_seen_at), num(u.calls), bad(u.errors), num(u.applied), `<span class="muted">${esc(u.client ?? "—")}</span>`]), "No users.", "users"),
-    `<small>by last seen</small>`);
+    `<small>all time, by last seen</small>`);
 }
 
 function userPage(x: UserDetail, v: View): string {
   const u = x.user;
   const stripe = u.stripe_customer ? `<a href="https://dashboard.stripe.com/customers/${encodeURIComponent(u.stripe_customer)}" target="_blank" rel="noopener"><code>${esc(u.stripe_customer)}</code> ↗</a>` : `<span class="dim">—</span>`;
   return `<div class="stats">
-${stat("Calls", num(x.totals.calls), `avg ${x.totals.avg_ms} ms`)}
-${stat("Errors", x.totals.errors ? `<span class="n bad">${x.totals.errors}</span>` : num(0), x.totals.calls ? `${((100 * x.totals.errors) / x.totals.calls).toFixed(1)}%` : "")}
+${stat("Calls · all time", num(x.totals.calls), `avg ${x.totals.avg_ms} ms`)}
+${stat("Errors · all time", x.totals.errors ? `<span class="n bad">${x.totals.errors}</span>` : num(0), x.totals.calls ? `${((100 * x.totals.errors) / x.totals.calls).toFixed(1)}%` : "")}
 ${stat("Proposals", num(x.proposals.length), `${x.proposals.filter((p) => p.status === "applied").length} applied`)}
 ${stat("Ads accounts", num(x.accounts.length), "")}
 </div>
@@ -377,11 +384,11 @@ ${card("Recent calls", callsTable(r.recent.map((c) => ({ ...c, id: r.users.find(
 function revenuePage(v: View): string {
   const r = v.report;
   const pros = r.users.filter((u) => u.plan !== "free");
-  const paying = pros.filter((u) => u.paying);
+  const paying = r.paying;
   return `<div class="stats">
-${stat("Paying", num(paying.length), "Stripe subscriptions")}
-${stat("MRR", `$${paying.length * MRR_PER_PRO}`, `$${MRR_PER_PRO}/mo each`)}
-${stat("Comped Pro", num(pros.length - paying.length), "PRO_EMAILS")}
+${stat("Paying", num(paying), "live Stripe subscriptions")}
+${stat("MRR", `$${paying * MRR_PER_PRO}`, `$${MRR_PER_PRO}/mo each`)}
+${stat("Comped Pro", num(pros.filter((u) => !u.paying).length), v.all ? "PRO_EMAILS" : "PRO_EMAILS are internal: show internal")}
 ${stat("Ad connects uploaded", num(r.adConversions?.uploaded), `${r.adConversions?.recorded ?? 0} recorded`)}
 </div>
 ${card("Pro users", table(["user", "plan", "permissions", "signed up", "last seen", ["calls", "r"]], pros.map((u) => [userLink(v, u.id, u.email), planBadge(u.plan, u.paying),
