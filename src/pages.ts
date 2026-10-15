@@ -263,7 +263,8 @@ Changes there never reach Google, and the demo doesn't count as one of your plan
 <h2>Questions</h2>
 <h3>Can the AI change my account without asking?</h3>
 <p>Not without a proposal. Every change is first stored as a proposal and checked with Google; applying it is a separate
-tool call, and the server refuses anything that wasn't proposed first, is older than 24 hours, or belongs to someone else.
+tool call, and the server refuses anything that wasn't proposed first or belongs to someone else. If the account changed since the
+proposal, it isn't applied: you get an updated proposal to approve instead.
 Claude and ChatGPT normally ask you before running a tool that changes things, but if you've set that tool to "always allow",
 the AI could propose and apply in one go. Keep the confirmation on for <code>apply_changes</code>.</p>
 <h3>What data do you keep?</h3>
@@ -324,8 +325,10 @@ at <a href="https://myaccount.google.com/security">myaccount.google.com/security
 <h3>A change is refused for lack of permission</h3>
 <p>Reading needs any access to the account; applying a change needs <strong>Standard</strong> or <strong>Admin</strong> access.
 With Read only access, ask an account admin to raise it in Google Ads, under <strong>Admin</strong>, then <strong>Access and security</strong>.</p>
-<h3>"Proposal is older than 24 hours"</h3>
-<p>Proposals expire after a day, because the account may have changed since. Ask ${app} to propose the change again.</p>
+<h3>"The account changed since it was proposed"</h3>
+<p>Before applying, Camberstack checks the proposal against your account as it is now. If something it would change has moved
+since (a budget, a status, an end date), nothing is applied and ${app} shows you an updated proposal instead. Approve that one to go ahead.
+If everything in it is already in place, there's nothing left to apply. Proposals don't expire: an older one that still matches your account applies as approved.</p>
 <h3>"Plan limit"</h3>
 <p>The Free plan covers one Google Ads account at a time, with one switch to another account every ${ACCOUNT_WINDOW_DAYS} days. Past that, it asks you
 to upgrade, with a personal checkout link, and says when your next switch opens. Undo and change history always work. <a href="/#pricing">Plans</a>.</p>
@@ -726,8 +729,8 @@ ${cmd(`{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }`)}
 <code>keyword_ideas</code> and <code>keyword_metrics</code> size search demand. None of these change anything.</li>
 <li><strong>Propose.</strong> <code>propose_changes</code> stores the change as a proposal and checks it with Google (validate-only). Nothing is applied.</li>
 <li><strong>Approve.</strong> Your AI shows you the proposal. You approve that specific proposal in the conversation.</li>
-<li><strong>Apply.</strong> <code>apply_changes</code> applies an approved proposal. The server refuses anything that wasn't proposed first, is older than 24 hours,
-or belongs to someone else. Keep your AI app's confirmation prompt on for <code>apply_changes</code>.</li>
+<li><strong>Apply.</strong> <code>apply_changes</code> applies an approved proposal. The server refuses anything that wasn't proposed first
+or belongs to someone else, and checks it against the account first: if the account changed since, you get an updated proposal to approve instead. Keep your AI app's confirmation prompt on for <code>apply_changes</code>.</li>
 <li><strong>Undo.</strong> <code>undo_changes</code> builds the reverse of an applied proposal, which you approve and apply the same way.
 <code>change_history</code> lists everything applied.</li>
 </ol>

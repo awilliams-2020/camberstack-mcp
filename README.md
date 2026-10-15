@@ -36,7 +36,7 @@ Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account at a time wit
 | `analytics_landing_pages` | no | sessions, users, engagement rate, key events and key event rate per landing page, optionally for one channel (e.g. Paid Search) |
 | `analytics_report` | no | any GA4 Data API report by dimension and metric names, with a contains filter |
 | `propose_changes` | no | resolves changes against the live account, dry-runs them with Google (`validateOnly`), stores a proposal with a plain-English summary |
-| `apply_changes` | **yes** | applies a stored proposal (the user's own, un-applied, under 24h old); records each change's inverse |
+| `apply_changes` | **yes** | applies a stored proposal (the user's own, un-applied, still matching the account; if the account moved, returns an updated proposal to approve instead); records each change's inverse |
 | `undo_changes` | no | builds the reversing proposal for an applied one |
 | `billing` | no | plan, Google Ads accounts in use (last 30 days) vs. the plan's limit, and a personal upgrade or manage-billing link |
 | `discard_proposal` | no | marks an open proposal discarded so it can't be applied |

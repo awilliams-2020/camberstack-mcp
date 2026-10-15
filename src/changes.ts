@@ -3,8 +3,9 @@
  *
  *   propose  → resolve every change against the live account, dry-run it with validateOnly, store
  *              it with a plain-English diff. Nothing is written.
- *   apply    → only a stored, un-applied proposal belonging to this user, less than 24h old. Each
- *              change records its inverse, so any applied proposal can be undone.
+ *   apply    → only a stored, un-applied proposal belonging to this user, and only if, re-resolved against
+ *              the account now, it still reads as the summary the user approved (else it is proposed afresh).
+ *              Each change records its inverse, so any applied proposal can be undone.
  *
  * Surface: negatives, pause/enable keyword, ad group or campaign, daily budget, campaign end date, and
  * building: a whole Search, Display, Demand Gen or Performance Max campaign (always created PAUSED, so
@@ -20,7 +21,6 @@ import { fetchImage } from "./fetch-safe.js";
 import { micros, toMicros, type AdsClient } from "./google.js";
 
 export const MAX_CHANGES = 50;
-export const PROPOSAL_TTL = 24 * 3600;
 
 const id = z.string().regex(/^\d+$/, "numeric id");
 const campaignId = id.describe("Campaign id, digits only (campaign_id from account_overview or run_gaql)");
@@ -1283,4 +1283,15 @@ function fmtKw(text: string, matchType: string): string {
 export function summarize(resolved: { operations: unknown[]; describe: string }[]): string {
   return resolved.filter((r) => r.operations.length)
     .map((r, i) => `${i + 1}. ${r.describe}`).join("\n");
+}
+
+/**
+ * Do two summaries describe the same writes? Apply's drift check (session.ts) compares the summary the user approved with
+ * the same changes re-resolved now. A proposal stores keyword changes with the duplicates already dropped, so the
+ * "(n already present or repeated, skipped)" note is about the request, not the account, and is left out; the count before
+ * it stays, so keywords that appeared in the account meanwhile still read as a change.
+ */
+export function sameSummary(a: string, b: string): boolean {
+  const norm = (s: string) => s.replace(/ \(\d+ already present or repeated, skipped\)/g, "");
+  return norm(a) === norm(b);
 }

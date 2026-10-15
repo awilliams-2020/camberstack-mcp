@@ -1565,6 +1565,50 @@ describe("OAuth + MCP end to end", () => {
     expect(ads.campaignStatus).toBe("PAUSED");
   });
 
+  it("applies a proposal of any age that still reads the same, and re-proposes one the account has moved under", async () => {
+    const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };
+    const status = (id: string) => (db.prepare("SELECT status FROM proposals WHERE id = ?").get(id) as { status: string }).status;
+    const age = (id: string) => db.prepare("UPDATE proposals SET created_at = created_at - 3 * 86400 WHERE id = ?").run(id);
+    const was = { status: ads.campaignStatus, end: ads.campaignEnd };
+    ads.campaignStatus = "ENABLED";
+    ads.campaignEnd = "2030-01-31 23:59:59";
+
+    // Three days old, account unchanged: applied as approved.
+    const old = await propose([{ type: "set_end_date", campaign_id: "10", end_date: "2031-06-30" }]);
+    age(old.proposal_id);
+    const done = await call(token, "apply_changes", { proposal_id: old.proposal_id });
+    expect(done.isError).toBe(false);
+    expect(done.json.status).toBe("applied");
+    expect(ads.campaignEnd).toBe("2031-06-30 23:59:59");
+
+    // The end date moved after proposing: what was approved ("from 2031-06-30") no longer holds. Nothing is written, and
+    // the answer is a fresh proposal to approve, not an error.
+    const moved = await propose([{ type: "set_end_date", campaign_id: "10", end_date: "2032-03-31" }]);
+    expect(moved.summary).toContain("from 2031-06-30 to 2032-03-31");
+    ads.campaignEnd = "2031-09-30 23:59:59";
+    const again = await call(token, "apply_changes", { proposal_id: moved.proposal_id });
+    expect(again.isError).toBe(false);
+    expect(again.json).toMatchObject({ status: "needs approval", replaces: moved.proposal_id });
+    expect(again.json.summary).toContain("from 2031-09-30 to 2032-03-31");
+    expect(again.json.note).toContain(`apply_changes with ${again.json.proposal_id} only after they approve`);
+    expect(ads.campaignEnd).toBe("2031-09-30 23:59:59");
+    expect(status(moved.proposal_id)).toBe("discarded");
+    expect((await call(token, "apply_changes", { proposal_id: moved.proposal_id })).text).toContain("already discarded");
+    expect((await call(token, "apply_changes", { proposal_id: again.json.proposal_id })).json.status).toBe("applied");
+    expect(ads.campaignEnd).toBe("2032-03-31 23:59:59");
+
+    // Done meanwhile by someone else: nothing left to apply, also not an error.
+    const pause = await propose([{ type: "pause_campaign", campaign_id: "10" }]);
+    ads.campaignStatus = "PAUSED";
+    const noop = await call(token, "apply_changes", { proposal_id: pause.proposal_id });
+    expect(noop.isError).toBe(false);
+    expect(noop.json.status).toBe("already in place");
+    expect(status(pause.proposal_id)).toBe("discarded");
+
+    ads.campaignStatus = was.status;
+    ads.campaignEnd = was.end;
+  });
+
   it("builds a paused campaign atomically, adds keywords, scopes its conversion goal, and undoes each", async () => {
     const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };
     const ad = { headlines: ["Cleaning Invoice Template", "Send It With a Pay Button", "Start Free"], descriptions: ["Fill it in free.", "Clients pay by card."],
@@ -1965,7 +2009,7 @@ describe("OAuth + MCP end to end", () => {
     // so the two guides don't repeat each other (Google declined to index them while they were 54% identical).
     const cg = await (await fetch(`${base}/google-ads-claude`)).text(), gg = await (await fetch(`${base}/google-ads-chatgpt`)).text();
     const docs = await (await fetch(`${base}/docs`)).text();
-    for (const msg of ["NOT_ADS_USER", "TWO_STEP_VERIFICATION_NOT_ENROLLED", "Proposal is older than 24 hours", "Plan limit", "sufficient permission for site"])
+    for (const msg of ["NOT_ADS_USER", "TWO_STEP_VERIFICATION_NOT_ENROLLED", "The account changed since it was proposed", "Plan limit", "sufficient permission for site"])
       expect(docs).toContain(msg);
     for (const g of [cg, gg]) {
       expect(g).toContain('href="/docs#troubleshooting"');

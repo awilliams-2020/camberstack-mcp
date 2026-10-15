@@ -16,7 +16,7 @@ import { GA_TARGET, GaChangeSchema, gaInverseAfterApply, gaNoteAfterApply, resol
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
 import { CATALOG_QUERY, catalog, checkGaql, lookupFields } from "./gaql.js";
 import {
-  ChangeSchema, MAX_CHANGES, PROPOSAL_TTL, inverseAfterApply, pendingOf, resolveChange, summarize,
+  ChangeSchema, MAX_CHANGES, inverseAfterApply, sameSummary, pendingOf, resolveChange, summarize,
   type Change, type ResolvedChange,
 } from "./changes.js";
 
@@ -797,7 +797,6 @@ export class UserSession {
   async apply(proposalId: string) {
     const p = this.proposal(proposalId);
     if (p.status !== "proposed") throw new Error(`Proposal ${proposalId} is already ${p.status}.`);
-    if (p.created_at < now() - PROPOSAL_TTL) throw new Error(`Proposal ${proposalId} is older than 24 hours; the account may have changed. Propose again.`);
     const changes = JSON.parse(p.changes) as AnyChange[];
     // Claim it before any write: a client retrying after a timeout would otherwise apply it twice. applied_at
     // marks the claim, and an undo also claims the change it reverses, so two undos of one change can't both run.
@@ -835,6 +834,8 @@ export class UserSession {
       save("failed", outcomes);
       return { proposal_id: p.id, status: "failed", note: "Nothing was changed.", results: publicResults(outcomes) };
     }
+    const drift = await this.drifted(p, checked.map((x) => (x as { r: AnyResolved }).r));
+    if (drift) return drift;
 
     const outcomes: Outcome[] = [];
     let failed: { at: number; error: string } | undefined;
@@ -880,6 +881,27 @@ export class UserSession {
       results: publicResults(outcomes),
       undo: stuck ? `To reverse what stayed applied, call undo_changes with proposal_id "${p.id}".` : undefined,
     };
+  }
+
+  /**
+   * The user approved a summary, and the summary carries the account's values at proposal time ("now ENABLED",
+   * "$10 → $20"). Re-resolved against the account as it is now, the same changes must read the same, however old the
+   * proposal is; if they don't, the account moved and what they approved is no longer what would run. Then nothing is
+   * written: the old proposal is discarded and the same request is proposed afresh, for the user to approve. Not an
+   * error: it's the expected answer to an account that changed. (Replaced a flat 24-hour expiry, 2026-10-15.)
+   */
+  private async drifted(p: ProposalRow, resolved: AnyResolved[]) {
+    const live = resolved.filter((r) => r.operations.length);
+    if (live.length && sameSummary(summarize(live), p.summary)) return null;
+    this.deps.db.prepare("UPDATE proposals SET status = 'discarded', applied_at = NULL WHERE id = ?").run(p.id);
+    if (!live.length) {
+      return { proposal_id: p.id, status: "already in place",
+        note: "Nothing was applied: every change in this proposal is already in place in the account, so there's nothing left to do." };
+    }
+    const fresh = await this.propose(p.customer_id, live.map((r) => r.change), p.undo_of ?? undefined);
+    return { proposal_id: fresh.proposal_id, status: "needs approval", replaces: p.id, summary: fresh.summary, skipped: fresh.skipped,
+      note: `Nothing was applied: the account changed since ${p.id} was proposed, so it no longer matches what was approved. `
+        + `Show the user this updated summary and call apply_changes with ${fresh.proposal_id} only after they approve it.` };
   }
 
   /** Read what a change would do against the live account (Google Ads) or property (Google Analytics). */

@@ -361,7 +361,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   tool("apply_changes", {
     title: "Apply an approved proposal",
-    description: "Applies a proposal from propose_changes to the Google Ads account. Only call this after the user has explicitly approved that proposal. All or nothing: every change is checked with Google first, and if one still fails the ones before it are rolled back. Each change is logged and can be reversed with undo_changes.",
+    description: "Applies a proposal from propose_changes to the Google Ads account. Only call this after the user has explicitly approved that proposal. All or nothing: every change is checked with Google first, and if one still fails the ones before it are rolled back. Each change is logged and can be reversed with undo_changes. "
+      + "If the account changed since the proposal, nothing is applied and the result (status \"needs approval\") is a new proposal with the updated summary: show it to the user and apply it only after they approve.",
     inputSchema: { proposal_id: z.string().describe("The id returned by propose_changes") },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, ({ proposal_id }: { proposal_id: string }) => session().apply(proposal_id));
