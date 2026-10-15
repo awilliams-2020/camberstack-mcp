@@ -37,6 +37,8 @@ const RESOURCE_NAME = "Camberstack Google Ads";
 /** Gemini's OAuth relay; it registers its /r/ and /a/ paths on all three hosts. */
 const GEMINI_REDIRECT = /^https:\/\/oauth-redirect(-sandbox|-test)?\.googleusercontent\.com\//;
 const HOUR = 3600_000;
+/** POST /mcp slower than this gets a diagnostic log line (traefik saw 240–295s Claude requests; tools never exceed ~14s). */
+const SLOW_MCP_MS = 10_000;
 
 export interface Overrides extends Partial<SessionDeps> {
   fetch?: typeof fetch;
@@ -256,17 +258,29 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     res.status(204).end();
   });
 
-  app.post("/mcp", bearer, express.json({ limit: "1mb" }), async (req, res) => {
-    res.on("finish", () => {
-      // Diagnostics for rejected requests only: method + protocol header, never arguments or data.
-      if (res.statusCode >= 400) {
-        const body = req.body as { method?: string } | { method?: string }[] | undefined;
-        const method = Array.isArray(body) ? `batch[${body.map((b) => b?.method).join(",")}]` : body?.method;
-        console.warn(`mcp ${res.statusCode} method=${method ?? "?"} protocol=${req.get("mcp-protocol-version") ?? "-"} accept=${req.get("accept") ?? "-"} ua=${req.get("user-agent") ?? "-"}`);
-      }
-    });
+  // Stamped before bearer + body parsing, so a slow request's log line splits auth/upload time (pre) from handling.
+  const stampStart = (_req: express.Request, res: express.Response, next: express.NextFunction) => { res.locals.t0 = Date.now(); next(); };
+  app.post("/mcp", stampStart, bearer, express.json({ limit: "1mb" }), async (req, res) => {
+    const t0 = res.locals.t0 as number;
+    const tHandler = Date.now();
+    let leg = "?";
+    // Diagnostics for rejected, slow (>= SLOW_MCP_MS) or client-aborted requests: JSON-RPC method, tool
+    // name, protocol header and timings, never arguments or data.
+    const diagnose = (outcome: string) => {
+      const ms = Date.now() - t0;
+      if (outcome === "finish" && res.statusCode < 400 && ms < SLOW_MCP_MS) return;
+      type Msg = { method?: string; params?: { name?: unknown } };
+      const label = (b: Msg | undefined) => b?.method === "tools/call" && typeof b.params?.name === "string" ? `tools/call:${b.params.name}` : b?.method;
+      const body = req.body as Msg | Msg[] | undefined;
+      const method = Array.isArray(body) ? `batch[${body.map(label).join(",")}]` : label(body);
+      const status = outcome === "finish" ? String(res.statusCode) : "aborted";
+      console.warn(`mcp ${status} ms=${ms} pre=${tHandler - t0} leg=${leg} method=${method ?? "?"} protocol=${req.get("mcp-protocol-version") ?? "-"} accept=${req.get("accept") ?? "-"} ua=${req.get("user-agent") ?? "-"}`);
+    };
+    res.on("finish", () => diagnose("finish"));
+    res.on("close", () => { if (!res.writableFinished) diagnose("close"); });
     try {
-      if (!(await isLegacyRequest(await toWebRequest(req, req.body), req.body))) return await modern(req, res, req.body);
+      leg = (await isLegacyRequest(await toWebRequest(req, req.body), req.body)) ? "legacy" : "modern";
+      if (leg === "modern") return await modern(req, res, req.body);
       // 2025-era: stateless, one JSON body per request, as before v2.
       const server = serverFor(req.auth);
       const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
