@@ -175,11 +175,13 @@ export class CamberstackProvider implements OAuthServerProvider {
     }
 
     const g = await exchangeGoogleCode(this.opts.google, q.code, this.googleRedirectUri, this.opts.fetch);
-    // À la carte: either service is enough to connect; a tool that needs the other returns a link that adds it (grant.ts).
+    // À la carte: any one service is enough to connect; a tool that needs another returns a link that adds it (grant.ts).
+    // Google Analytics counts only where sign-in asks for it (extraGoogleScopes, GA4_PUBLIC).
     const granted = g.scope.split(" ");
-    if (!granted.includes(ADS_SCOPE) && !granted.includes(SEARCH_CONSOLE_SCOPE)) {
+    const enough = [ADS_SCOPE, SEARCH_CONSOLE_SCOPE, ...(this.opts.extraGoogleScopes ?? []).slice(0, 1)];
+    if (!enough.some((s) => granted.includes(s))) {
       back.searchParams.set("error", "access_denied");
-      back.searchParams.set("error_description", "Neither Google Ads nor Search Console access was granted (both boxes were unticked).");
+      back.searchParams.set("error_description", "No Google service was granted (every box was unticked).");
       return { to: back.toString() };
     }
     if (!g.id_token) throw new Error("Google did not return an id_token");

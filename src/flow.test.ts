@@ -1214,6 +1214,14 @@ describe("OAuth + MCP end to end", () => {
     }
   });
 
+  it("refuses a Google Analytics-only grant while sign-in doesn't ask for Analytics (GA4_PUBLIC off, as in prod)", async () => {
+    const saved = { ...googleGrant };
+    googleGrant.scope = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/analytics.readonly";
+    try {
+      await expect(connect()).rejects.toThrow();
+    } finally { Object.assign(googleGrant, saved); }
+  });
+
   it("serves the page beacon without a Google Analytics tag unless a measurement ID is configured", async () => {
     const js = await (await fetch(`${base}/e.js`)).text();
     expect(js).toContain("sendBeacon");
