@@ -11,6 +11,7 @@ import { buildReport, permissionLabels, SCOPE_LABELS, userDetail, type Report, t
 import { now } from "./db.js";
 import { esc } from "./pages.js";
 import { PRO_PRICE_LABEL } from "./plans.js";
+import { FEEDBACK_KINDS, feedbackCount, recentFeedback, type FeedbackRow } from "./feedback.js";
 import { AUDIENCES, PRESETS, render as renderAnnouncement, type Announcements, type Preset, type SendState } from "./announce.js";
 
 export interface AdminDeps {
@@ -60,10 +61,12 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
   const view = (req: Request) => {
     const days = [1, 7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
     const all = req.query.internal === "1";
-    return { days, all, internal: d.internalEmails.size, report: buildReport(d.db, { days, exclude: all ? [] : [...d.internalEmails] }) };
+    return { days, all, internal: d.internalEmails.size, report: buildReport(d.db, { days, exclude: all ? [] : [...d.internalEmails] }),
+      feedback: feedbackCount(d.db, now() - days * 86400) };
   };
   const pages: Record<string, (v: ReturnType<typeof view>) => string> = {
     "/": overviewPage, "/users": usersPage, "/activity": activityPage, "/revenue": revenuePage,
+    "/feedback": (v) => feedbackPage(recentFeedback(d.db), v),
   };
   for (const [path, render] of Object.entries(pages)) {
     site.get(path, (req, res) => {
@@ -132,7 +135,7 @@ export function mountAdmin(app: Express, d: AdminDeps): SignIn | null {
 
 // ---------------------------------------------------------------- views
 
-type View = { days: number; all: boolean; internal: number; report: Report };
+type View = { days: number; all: boolean; internal: number; report: Report; feedback: number };
 
 /** Pro's monthly price in dollars, from the label the site shows, so the two can't drift. */
 const MRR_PER_PRO = Number(PRO_PRICE_LABEL.match(/\d+/)?.[0] ?? 0);
@@ -195,6 +198,7 @@ function shell(path: string, who: string, v: View, body: string, heading?: strin
     ["/activity", "Activity", errs ? `<b class="bad" title="${errs} tool errors in this range">${errs}</b>` : ""],
     ["/revenue", "Revenue", String(v.report.funnel.all.paid || "")],
     ["/announcements", "Announcements", ""],
+    ["/feedback", "Feedback", String(v.feedback || "")],
   ];
   const title = nav.find(([p]) => p === path)?.[1] ?? "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -449,3 +453,14 @@ button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg);paddi
 .warn{border:1px solid var(--bad);color:var(--bad);border-radius:6px;padding:8px 12px}.okmsg{border:1px solid var(--ok);color:var(--ok);border-radius:6px;padding:8px 12px}
 .mail{background:#fff;color:#1c1b19;border-radius:6px;padding:16px;font-size:14px}.mail a{color:#1f5f4a;text-decoration:underline}.mail hr{border:0;border-top:1px solid #ddd}
 </style>`;
+
+/** Every message from /feedback, newest first; not filtered by the range (there are few, and old ones still matter). */
+function feedbackPage(rows: FeedbackRow[], v: View): string {
+  const reply = (r: FeedbackRow) => `mailto:${encodeURIComponent(r.email)}?subject=${encodeURIComponent(`Re: your Camberstack feedback`)}`;
+  return card("Feedback", table(["when", "from", "about", "message"], rows.map((r) => [
+    when(r.at),
+    `${r.user_id ? userLink(v, r.user_id, r.email) : esc(r.email)}${r.user_id ? "" : ` <span class="chip">not connected</span>`}<br><a class="dim" href="${reply(r)}">reply</a>`,
+    esc(FEEDBACK_KINDS[r.kind] ?? r.kind),
+    `<div style="white-space:pre-wrap;max-width:60ch">${esc(r.message)}</div>`,
+  ]), "No feedback yet. It arrives from camberstack.io/feedback."), `<small>${rows.length} shown · emailed as they arrive</small>`);
+}

@@ -1379,6 +1379,42 @@ describe("OAuth + MCP end to end", () => {
     expect(await (await fetch(`${base}/account`, { headers: { cookie: "cs_account=forged" } })).text()).toContain("Sign in with Google");
   });
 
+  it("takes feedback at /feedback from a signed-in Google account, and lists it on the admin site", async () => {
+    // Public page; sending needs a sign-in, and a POST without one stores nothing.
+    const open = await (await fetch(`${base}/feedback`)).text();
+    expect(open).toContain('href="/feedback/login"');
+    const post = (cookie: string, fields: Record<string, string>) => fetch(`${base}/feedback`, { method: "POST", redirect: "manual",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields).toString() });
+    expect((await post("", { kind: "bug", message: "no session" })).headers.get("location")).toBe("/feedback");
+    expect(db.prepare("SELECT count(*) n FROM feedback").get()).toEqual({ n: 0 });
+
+    const login = await fetch(`${base}/feedback/login`, { redirect: "manual" });
+    const g = new URL(login.headers.get("location")!);
+    expect(g.searchParams.get("scope")).toBe("openid email");
+    const cookie = await signIn(g, stateCookie(login));
+    expect(cookie).toMatch(/^cs_feedback=/);
+    expect(await (await fetch(`${base}/feedback`, { headers: { cookie } })).text()).toContain("Sending as owner@example.com");
+
+    expect((await post(cookie, { kind: "nonsense", message: "hi there" })).status).toBe(400);
+    expect((await post(cookie, { kind: "idea", message: "x".repeat(5001) })).status).toBe(400);
+    const sent = await post(cookie, { kind: "idea", message: "Please add <b>Microsoft Ads</b>" });
+    expect(sent.headers.get("location")).toBe("/feedback?sent=1");
+    expect(db.prepare("SELECT email, kind, message, user_id IS NOT NULL connected FROM feedback").get())
+      .toEqual({ email: "owner@example.com", kind: "idea", message: "Please add <b>Microsoft Ads</b>", connected: 1 });
+    // Five a day per sender.
+    for (let i = 0; i < 4; i++) expect((await post(cookie, { kind: "other", message: `more ${i}` })).status).toBe(303);
+    expect((await post(cookie, { kind: "other", message: "one too many" })).status).toBe(429);
+
+    // The admin site lists it, escaped.
+    const admin = base.replace("localhost", "127.0.0.1");
+    const alogin = await fetch(`${admin}/login`, { redirect: "manual" });
+    const acookie = await signIn(new URL(alogin.headers.get("location")!), stateCookie(alogin));
+    const list = await (await fetch(`${admin}/feedback`, { headers: { cookie: acookie } })).text();
+    expect(list).toContain("Please add &lt;b&gt;Microsoft Ads&lt;/b&gt;");
+    expect(list).toContain("An idea or request");
+    db.prepare("DELETE FROM feedback").run();
+  });
+
   it("pauses and re-enables a campaign, warning before it spends again; flags big budget increases", async () => {
     db.prepare("UPDATE users SET plan = 'pro'").run();  // the free applies were used up above
     const propose = async (changes: object[]) => { const r = await call(token, "propose_changes", { customer_id: "1112223333", changes }); if (r.isError) throw new Error(r.text); return r.json; };

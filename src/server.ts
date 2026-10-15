@@ -18,6 +18,7 @@ import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
 import { Analytics, BEACON_JS, gtagJs, parseBeacon } from "./analytics.js";
 import { mountAdmin } from "./admin.js";
 import { mountAccount } from "./account.js";
+import { mountFeedback } from "./feedback.js";
 import { Billing } from "./billing.js";
 import { AdConversions } from "./adconversions.js";
 import { Lifecycle, lifecycleSigningKey } from "./lifecycle.js";
@@ -168,6 +169,10 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     db, google: cfg.google, baseUrl: cfg.baseUrl, fetch: overrides.fetch,
     session: (userId) => UserSession.load(deps, userId), billingLink: (kind, userId) => billing.link(kind, userId),
   });
+  const feedback = mountFeedback(app, {
+    db, google: cfg.google, baseUrl: cfg.baseUrl, fetch: overrides.fetch, mailFetch: overrides.mailFetch,
+    mail: cfg.mail && { apiKey: cfg.mail.apiKey, from: cfg.mail.from, replyTo: cfg.mail.replyTo }, operator: cfg.feedbackTo ?? cfg.mail?.replyTo ?? "adam@camberstack.io",
+  });
 
   // The consent page's answer (provider.authorize renders it). Same-origin form POST; the cookie the page set
   // is what proves this browser saw it, so a cross-site auto-submit or a forwarded link gets nowhere.
@@ -184,7 +189,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   app.get("/oauth/google/callback", async (req, res) => {
     // One registered redirect URI serves every Google flow. Web sign-ins (/admin, /account) are told
     // apart by their state prefix and finish on their own path, where their session cookie is scoped.
-    const site = [admin, account].find((s) => s?.owns(req.query.state));
+    const site = [admin, account, feedback].find((s) => s?.owns(req.query.state));
     if (site) {
       res.redirect(302, `${site.callbackUrl}?${new URLSearchParams(req.query as Record<string, string>)}`);
       return;

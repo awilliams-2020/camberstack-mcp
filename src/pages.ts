@@ -10,7 +10,7 @@ import type { ToolDoc } from "./tools.js";
 
 const CONTACT = "adam@camberstack.io";
 // Each policy keeps its own date: changing the terms mustn't re-date a privacy policy Google is reviewing.
-const PRIVACY_UPDATED = "2026-10-14";
+const PRIVACY_UPDATED = "2026-10-15";
 const TERMS_UPDATED = "2026-10-15";
 
 const CSS = `
@@ -90,12 +90,18 @@ ol.steps>li{margin-bottom:28px}
 .danger p{margin:0 0 12px}.danger label{display:block;margin-bottom:12px}
 .btn-danger{font:inherit;font-weight:600;background:#c2412d;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
 .signin{max-width:440px;margin:72px auto 96px;text-align:center}.signin .card{display:flex;flex-direction:column;gap:16px;align-items:center;padding:36px 32px}.signin .btn{align-self:center}
+.fb{max-width:600px;margin:56px auto 80px}.fb .card{padding:28px}.fb h1{font-size:28px;margin:0 0 8px}.fb .lede{margin:0;color:var(--muted)}
+.fb fieldset{border:0;padding:0;margin:24px 0 20px}.fb legend,.fb .lbl{display:block;font-weight:600;margin-bottom:8px}
+.fb .opt{display:flex;gap:10px;align-items:center;padding:6px 0;cursor:pointer}.fb .opt input{margin:0;width:18px;height:18px;accent-color:var(--accent)}
+.fb textarea{display:block;width:100%;box-sizing:border-box;min-height:180px;font:inherit;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:inherit;resize:vertical}
+.fb .hint{font-size:14px;color:var(--muted);margin:8px 0 20px}.fb .btn{border:0;cursor:pointer;font-size:16px}.fb .who{font-size:14px;color:var(--muted);margin:20px 0 0}
 @media (max-width:600px){
 nav a{margin-left:12px}nav{white-space:nowrap}
 @media (max-width:400px){header .wrap{padding:0 16px}nav a{margin-left:10px;font-size:14px}}
 .btn{padding:9px 14px;font-size:15px;border-radius:7px}
 .btn-danger{padding:9px 14px;font-size:15px}
 .signin{margin:40px auto 56px}.signin .card{padding:28px 20px}
+.fb{margin:24px auto 48px}.fb .card{padding:20px 16px}.fb h1{font-size:24px}.fb .btn{width:100%}
 .big{font-size:22px}
 .change{padding:12px 14px}.change ul{padding-left:18px}.change li,.fold .preview{font-size:15px;line-height:1.5}
 .range{max-width:none}.range a{min-height:38px}
@@ -123,7 +129,7 @@ ${o.jsonLd ? `<script type="application/ld+json">${JSON.stringify(o.jsonLd)}</sc
 <nav><a href="/#setup">Connect</a><a href="/docs">Docs</a><a href="/#pricing">Pricing</a><a href="/account">Account</a></nav></div></header>
 <main class="wrap">${o.body}</main>
 <footer><div class="wrap">
-<a href="/docs">Docs</a><a href="/tools">Tools</a><a href="/changelog">Changelog</a><a href="/about">About</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
+<a href="/docs">Docs</a><a href="/tools">Tools</a><a href="/changelog">Changelog</a><a href="/about">About</a><a href="/feedback">Feedback</a><a href="${SOURCE_URL}">Source code (MIT)</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms</a><a href="mailto:${CONTACT}">${CONTACT}</a>
 <p>Camberstack is independent and not affiliated with or endorsed by Google. Google Ads is a trademark of Google LLC.</p>
 </div></footer>
 <script src="/e.js" defer></script>
@@ -809,11 +815,14 @@ Humans at Camberstack do not read your Google Ads data unless you ask us to for 
 <tr><td>A random value in a cookie while you add a Google service (Google Ads, Search Console or Google Analytics) to your connection</td><td>Check that the browser finishing Google's consent is the one that opened your link</td><td>The consent finishes, or 10 minutes</td></tr>
 <tr><td>Tokens we issue to your AI app (stored as hashes)</td><td>Authenticate your AI app</td><td>Expiry (1 hour access, 90 days refresh) or disconnect</td></tr>
 <tr><td>Proposals: the changes requested, their summary and results</td><td>Show what changed and let you undo it</td><td>You ask us to delete them</td></tr>
+<tr><td>Feedback you send from camberstack.io/feedback: your message, what it's about, and the Google email you signed in with</td><td>Read it and reply to you</td><td>You ask us to delete it</td></tr>
+<tr><td>A sign-in session for the feedback page (a cookie; we store only its hash)</td><td>Know who a message is from, so we can reply and keep spam out</td><td>1 day, or until you sign out</td></tr>
 <tr><td>A usage log: which tool ran, for which Google Ads account ID, when, how long it took and any error message. Never the tool's inputs or results</td><td>Find and fix failures, see which features are used, and count how many Google Ads accounts you use for your plan</td><td>You ask us to delete it</td></tr>
 </table>
 <p>Reports, search-term lists, query results and Google Analytics reports are computed on request and returned to your AI assistant. We do not store them.
 When a proposed ad uses an image URL, we download that image only to upload it to your Google Ads account as an image asset; we do not keep the file.
-Standard web server logs (IP address, time, path) are kept for a limited period for security and then deleted.</p>
+Standard web server logs (IP address, time, path) are kept for a limited period for security and then deleted.
+When the server hits a bug, the error and where in the code it happened go to an error tracker we host ourselves; no request contents, cookies or tokens are sent with it.</p>
 
 <h2>Your AI assistant</h2>
 <p>Tool results go to the AI app you connected (for example Claude or ChatGPT). How that provider handles the conversation is governed by its own privacy policy.</p>

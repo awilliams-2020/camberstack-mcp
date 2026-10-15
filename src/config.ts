@@ -49,6 +49,8 @@ export interface Config {
   noindex?: boolean;
   /** Self-hosted Matomo for the public pages; unset = no analytics. See analytics.ts. */
   matomo?: { url: string; siteId: string; token: string };
+  /** Where /feedback notifications go (feedback.ts); unset = the mail reply-to address. */
+  feedbackTo?: string;
   gitSha: string;
   gitCommitDate: string;
 }
@@ -83,6 +85,7 @@ export function loadConfig(): Config {
     ga4Public: process.env.GA4_PUBLIC === "1",
     noindex: process.env.NOINDEX === "1",
     glamaClaim: process.env.GLAMA_CLAIM || undefined,
+    feedbackTo: process.env.FEEDBACK_TO || undefined,
     openaiAppsChallenge: process.env.OPENAI_APPS_CHALLENGE || undefined,
     ga4MeasurementId: /^G-[A-Z0-9]{4,20}$/.test(process.env.GA4_MEASUREMENT_ID ?? "") ? process.env.GA4_MEASUREMENT_ID : undefined,
     mail: process.env.RESEND_API_KEY

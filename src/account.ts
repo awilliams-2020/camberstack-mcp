@@ -195,6 +195,7 @@ ${all.length ? rangeBar : ""}
 ${!all.length ? `<div class="card"><p class="muted">No changes yet. Ask your AI about your Google Ads account to start.</p></div>`
   : entries.length ? countLine + changes
   : `<div class="card"><p class="muted">No changes in the last ${rangeName(days)}. <a href="/account?days=0#changes">See all ${all.length}</a>.</p></div>`}
+<p class="muted">Something wrong, missing or confusing? <a href="/feedback">Send feedback</a>.</p>
 <h2 id="disconnect">Disconnect</h2>
 ${u.enc_refresh ? `<form method="post" action="/account/disconnect" class="danger"><p>Revokes Camberstack's Google access and deletes the stored credentials. Your AI app stops working with Camberstack until you connect again. Your change history stays here.</p>
 <label><input type="checkbox" name="confirm" value="yes" required> I want to disconnect</label><button class="btn-danger">Disconnect Google Ads</button></form>`

@@ -165,6 +165,18 @@ CREATE TABLE IF NOT EXISTS page_versions (
   hash     TEXT NOT NULL,
   changed  TEXT NOT NULL      -- YYYY-MM-DD
 );
+
+-- Messages from /feedback (feedback.ts). email is the sender's verified Google address; user_id is set
+-- when that address has connected Camberstack.
+CREATE TABLE IF NOT EXISTS feedback (
+  id       INTEGER PRIMARY KEY,
+  at       INTEGER NOT NULL,
+  email    TEXT NOT NULL,
+  user_id  TEXT,
+  kind     TEXT NOT NULL,     -- bug | idea | other
+  message  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS feedback_email_at ON feedback (email, at);
 `;
 
 export function openDb(dataDir: string): DB {
