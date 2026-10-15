@@ -1444,7 +1444,9 @@ describe("OAuth + MCP end to end", () => {
     // The link works once.
     expect((await fetch(link, { redirect: "manual" })).status).toBe(400);
 
+    db.prepare("UPDATE users SET last_seen_at = 1 WHERE id = ?").run(id);
     const html = await (await fetch(`${base}/account`, { headers: { cookie } })).text();
+    expect(db.prepare("SELECT last_seen_at FROM users WHERE id = ?").get(id)).toEqual({ last_seen_at: 1 });   // not "seen" by an admin's look
     expect(html).toContain("Logged in as owner@example.com");
     expect(html).toContain("as admin owner@example.com");
     expect(html).toContain('class="pill undone"');   // the user's own page, changes and all

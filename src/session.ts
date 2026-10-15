@@ -155,10 +155,11 @@ export class UserSession {
       ?? new AnalyticsClient(() => this.googleAccessToken(), link("analytics")), new DemoAnalytics());
   }
 
-  static load(deps: SessionDeps, userId: string): UserSession {
+  /** `seen: false` leaves last_seen_at alone: an admin viewing the user's /account through "Log in as user". */
+  static load(deps: SessionDeps, userId: string, o: { seen?: boolean } = {}): UserSession {
     const user = deps.db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
     if (!user) throw new NotConnectedError("Unknown user; connect Camberstack again.");
-    deps.db.prepare("UPDATE users SET last_seen_at = ? WHERE id = ?").run(now(), userId);
+    if (o.seen !== false) deps.db.prepare("UPDATE users SET last_seen_at = ? WHERE id = ?").run(now(), userId);
     return new UserSession(deps, user);
   }
 

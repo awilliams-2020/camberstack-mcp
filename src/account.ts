@@ -20,7 +20,7 @@ export interface AccountDeps {
   google: GoogleCreds;
   baseUrl: string;
   fetch?: typeof fetch;
-  session: (userId: string) => UserSession;
+  session: (userId: string, o?: { seen?: boolean }) => UserSession;
   billingLink: (kind: "upgrade" | "billing", userId: string) => string | null;
   /** The admin site's origin: where ending a "Log in as user" session returns to. */
   adminUrl?: string;
@@ -169,7 +169,8 @@ Your AI app can no longer use Camberstack until you connect again.</p>
 </div></div>`));
       return;
     }
-    const s = d.session(u.id);
+    // An admin looking at the page is not the user being active.
+    const s = d.session(u.id, { seen: !by });
     const plan = s.plan();
     const history = s.history(undefined, 500);
     const apps = d.db.prepare(`SELECT coalesce(json_extract(cl.info, '$.client_name'), 'AI app') name, max(c.at) last FROM tool_calls c
