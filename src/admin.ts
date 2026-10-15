@@ -181,7 +181,7 @@ const EXTERNAL: [string, string][] = [
   ["Claude directory", "https://claude.ai/directory/manage/camberstack"],  // submission + Observability; public listing: /directory/connectors/camberstack
   ["Stripe", "https://dashboard.stripe.com/subscriptions"],
   ["Glama", "https://glama.ai/mcp/servers/zwznco/camberstack-mcp"],
-  ["MCP registry", "https://registry.modelcontextprotocol.io/v0/servers?search=io.camberstack"],
+  ["MCP registry", "https://registry.modelcontextprotocol.io/?q=io.camberstack"],
   ["Matomo", "https://matomo.zwznco.com/index.php?module=CoreHome&action=index&idSite=7&period=day&date=today"],
   ["GitHub", "https://github.com/zwznco/camberstack-mcp"],
 ];
