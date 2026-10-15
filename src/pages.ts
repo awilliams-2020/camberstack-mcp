@@ -9,7 +9,9 @@ import { ACCOUNT_WINDOW_DAYS, PRO_PRICE_LABEL } from "./plans.js";
 import type { ToolDoc } from "./tools.js";
 
 const CONTACT = "adam@camberstack.io";
-const UPDATED = "2026-10-14";
+// Each policy keeps its own date: changing the terms mustn't re-date a privacy policy Google is reviewing.
+const PRIVACY_UPDATED = "2026-10-14";
+const TERMS_UPDATED = "2026-10-15";
 
 const CSS = `
 .linkish{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
@@ -772,7 +774,7 @@ export function privacyPage(baseUrl: string): string {
     description: "What Camberstack does with your Google account and Google Ads data.",
     body: `<div class="legal">
 <h1>Privacy policy</h1>
-<p class="muted">Last updated ${UPDATED}</p>
+<p class="muted">Last updated ${PRIVACY_UPDATED}</p>
 <p>Camberstack ("we") runs camberstack.io, a connector that lets an AI assistant you choose read and, with your approval,
 change your Google Ads account. This policy explains what we access, why, and what we keep.</p>
 
@@ -864,17 +866,19 @@ export function termsPage(baseUrl: string): string {
     description: "Terms for using Camberstack.",
     body: `<div class="legal">
 <h1>Terms of service</h1>
-<p class="muted">Last updated ${UPDATED}</p>
+<p class="muted">Last updated ${TERMS_UPDATED}</p>
 <h2>The service</h2>
 <p>Camberstack lets an AI assistant read your Google Ads account and, when you approve a specific proposal, change it.
+If you add them to your connection, it can also read your Search Console data (read-only) and your Google Analytics data,
+and change your Google Analytics setup when you approve a specific proposal.
 There is a free plan and a paid Pro plan, described at <a href="/#pricing">camberstack.io/#pricing</a>.</p>
 <h2>Pro subscription</h2>
 <p>Pro is billed monthly in advance through Stripe until you cancel. You can cancel any time from the billing link the <code>billing</code> tool gives you; Pro continues until the end of the period you paid for, and we don't refund partial months. If we change the price we will email you at least 30 days before it applies to you.</p>
 <h2>You stay in control, and responsible</h2>
 <p>Recommendations are generated from your account data and may be wrong. You decide what to approve, and you are responsible
-for changes you approve and for your Google Ads spend. Review proposals before approving them.</p>
+for changes you approve, for your Google Ads spend, and for the tracking and consent on any website you measure with Google Analytics. Review proposals before approving them.</p>
 <h2>Acceptable use</h2>
-<p>Use Camberstack only on Google Ads accounts you are authorized to manage, and in line with Google's policies. Don't attempt to access other users' data or overload the service.</p>
+<p>Use Camberstack only on Google Ads accounts, Search Console sites and Google Analytics properties you are authorized to manage, and in line with Google's policies. Don't attempt to access other users' data or overload the service.</p>
 <h2>No warranty</h2>
 <p>The service is provided "as is", without warranties of any kind, including fitness for a particular purpose or uninterrupted availability.</p>
 <h2>Limitation of liability</h2>
