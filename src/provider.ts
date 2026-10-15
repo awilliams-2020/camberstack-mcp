@@ -76,7 +76,9 @@ export class CamberstackProvider implements OAuthServerProvider {
 
   constructor(
     private db: DB,
-    private opts: { baseUrl: string; google: GoogleCreds; encryptionKey: Buffer; fetch?: typeof fetch; allowedEmails?: Set<string> },
+    private opts: { baseUrl: string; google: GoogleCreds; encryptionKey: Buffer; fetch?: typeof fetch; allowedEmails?: Set<string>;
+      /** Asked at sign-in on top of Ads + Search Console (server.ts: Google Analytics when GA4_PUBLIC). */
+      extraGoogleScopes?: readonly string[] },
   ) {
     this.clientsStore = new ClientsStore(db);
   }
@@ -149,7 +151,7 @@ export class CamberstackProvider implements OAuthServerProvider {
       return back.toString();
     }
     this.db.prepare("UPDATE pending_auth SET params = ? WHERE id = ?").run(JSON.stringify({ ...p, approved: true }), row.id);
-    return googleAuthUrl(this.opts.google, this.googleRedirectUri, row.id);
+    return googleAuthUrl(this.opts.google, this.googleRedirectUri, row.id, this.opts.extraGoogleScopes);
   }
 
   /**

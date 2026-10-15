@@ -13,6 +13,7 @@ import { deriveKey } from "./crypto.js";
 import { CamberstackProvider, MCP_SCOPE, consentCookie } from "./provider.js";
 import { UserSession, clearGoogleCache, type SessionDeps } from "./session.js";
 import { Grants } from "./grant.js";
+import { GRANTS } from "./google.js";
 import { Relay } from "./relay.js";
 import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
 import { Analytics, BEACON_JS, gtagJs, parseBeacon } from "./analytics.js";
@@ -75,6 +76,8 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
 
   const provider = new CamberstackProvider(db, {
     baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey, fetch: overrides.fetch, allowedEmails: cfg.allowedEmails,
+    // Until Google verifies the Analytics scopes, prod asks for them only through the /connect/analytics link (GA4_PUBLIC off).
+    extraGoogleScopes: cfg.ga4Public ? GRANTS.analytics.scopes : [],
   });
   const grants = new Grants({ db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
     signingKey: deriveKey(cfg.encryptionKey, "grant-links"), forgetToken: clearGoogleCache, fetch: overrides.fetch });

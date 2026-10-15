@@ -99,3 +99,14 @@ describe("missingSelectFields", () => {
     expect(missingSelectFields("not json")).toEqual([]);
   });
 });
+
+describe("sign-in scopes", () => {
+  const creds = { clientId: "c", clientSecret: "s" };
+  const scopes = (u: string) => new URL(u).searchParams.get("scope")!.split(" ");
+  it("asks for Ads and Search Console, and Google Analytics only when passed (GA4_PUBLIC)", async () => {
+    const { googleAuthUrl, GRANTS, ADS_SCOPE, ANALYTICS_EDIT_SCOPE } = await import("./google.js");
+    expect(scopes(googleAuthUrl(creds, "https://x/cb", "st"))).toContain(ADS_SCOPE);
+    expect(scopes(googleAuthUrl(creds, "https://x/cb", "st"))).not.toContain(ANALYTICS_EDIT_SCOPE);
+    expect(scopes(googleAuthUrl(creds, "https://x/cb", "st", GRANTS.analytics.scopes))).toEqual(expect.arrayContaining([ADS_SCOPE, ...GRANTS.analytics.scopes]));
+  });
+});
