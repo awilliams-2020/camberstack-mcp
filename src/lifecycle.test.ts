@@ -48,20 +48,23 @@ describe("lifecycle emails", () => {
     expect(await lc.run()).toBe(0);  // never twice
   });
 
-  it("sends limit_reached once, 3+ days after the plan gate refused a second account", async () => {
+  it("sends limit_reached once, the morning after the plan gate refused a second account, with when the next switch opens", async () => {
     const { db, lc, sent, user, call } = setup();
-    const refused = (userId: string, daysAgo: number, error = "Plan limit: Camberstack has been used on 1 Google Ads account") =>
+    const refused = (userId: string, daysAgo: number, error = "Plan limit: Camberstack has been used on 2 Google Ads accounts; "
+      + "the Free plan covers 1 at a time (active: 1112223333), with one switch per 30 days, already used; the next opens 2026-11-13.") =>
       db.prepare("INSERT INTO tool_calls (at, user_id, tool, ok, error, ms, bytes) VALUES (?, ?, 'account_overview', 0, ?, 10, 10)")
         .run(now() - daysAgo * DAY, userId, error);
-    user("capped", "capped@example.com", 10); call("capped", "propose_changes"); refused("capped", 4);
-    user("recent", "recent@example.com", 10); call("recent", "propose_changes"); refused("recent", 1);  // too recent
-    user("other", "other@example.com", 10); call("other", "propose_changes"); refused("other", 4, "Google said no");  // not the gate
-    user("pro", "pro@example.com", 10, "pro"); call("pro", "propose_changes"); refused("pro", 4);
+    user("capped", "capped@example.com", 10); call("capped", "propose_changes"); refused("capped", 0.3);
+    user("recent", "recent@example.com", 10); call("recent", "propose_changes"); refused("recent", 0.2);  // under 6 hours ago
+    user("other", "other@example.com", 10); call("other", "propose_changes"); refused("other", 0.3, "Google said no");  // not the gate
+    user("pro", "pro@example.com", 10, "pro"); call("pro", "propose_changes"); refused("pro", 0.3);
     expect(await lc.run()).toBe(1);
     expect(sent[0].to).toEqual(["capped@example.com"]);
     expect(sent[0].subject).toBe("Using Camberstack on more than one Google Ads account");
     expect(sent[0].text).toContain("https://camberstack.io/upgrade?t=capped.sig");
     expect(sent[0].text).toContain("up to 10 accounts");
+    expect(sent[0].text).toContain("yours was already used; the next one opens on November 13.");
+    expect(sent[0].html).toContain("the next one opens on November 13");
     expect(await lc.run()).toBe(0);
   });
 

@@ -1,7 +1,8 @@
 /**
  * Lifecycle emails, each sent at most once per user, through Resend:
  *   first_steps    connected 2–14 days ago and never asked anything real → the first question to ask, and the demo
- *   limit_reached  a tool refused a second Google Ads account (the Free plan's limit), still free 3+ days later → one note: what Pro covers, the upgrade link
+ *   limit_reached  a tool refused a second Google Ads account (the Free plan's limit), still free the next morning (6+ hours later) → one note:
+ *                  when their next switch opens, what Pro covers, the upgrade link
  *   check_in       first applied a change to a real account 2–14 days ago → a personal note from Adam asking how it went (replies go to him)
  *   welcome        signed up (still Free) → the first question to ask, the demo, the plans
  *   pro_welcome    on Pro with a Stripe subscription → what Pro adds, where billing lives
@@ -79,7 +80,7 @@ export class Lifecycle {
   }
 
   /** Who is due each email right now. */
-  private due(): { kind: Kind; id: string; email: string; days: number }[] {
+  private due(): { kind: Kind; id: string; email: string; days: number; opens?: string }[] {
     const t = now();
     const eligible = `u.enc_refresh IS NOT NULL AND u.email_opt_out = 0 AND u.plan = 'free'`;
     const notSent = (k: string) => `NOT EXISTS (SELECT 1 FROM email_log e WHERE e.user_id = u.id AND e.kind = '${k}')`;
@@ -87,12 +88,15 @@ export class Lifecycle {
       AND u.created_at BETWEEN ? AND ? AND ${notSent("first_steps")}
       AND NOT EXISTS (SELECT 1 FROM tool_calls c WHERE c.user_id = u.id AND c.ok = 1 AND c.tool IN ${USED_TOOLS})`)
       .all(t - 15 * DAY, t - 2 * DAY) as { id: string; email: string; time_zone: string | null; created_at: number }[];
-    // Refused a second account by the plan gate (session.ts checkAccount), the last refusal 3–30 days ago.
-    const limit = this.d.db.prepare(`SELECT u.id, u.email, u.time_zone, max(c.at) last
+    // Refused a second account by the plan gate (session.ts checkAccount), the last refusal 6 hours to 30 days ago.
+    // Since 0.12.0 a refusal only follows a switch the user confirmed, so they're working on more than one account
+    // now: the next morning, not days later. The 6 hours keep it from landing minutes after a refusal inside the
+    // send window. `error` is the latest refusal's (SQLite takes bare columns from the max() row).
+    const limit = this.d.db.prepare(`SELECT u.id, u.email, u.time_zone, max(c.at) last, c.error
       FROM users u JOIN tool_calls c ON c.user_id = u.id AND c.ok = 0 AND c.error LIKE ?
       WHERE ${eligible} AND ${notSent("limit_reached")}
       GROUP BY u.id HAVING last BETWEEN ? AND ?`)
-      .all(`${PLAN_LIMIT_PREFIX}%`, t - 31 * DAY, t - 3 * DAY) as { id: string; email: string; time_zone: string | null; last: number }[];
+      .all(`${PLAN_LIMIT_PREFIX}%`, t - 31 * DAY, t - 6 * 3600) as { id: string; email: string; time_zone: string | null; last: number; error: string }[];
     // First applied change to a real account (not the demo, not an undo) 2–14 days ago; any plan, connected or not.
     const checkIn = this.d.db.prepare(`SELECT u.id, u.email, u.time_zone, min(p.applied_at) first FROM users u
       JOIN proposals p ON p.user_id = u.id AND p.status = 'applied' AND p.undo_of IS NULL AND p.customer_id <> ?
@@ -105,7 +109,9 @@ export class Lifecycle {
     const ok = (u: { email: string; time_zone: string | null }) => !this.d.internalEmails.has(u.email.toLowerCase()) && morning(u);
     return [
       ...first.filter(ok).map((u) => ({ kind: "first_steps" as const, id: u.id, email: u.email, days: Math.floor((t - u.created_at) / DAY) })),
-      ...limit.filter(ok).map((u) => ({ kind: "limit_reached" as const, id: u.id, email: u.email, days: 0 })),
+      // Every refusal's text names when the next switch opens (session.ts refuse: "the next opens YYYY-MM-DD").
+      ...limit.filter(ok).map((u) => ({ kind: "limit_reached" as const, id: u.id, email: u.email, days: 0,
+        opens: /the next opens (\d{4}-\d{2}-\d{2})/.exec(u.error)?.[1] })),
       ...checkIn.filter(ok).map((u) => ({ kind: "check_in" as const, id: u.id, email: u.email, days: 0 })),
     ];
   }
@@ -114,7 +120,7 @@ export class Lifecycle {
   async run(): Promise<number> {
     if (!this.d.mail) return 0;
     return this.deliver(this.due(), (u) => u.kind === "first_steps" ? firstSteps(u.days)
-      : u.kind === "limit_reached" ? limitReached(this.d.baseUrl, this.d.upgradeLink(u.id)) : checkInEmail());
+      : u.kind === "limit_reached" ? limitReached(this.d.baseUrl, this.d.upgradeLink(u.id), u.opens) : checkInEmail());
   }
 
   /**
@@ -182,7 +188,7 @@ export class Lifecycle {
   /** Operator check: send one sample of each email to `to`, with placeholder links. */
   async preview(to: string): Promise<void> {
     await this.send(to, firstSteps(3), "preview");
-    await this.send(to, limitReached(this.d.baseUrl, `${this.d.baseUrl}/account?upgrade=1`), "preview");
+    await this.send(to, limitReached(this.d.baseUrl, `${this.d.baseUrl}/account?upgrade=1`, "2026-11-13"), "preview");
     await this.send(to, checkInEmail(), "preview");
     await this.send(to, welcome(this.d.baseUrl), "preview");
     await this.send(to, proWelcome(this.d.baseUrl), "preview");
@@ -237,23 +243,30 @@ Camberstack`,
   };
 }
 
-function limitReached(base: string, upgrade: string | null) {
+function limitReached(base: string, upgrade: string | null, opens?: string) {
+  // "November 13": the date the refusal named, in words. UTC so it's the same day the tool said.
+  const when = opens && new Date(`${opens}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+  const stopped = `Camberstack stopped when you tried it on another Google Ads account. The Free plan covers one account at a time, `
+    + `with one switch every ${ACCOUNT_WINDOW_DAYS} days, and yours was already used${when ? `; the next one opens on ${when}` : ""}.`;
+  const pro = `If you're working on more than one account, Camberstack Pro covers up to 10 accounts, for ${PRO_PRICE_LABEL}, cancel any time.`;
+  const free = "On Free, every tool and unlimited changes keep working on your active account, and undo and history always work";
   return {
     subject: "Using Camberstack on more than one Google Ads account",
     text: `Hi,
 
-Camberstack stopped when you tried it on another Google Ads account. The Free plan covers one account at a time, with one
-switch every ${ACCOUNT_WINDOW_DAYS} days, and every tool and unlimited changes. Undo and history always work: ${base}/account
+${stopped}
 
-Camberstack Pro covers up to 10 accounts, for ${PRO_PRICE_LABEL}, cancel any time${upgrade ? `:\n${upgrade}\n(personal link, valid for 7 days)` : ` from ${base}/account`}.
+${pro}${upgrade ? `\n${upgrade}\n(personal link, valid for 7 days)` : ` Upgrade from ${base}/account`}
+
+${free}: ${base}/account
 
 This is the only email about it. Questions? Just reply.
 
 Adam
 Camberstack`,
-    html: wrap(p("Hi,") + p(`Camberstack stopped when you tried it on another Google Ads account. The Free plan covers one account at a time, with one switch every ${ACCOUNT_WINDOW_DAYS} days, and every tool and unlimited changes. Undo and history always work, on <a href="${base}/account">your account page</a>.`)
-      + p(`Camberstack Pro covers up to 10 accounts, for ${PRO_PRICE_LABEL}, cancel any time.`)
+    html: wrap(p("Hi,") + p(stopped) + p(pro)
       + `<p style="margin:0 0 18px"><a href="${upgrade ?? `${base}/account?upgrade=1`}" style="display:inline-block;background:#1f5f4a;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:600">Upgrade to Pro</a></p>`
+      + p(`${free}, on <a href="${base}/account">your account page</a>.`)
       + p("This is the only email about it. Questions? Just reply.") + p("Adam<br>Camberstack")),
   };
 }
