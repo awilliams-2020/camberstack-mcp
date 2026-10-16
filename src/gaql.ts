@@ -122,7 +122,14 @@ export function checkGaql(query: string, cat: Catalog): string[] {
       if (clause === "SELECT" && f.selectable === false) issues.push(`${name} can't be selected.`);
       if (clause === "WHERE" && f.filterable === false) issues.push(`${name} can't be used in WHERE.`);
       if (clause === "ORDER BY" && f.sortable === false) issues.push(`${name} can't be used in ORDER BY.`);
-      if (!usable(f)) issues.push(`${name} can't be used FROM ${p.from}${whereFrom(f, cat, p.from)}.`);
+      if (!usable(f)) {
+        // A segment the FROM resource carries as its own field (segments.search_term FROM campaign_search_term_view): name
+        // that field first. Pointing at the other resources alone sent a user to the insight views instead (2026-10-16).
+        const own = f.category === "SEGMENT" ? cat.get(`${p.from}.${name.slice("segments.".length)}`) : undefined;
+        issues.push(own && usable(own) && own.selectable !== false
+          ? `${name} can't be used FROM ${p.from}: select ${own.name} instead, its own field.`
+          : `${name} can't be used FROM ${p.from}${whereFrom(f, cat, p.from)}.`);
+      }
     }
   }
   return [...issues, ...enumIssues(query, cat)];

@@ -52,6 +52,10 @@ describe("checkGaql against Google's field catalog", () => {
     const [i] = checkGaql("SELECT ad_group.id, campaign_budget.amount_micros FROM ad_group", cat);
     expect(i).toMatch(/campaign_budget\.amount_micros can't be used FROM ad_group; query it FROM campaign_budget or FROM campaign/);
   });
+  it("points a segment at the FROM resource's own field of that name (2026-10-16)", () => {
+    expect(checkGaql("SELECT campaign.id, segments.search_term, metrics.clicks FROM campaign_search_term_view WHERE segments.date DURING LAST_30_DAYS", cat))
+      .toEqual(["segments.search_term can't be used FROM campaign_search_term_view: select campaign_search_term_view.search_term instead, its own field."]);
+  });
   it("catches a metric the resource doesn't have", () => {
     expect(checkGaql("SELECT ad_group.id, metrics.search_budget_lost_impression_share FROM ad_group", cat)[0])
       .toContain("metrics.search_budget_lost_impression_share can't be used FROM ad_group; query it FROM campaign");
