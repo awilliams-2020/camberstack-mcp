@@ -6,9 +6,6 @@
  * is, so a reconnect finds the same account and change log). Nothing else from the Google account is touched.
  */
 
-/** A unix time in the format Google Ads wants for conversion times: "yyyy-MM-dd HH:mm:ss+00:00". */
-export const adsDateTime = (at: number) => new Date(at * 1000).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "+00:00");
-
 export const ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
 export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 /** Google Analytics (GA4): reports, and setup changes (properties, key events, Google Ads links). Not in the main consent: asked
@@ -365,31 +362,6 @@ export class AdsClient {
     if (!cross) return json.results ? json : { results: [] };
     return { results: (json.mutateOperationResponses ?? []).map((r: Record<string, { resourceName?: string }>) =>
       ({ resourceName: Object.values(r)[0]?.resourceName })) };
-  }
-
-  /**
-   * Upload click conversions (partialFailure, so one stale click id doesn't sink the rest). Returns one
-   * error string per conversion, null where it was accepted.
-   */
-  async uploadClickConversions(
-    customerId: string, conversions: object[], loginCustomerId?: string | null,
-  ): Promise<(string | null)[]> {
-    const res = await this.f(`${ADS_API}/customers/${customerId}:uploadClickConversions`, {
-      method: "POST",
-      headers: await this.headers(loginCustomerId),
-      body: JSON.stringify({ conversions, partialFailure: true }),
-    });
-    const body = await this.body(res);
-    const json = body ? JSON.parse(body) : {};
-    const errors = conversions.map((): string | null => null);
-    for (const d of json.partialFailureError?.details ?? []) {
-      for (const e of d.errors ?? []) {
-        const i = e.location?.fieldPathElements?.find((x: { fieldName?: string }) => x.fieldName === "conversions")?.index ?? 0;
-        errors[i] = String(e.message ?? "rejected").slice(0, 300);
-      }
-    }
-    if (json.partialFailureError && !errors.some(Boolean)) errors.fill(String(json.partialFailureError.message ?? "rejected").slice(0, 300));
-    return errors;
   }
 }
 

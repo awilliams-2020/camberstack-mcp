@@ -128,13 +128,8 @@ class FakeAds {
   portfolio: { id: string; cpa: string } | undefined;
   /** Campaigns a strategy-membership query returns; default: Search and Brand. */
   strategyCampaigns: { id: string; name: string }[] | undefined;
-  uploads: { cid: string; conversions: any[] }[] = [];
   agBid = "1000000";
   kwBid: string | undefined;
-  async uploadClickConversions(cid: string, conversions: any[]) {
-    this.uploads.push({ cid, conversions });
-    return conversions.map((c) => (c.gclid === "STALE_CLICK_ID_0001" ? "The click is too old" : null));
-  }
   removed: string[] = [];
   /** A test can make Google refuse operations mentioning `text`: at validation too, or only on the real write. */
   failOn: { text: string; writesOnly?: boolean } | undefined;

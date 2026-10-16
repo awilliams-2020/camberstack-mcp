@@ -132,21 +132,6 @@ CREATE TABLE IF NOT EXISTS relay_keys (
   last_used_at       INTEGER,
   revoked_at         INTEGER
 );
-CREATE TABLE IF NOT EXISTS relay_conversions (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  key_id         TEXT NOT NULL REFERENCES relay_keys(id) ON DELETE CASCADE,
-  action_id      TEXT NOT NULL,
-  kind           TEXT NOT NULL CHECK (kind IN ('gclid','gbraid','wbraid')),
-  click_id       TEXT NOT NULL,
-  at             INTEGER NOT NULL,
-  value          REAL,
-  currency       TEXT,
-  order_id       TEXT NOT NULL DEFAULT '',   -- Google dedupes on it; '' when the app sends none
-  uploaded_at    INTEGER,
-  error          TEXT,
-  attempts       INTEGER NOT NULL DEFAULT 0,
-  UNIQUE (key_id, action_id, click_id, order_id)
-);
 
 -- Lifecycle emails (lifecycle.ts): one row per user per kind, so each is sent at most once.
 CREATE TABLE IF NOT EXISTS email_log (
@@ -222,12 +207,9 @@ export function openDb(dataDir: string): DB {
   // Relay keys got scopes in 0.13.0: every key before then reports conversions only.
   const rk = new Set((db.prepare("PRAGMA table_info(relay_keys)").all() as { name: string }[]).map((c) => c.name));
   if (!rk.has("scopes")) db.exec("ALTER TABLE relay_keys ADD COLUMN scopes TEXT NOT NULL DEFAULT 'conversions'");
-  // relay_conversions shipped in 0.6.0 without order_id (and its UNIQUE). Still empty then, so rebuild.
-  const rc = new Set((db.prepare("PRAGMA table_info(relay_conversions)").all() as { name: string }[]).map((c) => c.name));
-  if (!rc.has("order_id")) {
-    if ((db.prepare("SELECT count(*) n FROM relay_conversions").get() as { n: number }).n) db.exec("ALTER TABLE relay_conversions ADD COLUMN order_id TEXT NOT NULL DEFAULT ''");
-    else { db.exec("DROP TABLE relay_conversions"); db.exec(SCHEMA); }
-  }
+  // Conversions moved to ~/conversions-relay (2026-10-16): their queue (never used, empty) and revoked keys go.
+  db.exec("DROP TABLE IF EXISTS relay_conversions");
+  db.prepare("DELETE FROM relay_keys WHERE revoked_at IS NOT NULL").run();
   return db;
 }
 
