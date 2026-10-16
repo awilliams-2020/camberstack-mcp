@@ -54,6 +54,10 @@ const tag = (v: string | null) => (v && TAG.test(v) ? v : "");
  * Campaign from the landing URL's query string. Only the name and keyword are kept; the query itself
  * (click ids included) never reaches Matomo. Google Ads auto-tagging adds no utm tags, and this
  * Matomo does not read gclid, so without this an ad click is filed as organic Google search.
+ *
+ * TODO: drop the mapping. Matomo 5 already reads utm_campaign/utm_term (and mtm_*) off the tracking request, so
+ * forward the landing's own campaign params as-is (allowlisted, still never click ids) instead of renaming them
+ * to mtm_campaign/mtm_kwd here. Only the gclid → "google-ads-<id>" fallback has no utm param to pass through.
  */
 function campaignOf(query: string): { campaign: string; keyword: string } {
   const q = new URLSearchParams(query.slice(0, 2000));
