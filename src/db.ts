@@ -182,6 +182,9 @@ export function openDb(dataDir: string): DB {
   if (!cols.has("google_scopes")) db.exec("ALTER TABLE users ADD COLUMN google_scopes TEXT");
   // Operator courtesy reset of plan accounts (session.ts usage): calls before it don't count. NULL = never reset.
   if (!cols.has("plan_reset_at")) db.exec("ALTER TABLE users ADD COLUMN plan_reset_at INTEGER");
+  // First-touch source of a new user (firsttouch.ts, 2026-10-16): utm_source/campaign/content and Reddit's rdt_cid.
+  // NULL = untagged landing, or signed up before it was recorded.
+  for (const c of ["src_source", "src_campaign", "src_content", "src_click"]) if (!cols.has(c)) db.exec(`ALTER TABLE users ADD COLUMN ${c} TEXT`);
   // run_gaql's query shape (2026-10-15): which fields custom queries ask for, never the values in them.
   const tc = new Set((db.prepare("PRAGMA table_info(tool_calls)").all() as { name: string }[]).map((c) => c.name));
   if (!tc.has("query_shape")) db.exec("ALTER TABLE tool_calls ADD COLUMN query_shape TEXT");
