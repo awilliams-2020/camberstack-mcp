@@ -7,6 +7,14 @@ export interface Release { version: string; date: string; summary: string; items
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.12.0", date: "2026-10-16",
+    summary: "A warning before switching accounts on the Free plan, and approved proposals stay valid until the account changes.",
+    items: [
+      "**Switching accounts asks first.** The Free plan covers one Google Ads account at a time, with one switch every 30 days. Your AI now tells you which account the switch would lock, and until when, before anything is spent, and you can upgrade to keep both instead.",
+      "**Proposals don't expire after 24 hours.** Approving an older proposal now checks whether the account changed since; if nothing did, it applies.",
+    ],
+  },
+  {
     version: "0.11.0", date: "2026-10-14",
     summary: "Shared bid strategies, a field lookup for custom queries, and clearer query errors.",
     items: [

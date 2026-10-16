@@ -10,7 +10,7 @@ import {
   AdsApiError, AdsClient, NotGrantedError, SearchConsoleClient, micros, refreshGoogleToken, revokeGoogleToken,
   type GoogleCreds, type GrantKind, type SearchAnalyticsRequest, type SearchAnalyticsRow, type UrlInspection,
 } from "./google.js";
-import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError, accountsLabel } from "./plans.js";
+import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError, SWITCH_NOTICE_PREFIX, accountsLabel } from "./plans.js";
 import { AnalyticsClient, DemoAnalytics, routedAnalytics, type Analytics } from "./ga4.js";
 import { GA_TARGET, GaChangeSchema, gaInverseAfterApply, gaNoteAfterApply, resolveGaChange, writeGa, type GaChange, type GaOp, type GaResolved } from "./ga4-changes.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
@@ -197,7 +197,8 @@ export class UserSession {
   /**
    * Google Ads accounts this user has run tools on in the window: what a plan is sized by. Accounts used,
    * not accounts reachable, so a manager login that can see 50 clients isn't charged for 50. The demo never
-   * counts, nor does Google Analytics (change_history for "ga4"), nor failed calls (a call the gate refused is logged as failed).
+   * counts, nor does Google Analytics (change_history for "ga4"), nor failed calls (a call the gate refused is logged as failed),
+   * nor calls before the user's plan_reset_at (a reset by hand: UPDATE users SET plan_reset_at = unixepoch()).
    */
   accountsInUse(): string[] {
     return this.usage().map((u) => u.c);
@@ -208,7 +209,7 @@ export class UserSession {
     return this.deps.db.prepare(`SELECT customer_id c, max(at) last FROM tool_calls
         WHERE user_id = ? AND ok = 1 AND customer_id IS NOT NULL AND customer_id NOT IN (?, ?) AND at >= ?
         GROUP BY customer_id ORDER BY last DESC, c`)
-      .all(this.user.id, DEMO_CID, GA_TARGET, now() - ACCOUNT_WINDOW_DAYS * 86400) as { c: string; last: number }[];
+      .all(this.user.id, DEMO_CID, GA_TARGET, Math.max(now() - ACCOUNT_WINDOW_DAYS * 86400, this.user.plan_reset_at ?? 0)) as { c: string; last: number }[];
   }
 
   /**
@@ -245,19 +246,35 @@ export class UserSession {
    *
    * One user's checks run one at a time, and a passed account counts as in use until its call ends (call the
    * returned release): AI clients call tools in parallel, which otherwise let several new accounts through at once.
+   *
+   * Spending the switch takes `confirmSwitch`: without it the call stops with a notice naming what will lock and
+   * until when. Users found out only on the way back, after days of work on both (2026-10-16).
    */
-  checkAccount(customerId: string): Promise<() => void> {
+  checkAccount(customerId: string, confirmSwitch = false): Promise<() => void> {
     const prev = gateQueue.get(this.user.id) ?? Promise.resolve();
-    const run = prev.then(() => this.admit(bareCid(customerId)));
+    const run = prev.then(() => this.admit(bareCid(customerId), confirmSwitch));
     const tail = run.then(() => {}, () => {});
     gateQueue.set(this.user.id, tail);
     void tail.then(() => { if (gateQueue.get(this.user.id) === tail) gateQueue.delete(this.user.id); });
     return run;
   }
 
-  private async admit(cid: string): Promise<() => void> {
+  private async admit(cid: string, confirmSwitch: boolean): Promise<() => void> {
     if (isDemo(cid)) return () => {};
     let st = this.planState(new Set());
+    // A new account on a full plan is the switch: it passes only once the user has said yes to spending it.
+    const isSwitch = () => st.full && !st.active.includes(cid) && st.allows(cid);
+    if (isSwitch() && !confirmSwitch) {
+      const managers = new Set((await this.accounts().catch(() => [] as Account[])).filter((a) => a.manager).map((a) => a.customerId));
+      if (!managers.has(cid)) {
+        st = this.planState(managers);
+        if (isSwitch() && !this.isPro && await this.deps.refreshPlan?.(this.user.id)) {
+          this.user.plan = "pro";
+          st = this.planState(managers);
+        }
+        if (isSwitch()) this.noticeSwitch(cid, st);
+      }
+    }
     if (!st.allows(cid)) {
       const managers = new Set((await this.accounts().catch(() => [] as Account[])).filter((a) => a.manager).map((a) => a.customerId));
       if (!managers.has(cid)) {
@@ -280,6 +297,23 @@ export class UserSession {
     };
   }
 
+  /** Stop before the switch is spent: what it locks, until when, and how to go ahead. */
+  private noticeSwitch(cid: string, st: ReturnType<UserSession["planState"]>): never {
+    const locks = st.active.at(-1)!;
+    // Once spent, the switch comes back when the account it locks ages out of the window.
+    const last = this.usage().find((u) => u.c === locks)?.last ?? now();
+    const reopens = new Date((last + ACCOUNT_WINDOW_DAYS * 86400) * 1000).toISOString().slice(0, 10);
+    const url = this.isPro ? null : this.deps.billingLink?.("upgrade", this.user.id) ?? null;
+    throw new PlanLimitError(`${SWITCH_NOTICE_PREFIX} using ${cid} spends this plan's one switch per ${ACCOUNT_WINDOW_DAYS} days. `
+      + `${locks} would lock until ${reopens}, including switching back to it. Nothing has been used yet. `
+      + `Ask the user; if they want to go ahead, call again with confirm_switch: true.`,
+      { error: "switch_confirmation_needed", plan: this.isPro ? "pro" : "free", switch_to: cid, locks_account: locks,
+        locked_until: reopens, accounts_included: this.accountLimit, window_days: ACCOUNT_WINDOW_DAYS,
+        to_go_ahead: "call again with confirm_switch: true, once the user agrees",
+        ...(this.isPro ? {} : { keep_both: { plan: "pro", price: PRO_PRICE_LABEL, accounts_included: this.deps.proAccounts,
+          upgrade_url: url, pricing_page: url ? null : `${this.deps.baseUrl}/#pricing` } }) });
+  }
+
   private refuse(cid: string, st: ReturnType<UserSession["planState"]>): never {
     const used = `${PLAN_LIMIT_PREFIX} Camberstack has been used on ${accountsLabel(st.used.length)} in the last ${ACCOUNT_WINDOW_DAYS} days`;
     const rule = `covers ${this.accountLimit} at a time (active: ${st.active.join(", ")}), with one switch per ${ACCOUNT_WINDOW_DAYS} days, `
@@ -293,7 +327,10 @@ export class UserSession {
         { error: "plan_limit", ...common, contact: "adam@camberstack.io" });
     }
     const url = this.deps.billingLink?.("upgrade", this.user.id) ?? null;
-    throw new PlanLimitError(`${used} (${st.used.join(", ")}); the Free plan ${rule}`,
+    // Lead with what gets them working again: someone refused here is working on more than one account.
+    const wait = st.used.includes(cid) ? `${cid} opens again on ${st.switchOpens}` : `the next switch opens on ${st.switchOpens}`;
+    throw new PlanLimitError(`${used} (${st.used.join(", ")}). Pro (${PRO_PRICE_LABEL}) covers up to ${this.deps.proAccounts}, `
+      + `so ${cid} works right away. On Free, ${wait}: the Free plan ${rule}`,
       { error: "plan_limit", ...common,
         upgrade: { plan: "pro", price: PRO_PRICE_LABEL, accounts_included: this.deps.proAccounts, cancel: "any time",
           upgrade_url: url, upgrade_url_expires: url ? "7 days; personal to this user" : null,

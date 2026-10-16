@@ -953,7 +953,7 @@ describe("OAuth + MCP end to end", () => {
     ads.search = async (cid: string, q: string) => { await new Promise((r) => setTimeout(r, 50)); return realSearch(cid, q); };
     try {
       // Free takes one account plus one switch, so of three new accounts at once exactly one is refused.
-      const all = await Promise.all(["111-222-3333", "999-888-7777", "888-777-6666"].map((c) => call(token, "account_overview", { customer_id: c, days: 30 })));
+      const all = await Promise.all(["111-222-3333", "999-888-7777", "888-777-6666"].map((c) => call(token, "account_overview", { customer_id: c, days: 30, confirm_switch: true })));
       expect(all.filter((r) => r.text.includes("Plan limit:"))).toHaveLength(1);
     } finally {
       ads.search = realSearch;
@@ -965,9 +965,22 @@ describe("OAuth + MCP end to end", () => {
 
   it("lets Free switch accounts once a month, and keeps the most recent after a downgrade", async () => {
     const uid = (db.prepare("SELECT id FROM users WHERE email = 'owner@example.com'").get() as { id: string }).id;
-    // One account in use: a new one is the switch, so it gets past the gate (this login just can't read it).
-    const sw = await call(token, "account_overview", { customer_id: "222-333-4444", days: 30 });
+    // One account in use: a new one is the switch. The first call only says what spending it would lock, and uses nothing.
+    const ask = await call(token, "account_overview", { customer_id: "222-333-4444", days: 30 });
+    expect(ask.isError).toBe(true);
+    expect(ask.text).toContain("Account switch: using 2223334444 spends this plan's one switch per 30 days. 1112223333 would lock until ");
+    expect(ask.text).not.toContain("Plan limit:");  // a notice, not a refusal: no limit_reached email
+    const notice = JSON.parse(ask.text.slice(ask.text.indexOf("\n") + 1));
+    expect(notice).toMatchObject({ error: "switch_confirmation_needed", switch_to: "2223334444", locks_account: "1112223333",
+      keep_both: { plan: "pro", accounts_included: 10 } });
+    expect(notice.keep_both.upgrade_url).toContain("/upgrade?t=");
+    expect((db.prepare("SELECT count(*) n FROM tool_calls WHERE user_id = ? AND customer_id = '2223334444' AND ok = 1").get(uid) as { n: number }).n).toBe(0);
+    // The account in use, the demo and the switch once confirmed all go through (this login just can't read 2223334444).
+    expect((await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 })).text).not.toContain("Account switch:");
+    expect((await call(token, "account_overview", { customer_id: "0000000001", days: 30 })).isError).toBe(false);
+    const sw = await call(token, "account_overview", { customer_id: "222-333-4444", days: 30, confirm_switch: true });
     expect(sw.text).not.toContain("Plan limit:");
+    expect(sw.text).not.toContain("Account switch:");
 
     // As if they'd been on Pro: three accounts used, 2223334444 most recently. Free covers one, the switch is spent.
     const saved = db.prepare("SELECT * FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL").all(uid);
@@ -978,8 +991,10 @@ describe("OAuth + MCP end to end", () => {
     use.run(t - 3 * 86400, uid, "3334445555");
     use.run(t - 86400, uid, "2223334444");
     try {
-      const blocked = await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 });
+      const blocked = await call(token, "account_overview", { customer_id: "111-222-3333", days: 30, confirm_switch: true });
       expect(blocked.text).toContain("Plan limit:");
+      // Switching back to an account used before: lead with Pro, then when it opens again.
+      expect(blocked.text).toContain("Pro ($15/month) covers up to 10, so 1112223333 works right away. On Free, 1112223333 opens again on ");
       const limit = JSON.parse(blocked.text.slice(blocked.text.indexOf("\n") + 1));
       // The switch comes back when the second most recent account ages out of the window.
       const opens = new Date((t - 3 * 86400 + 30 * 86400) * 1000).toISOString().slice(0, 10);
@@ -990,9 +1005,18 @@ describe("OAuth + MCP end to end", () => {
       expect(list.accounts.find((a: any) => a.customerId === "1112223333").plan_status).toBe("locked");
       expect(list.plan).toMatchObject({ plan: "free", accounts_included: 1, active_accounts: ["2223334444"] });
       expect(list.plan.switching).toContain(opens);
+
+      // A reset by hand: usage before plan_reset_at no longer counts, so the locked account is the only one in use.
+      db.prepare("UPDATE users SET plan_reset_at = ? WHERE id = ?").run(t, uid);
+      const back = await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 });
+      expect(back.text).not.toContain("Plan limit:");
+      expect(back.text).not.toContain("Account switch:");
+      expect((await call(token, "account_overview", { customer_id: "222-333-4444", days: 30 })).text).toContain("Account switch:");
     } finally {
+      db.prepare("UPDATE users SET plan_reset_at = NULL WHERE id = ?").run(uid);
       db.prepare("DELETE FROM tool_calls WHERE user_id = ? AND customer_id IS NOT NULL").run(uid);
-      const put = db.prepare("INSERT INTO tool_calls (id, at, user_id, client_id, tool, customer_id, ok, error, ms, bytes) VALUES (@id, @at, @user_id, @client_id, @tool, @customer_id, @ok, @error, @ms, @bytes)");
+      // OR REPLACE: rows logged in the try reuse freed ids (no AUTOINCREMENT).
+      const put = db.prepare("INSERT OR REPLACE INTO tool_calls (id, at, user_id, client_id, tool, customer_id, ok, error, ms, bytes) VALUES (@id, @at, @user_id, @client_id, @tool, @customer_id, @ok, @error, @ms, @bytes)");
       for (const r of saved) put.run(r);
     }
     // Back to normal: the one account in use is active, and a plan with nothing locked says nothing.

@@ -210,6 +210,8 @@ export function openDb(dataDir: string): DB {
   if (!cols.has("time_zone")) db.exec("ALTER TABLE users ADD COLUMN time_zone TEXT");
   // Google scopes on their token as Google last reported them (sign-in, /connect, every refresh); NULL = not seen yet.
   if (!cols.has("google_scopes")) db.exec("ALTER TABLE users ADD COLUMN google_scopes TEXT");
+  // Operator courtesy reset of plan accounts (session.ts usage): calls before it don't count. NULL = never reset.
+  if (!cols.has("plan_reset_at")) db.exec("ALTER TABLE users ADD COLUMN plan_reset_at INTEGER");
   // run_gaql's query shape (2026-10-15): which fields custom queries ask for, never the values in them.
   const tc = new Set((db.prepare("PRAGMA table_info(tool_calls)").all() as { name: string }[]).map((c) => c.name));
   if (!tc.has("query_shape")) db.exec("ALTER TABLE tool_calls ADD COLUMN query_shape TEXT");
@@ -238,6 +240,8 @@ export interface UserRow {
   stripe_customer?: string | null;
   stripe_sub?: string | null;
   time_zone?: string | null;
+  /** Calls before this don't count toward plan accounts (session.ts usage); set by hand as a courtesy reset. */
+  plan_reset_at?: number | null;
   google_scopes?: string | null;
 }
 

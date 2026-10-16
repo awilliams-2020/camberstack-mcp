@@ -10,7 +10,7 @@ import { isDemo, type Account, type UserSession } from "./session.js";
 import { isUnexpected, reportError } from "./sentry.js";
 
 const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.11.0";
+export const SERVER_VERSION = "0.12.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
@@ -23,6 +23,8 @@ Account 000-000-0001 is a demo with sample data: anyone can try every tool on it
 /** Tools that read or propose on one Google Ads account, so count toward the plan's accounts (session.ts checkAccount). */
 const GATED = new Set(["account_overview", "run_gaql", "keyword_ideas", "keyword_metrics", "propose_changes", "paid_organic_overlap"]);
 
+const confirmSwitch = z.boolean().optional()
+  .describe("Only after the user has agreed to spend their plan's account switch (a call answered \"Account switch:\"). Leave out otherwise");
 const customerId = z.string().describe("Google Ads customer ID, with or without dashes (from list_accounts)");
 const locationIds = z.array(z.string().regex(/^\d+$/)).min(1).max(10).default(["2840"])
   .describe("Google geo target IDs. 2840 United States, 2826 United Kingdom, 2124 Canada, 2036 Australia, 2356 India. "
@@ -84,7 +86,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       let out: ReturnType<typeof ok> | ReturnType<typeof fail>;
       let release = () => {};
       try {
-        if (GATED.has(name) && typeof cid === "string") release = await session().checkAccount(cid);
+        if (GATED.has(name) && typeof cid === "string")
+          release = await session().checkAccount(cid, (a as { confirm_switch?: unknown }).confirm_switch === true);
         out = ok(await fn(a));
       } catch (e) {
         out = fail(e);
@@ -108,7 +111,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     fn: (a: A) => Promise<unknown> | unknown) => (catalog.push({ name, ...config }),
     server.registerTool(name, {
       ...config,
-      inputSchema: config.inputSchema && z.object(config.inputSchema),
+      inputSchema: config.inputSchema && z.object(GATED.has(name) ? { ...config.inputSchema, confirm_switch: confirmSwitch } : config.inputSchema),
       annotations: { ...config.annotations, title: config.title },
     }, wrap(name, fn) as never));
   // Every tool sets all three hints (publish.test.ts): ChatGPT's plugin review rejects an unset one.
@@ -133,7 +136,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       ...(st.full && accounts.some((a) => counted(a) && !st.active.includes(a.customerId)) ? { plan: {
         plan: s.isPro ? "pro" : "free", accounts_included: s.accountLimit, active_accounts: st.active,
         switching: st.canSwitch
-          ? `One switch per ${ACCOUNT_WINDOW_DAYS} days: using a "switch" account makes it active and locks ${st.active.at(-1)}.`
+          ? `One switch per ${ACCOUNT_WINDOW_DAYS} days: using a "switch" account makes it active and locks ${st.active.at(-1)}, `
+            + "switching back included. The first call on it asks for confirm_switch before anything is spent."
           : `This ${ACCOUNT_WINDOW_DAYS}-day switch is used; locked accounts open up from ${st.switchOpens}`
             + (s.isPro ? "." : ", or on Pro, which covers more (the billing tool has the upgrade link)."),
       } } : {}),

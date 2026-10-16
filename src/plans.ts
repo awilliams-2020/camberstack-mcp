@@ -5,6 +5,8 @@ export const PRO_PRICE_LABEL = "$15/month";
 export const ACCOUNT_WINDOW_DAYS = 30;
 /** Error text the account gate starts with; lifecycle.ts finds blocked users by it in tool_calls. */
 export const PLAN_LIMIT_PREFIX = "Plan limit:";
+/** Error text of the notice before a plan's one switch is spent (session.ts admit). Not a refusal: lifecycle.ts doesn't match it. */
+export const SWITCH_NOTICE_PREFIX = "Account switch:";
 
 /** "1 Google Ads account" / "10 Google Ads accounts". */
 export const accountsLabel = (n: number) => `${n} Google Ads account${n === 1 ? "" : "s"}`;
