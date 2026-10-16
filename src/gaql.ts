@@ -101,6 +101,15 @@ export function checkGaql(query: string, cat: Catalog): string[] {
       seen.add(`${clause}:${name}`);
       const f = cat.get(name);
       if (!f) {
+        // Another resource's real field written under this one (campaign.conversion_goal_campaign_config.goal_config_level):
+        // name the field, and where it can be queried.
+        const parts = name.split(".");
+        const real = parts.slice(1, -1).map((_, i) => cat.get(parts.slice(i + 1).join("."))).find((x) => x && x.category !== "RESOURCE");
+        if (real) {
+          issues.push(`${name} doesn't exist: the field is ${real.name}`
+            + `${usable(real) ? `, which can be selected FROM ${p.from}` : ` (its own resource, not part of ${p.from})${whereFrom(real, cat, p.from)}`}.`);
+          continue;
+        }
         // Prefer suggestions this FROM can use; fall back to any field.
         const pool = [...cat.values()].filter((x) => x.category !== "RESOURCE");
         const near = closest(name, pool.filter(usable).map((x) => x.name));

@@ -41,6 +41,13 @@ describe("checkGaql against Google's field catalog", () => {
     expect(i).toContain("recommendation.impact.base_metrics.clicks doesn't exist");
     expect(i).toContain("recommendation.impact");
   });
+  it("names another resource's field written under this one, and where to query it (2026-10-16)", () => {
+    expect(checkGaql("SELECT campaign.name, campaign.conversion_goal_campaign_config.goal_config_level FROM campaign", cat)[0])
+      .toBe("campaign.conversion_goal_campaign_config.goal_config_level doesn't exist: the field is conversion_goal_campaign_config.goal_config_level "
+        + "(its own resource, not part of campaign); query it FROM conversion_goal_campaign_config.");
+    expect(checkGaql("SELECT campaign.name, campaign.campaign_budget.amount_micros FROM campaign", cat)[0])
+      .toBe("campaign.campaign_budget.amount_micros doesn't exist: the field is campaign_budget.amount_micros, which can be selected FROM campaign.");
+  });
   it("says where a field can be queried when this FROM can't use it", () => {
     const [i] = checkGaql("SELECT ad_group.id, campaign_budget.amount_micros FROM ad_group", cat);
     expect(i).toMatch(/campaign_budget\.amount_micros can't be used FROM ad_group; query it FROM campaign_budget or FROM campaign/);
