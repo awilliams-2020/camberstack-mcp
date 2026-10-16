@@ -54,7 +54,7 @@ export interface Service {
   billing: Billing;
   /** The background sweeps. Not started by createApp, so tests run without timers. */
   startJobs(): void;
-  /** The conversion relay, so tests can flush it. */
+  /** The keyword relay (relay.ts). */
   relay: Relay;
   /** Links that add one Google service to a connection, so tests can follow one. */
   grants: Grants;
@@ -363,9 +363,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
   const beaconJs = BEACON_JS + (cfg.ga4MeasurementId ? gtagJs(cfg.ga4MeasurementId) : "");
   app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(beaconJs); });
-  // Conversion relay for the operator's own apps (relay.ts): key-authenticated, no cookies, no CORS.
-  app.post("/v1/conversions", express.json({ limit: "10kb" }), relay.handle);
-  // 10,000 keywords of up to 80 characters each.
+  // Keyword relay for the operator's research scripts (relay.ts); 10,000 keywords of up to 80 characters each.
   app.post("/v1/keyword-metrics", express.json({ limit: "1mb" }), relay.keywordMetrics);
 
   app.post("/e", express.urlencoded({ extended: false, limit: "2kb" }), (req, res) => {
@@ -395,7 +393,6 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     every(HOUR, "lifecycle", () => lifecycle.run());
     every(60_000, "transactional mail", () => lifecycle.transactional());
     every(HOUR, "ad conversions", () => adConversions.flush());
-    every(HOUR, "relay conversions", () => relay.flush());
     // Pages new or changed since the last boot. Production only: a dev or test origin isn't ours to submit.
     if (cfg.baseUrl.startsWith("https://") && !cfg.noindex) {
       pingIndexNow(cfg.baseUrl, inKey, changedPages, overrides.indexNowFetch)

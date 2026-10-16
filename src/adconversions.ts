@@ -7,26 +7,25 @@
  *     captureClick() keeps it in a first-party, HttpOnly cookie for 90 days (the conversion window).
  *  2. The same browser finishes "Connect Google Ads" (the OAuth callback): record() ties the click to
  *     that user, once, on their FIRST connection only.
- *  3. upload() sends it to OUR Ads account (uploadClickConversions) with the operator's own
- *     credentials (CONV_ADS_* in .env), never a user's: the user's Google Ads data is not involved,
- *     and a disconnect test can't silently stop tracking. Failures stay in the table and the hourly
- *     sweep retries them, so nothing is lost while credentials are being fixed.
+ *  3. flush() hands it to the conversions relay (~/conversions-relay, http://conversions-relay:3000), the
+ *     operator's service that uploads the fleet's conversions through Google's Data Manager API, with
+ *     this app's own relay key, exactly as theqrcode and redbudway do. Nothing about the user travels
+ *     with it. Until 2026-10-16 this uploaded with its own refresh token (CONV_ADS_*), which died unnoticed,
+ *     and Google now refuses UploadClickConversions from new projects anyway.
+ *     Failures stay in the table and the hourly sweep retries them, so nothing is lost while the relay is down.
  */
 import type { Request, Response } from "express";
 import type { DB } from "./db.js";
 import { now } from "./db.js";
-import { ADS_API, adsDateTime, refreshGoogleToken } from "./google.js";
 import { readCookie } from "./http.js";
 
 export interface ConversionConfig {
-  customerId: string;
-  /** Manager the operator's login reaches the account through, if any. */
-  loginCustomerId?: string;
+  /** http://conversions-relay:3000/v1/conversions */
+  relayUrl: string;
+  /** This app's crk_ key on the relay, limited to actionId. */
+  relayKey: string;
+  /** Our "Google Ads connected" conversion action in 386-283-8095. */
   actionId: string;
-  clientId: string;
-  clientSecret: string;
-  refreshToken: string;
-  developerToken: string;
 }
 
 const COOKIE = "cs_click";
@@ -78,17 +77,13 @@ export class AdConversions {
   private async flushPending(cfg: ConversionConfig): Promise<void> {
     const pending = this.db.prepare(`SELECT * FROM ad_conversions WHERE uploaded_at IS NULL AND attempts < ? ORDER BY at`).all(MAX_ATTEMPTS) as
       { user_id: string; kind: Kind; click_id: string; at: number }[];
-    if (!pending.length) return;
-    let token: string;
-    try {
-      token = (await refreshGoogleToken(cfg, cfg.refreshToken, this.f)).access_token;
-    } catch (e) {
-      for (const p of pending) this.fail(p.user_id, `token: ${(e as Error).message}`);
-      return;
-    }
     for (const p of pending) {
       try {
-        await this.upload(token, p.kind, p.click_id, p.at);
+        const res = await this.f(cfg.relayUrl, { method: "POST",
+          headers: { Authorization: `Bearer ${cfg.relayKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ conversion_action_id: cfg.actionId, [p.kind]: p.click_id, conversion_time: new Date(p.at * 1000).toISOString() }) });
+        if (res.status !== 202) throw new Error(`relay ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        // Handed over: the relay uploads it, retries it, and mails the operator if Google rejects it.
         this.db.prepare("UPDATE ad_conversions SET uploaded_at = ?, error = NULL, attempts = attempts + 1 WHERE user_id = ?").run(now(), p.user_id);
       } catch (e) {
         this.fail(p.user_id, (e as Error).message);
@@ -100,24 +95,4 @@ export class AdConversions {
     this.db.prepare("UPDATE ad_conversions SET error = ?, attempts = attempts + 1 WHERE user_id = ?").run(error.slice(0, 500), userId);
   }
 
-  private async upload(token: string, kind: Kind, clickId: string, at: number): Promise<void> {
-    const c = this.cfg!;
-    const when = adsDateTime(at);
-    const res = await this.f(`${ADS_API}/customers/${c.customerId}:uploadClickConversions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`, "developer-token": c.developerToken, "Content-Type": "application/json",
-        ...(c.loginCustomerId ? { "login-customer-id": c.loginCustomerId } : {}),
-      },
-      body: JSON.stringify({
-        conversions: [{ [kind]: clickId, conversionAction: `customers/${c.customerId}/conversionActions/${c.actionId}`, conversionDateTime: when }],
-        partialFailure: true,
-      }),
-    });
-    const body = await res.text();
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
-    // partialFailure: a 200 can still carry a per-conversion rejection (bad or too-old click id).
-    const parsed = JSON.parse(body || "{}") as { partialFailureError?: { message?: string } };
-    if (parsed.partialFailureError) throw new Error(`rejected: ${parsed.partialFailureError.message ?? JSON.stringify(parsed.partialFailureError).slice(0, 300)}`);
-  }
 }

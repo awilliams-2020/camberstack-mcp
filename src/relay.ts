@@ -1,52 +1,29 @@
 /**
- * Conversion relay: lets the operator's own apps (redbudway, theqrcode) report ad-click conversions
- * without holding a Google Ads token of their own.
+ * Keyword relay: lets the operator's research scripts price keywords through a Camberstack connection,
+ * holding a scoped key instead of a Google token.
  *
- *   POST /v1/conversions   Authorization: Bearer csk_…
- *   { "conversion_action_id": "7585493163", "gclid": "…", "conversion_time": "2026-10-04T21:00:00Z", "value": 0, "order_id": "…" }
- *   From the box's own containers use http://camberstack:3000/v1/conversions (shared traefik network).
- *
- * A key belongs to one Camberstack user and one Google Ads account. Conversions are queued, then
- * uploaded with THAT user's stored Google connection (the same one their AI app uses, which doesn't
- * expire the way a self-minted script token does). Failures stay queued and the hourly sweep retries
- * them, like our own ad's conversions (adconversions.ts).
- *
- * Keys are created on the box, never over HTTP, and each is limited to the conversion actions named
- * at creation, so a leaked key can only add conversions to those actions in that one account:
- *   docker exec $(docker ps -qf name=^camberstack-) node dist/relay-admin.js create <email> <customer_id> <action_ids> <label> [login_customer_id]
- * This is for the operator's own apps; it is not offered to Camberstack users.
- *
- *   POST /v1/keyword-metrics   Authorization: Bearer csk_…   (a key created with create-keywords)
+ *   POST /v1/keyword-metrics   Authorization: Bearer csk_…   (a key created with relay-admin create-keywords)
  *   { "keywords": ["…", …up to 10000], "location_ids": ["2840"], "language_id": "1000", "months": 25 }
  *   → { "results": [...] }: Keyword Planner's generateKeywordHistoricalMetrics results as Google returns them
  *   (bids in micros, monthlySearchVolumes over `months`), for project-research's pricing scripts, which do
- *   their own trend math. Same idea as conversions: scripts hold a scoped key, never a Google token.
- * A key's scopes say which of the two it may call; a conversions key can't read Planner, and the other way round.
+ *   their own trend math. The key acts through its owner's stored Google connection.
+ *
+ * Keys are created on the box, never over HTTP. This is for the operator; it is not offered to users.
+ *
+ * Until 2026-10-16 this file also relayed the apps' ad conversions (POST /v1/conversions). Google now
+ * refuses UploadClickConversions from Camberstack's Cloud project ("use the Data Manager API"), so that
+ * moved to its own service, ~/conversions-relay (http://conversions-relay:3000). Keys created for it here
+ * carry the scope "conversions" and are refused by this endpoint.
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { now, type DB, type UserRow } from "./db.js";
-import { AdsClient, adsDateTime } from "./google.js";
+import { AdsClient } from "./google.js";
 import { UserSession, type SessionDeps } from "./session.js";
-
-const MAX_ATTEMPTS = 8;
-/** Google accepts click conversions up to 90 days after the click. */
-const MAX_AGE_DAYS = 90;
 
 const hash = (key: string) => createHash("sha256").update(key).digest("hex");
 const MONTH_ENUM = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
-
-const Body = z.object({
-  conversion_action_id: z.string().regex(/^\d+$/),
-  gclid: z.string().regex(/^[A-Za-z0-9_\-.~]{10,300}$/).optional(),
-  gbraid: z.string().regex(/^[A-Za-z0-9_\-.~]{10,300}$/).optional(),
-  wbraid: z.string().regex(/^[A-Za-z0-9_\-.~]{10,300}$/).optional(),
-  conversion_time: z.string().datetime({ offset: true }).optional(),
-  value: z.number().min(0).max(1_000_000).optional(),
-  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
-  order_id: z.string().min(1).max(64).optional().describe("Google dedupes conversions sharing an order id within one action"),
-}).refine((b) => [b.gclid, b.gbraid, b.wbraid].filter(Boolean).length === 1, "exactly one of gclid, gbraid, wbraid");
 
 const KeywordBody = z.object({
   keywords: z.array(z.string().trim().min(1).max(80)).min(1).max(10_000),
@@ -55,15 +32,11 @@ const KeywordBody = z.object({
   months: z.number().int().min(12).max(48).default(25).describe("history window; >12 lets a caller compare the same months a year apart"),
 });
 
-export type RelayScope = "conversions" | "keyword_metrics";
-interface KeyRow { id: string; user_id: string; customer_id: string; login_customer_id: string | null; label: string; action_ids: string; scopes: string }
+interface KeyRow { id: string; user_id: string; customer_id: string; login_customer_id: string | null; label: string; scopes: string }
 
-export function createRelayKey(db: DB, email: string, customerId: string, actionIds: string[], label: string, loginCustomerId: string | null = null,
-  scopes: RelayScope[] = ["conversions"]): string {
-  if (scopes.includes("conversions") && !actionIds.length) throw new Error("a conversions key needs action ids");
-  if (actionIds.some((x) => !/^\d+$/.test(x))) throw new Error("action ids must be digits, e.g. 7585493163");
+/** A keyword_metrics key for the user with this email ("auto": whoever last used the account successfully). */
+export function createRelayKey(db: DB, email: string, customerId: string, label: string, loginCustomerId: string | null = null): string {
   const cid = customerId.replace(/-/g, "");
-  // "auto": the user who most recently ran a tool successfully on this account, i.e. whose connection reaches it.
   const user = (email === "auto"
     ? db.prepare(`SELECT u.id, u.email FROM tool_calls t JOIN users u ON u.id = t.user_id
         WHERE t.customer_id = ? AND t.ok = 1 AND u.enc_refresh IS NOT NULL ORDER BY t.at DESC LIMIT 1`).get(cid)
@@ -71,46 +44,26 @@ export function createRelayKey(db: DB, email: string, customerId: string, action
   if (!user) throw new Error(email === "auto" ? `No connected Camberstack user has used account ${cid}.` : `No Camberstack user ${email}; connect Camberstack with that Google login first.`);
   console.error(`key owner: ${user.email.replace(/^(.).*(@.*)$/, "$1***$2")}`);
   const key = `csk_${randomBytes(32).toString("base64url")}`;
-  db.prepare(`INSERT INTO relay_keys (id, key_hash, user_id, customer_id, login_customer_id, label, action_ids, scopes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(randomUUID(), hash(key), user.id, cid, loginCustomerId?.replace(/-/g, "") || null, label, actionIds.join(","), scopes.join(","), now());
+  db.prepare(`INSERT INTO relay_keys (id, key_hash, user_id, customer_id, login_customer_id, label, action_ids, scopes, created_at) VALUES (?, ?, ?, ?, ?, ?, '', 'keyword_metrics', ?)`)
+    .run(randomUUID(), hash(key), user.id, cid, loginCustomerId?.replace(/-/g, "") || null, label, now());
   return key;
 }
 
 export class Relay {
   constructor(private deps: SessionDeps, private f: typeof fetch = fetch) {}
 
-  /** The key on this request, if it's live and has `scope`; otherwise answers 401/403 and returns undefined. */
-  private keyFor(req: Request, res: Response, scope: RelayScope): KeyRow | undefined {
+  /** The key on this request, if it's live and may price keywords; otherwise answers 401/403 and returns undefined. */
+  private keyFor(req: Request, res: Response): KeyRow | undefined {
     const key = /^Bearer (csk_[A-Za-z0-9_-]{20,})$/.exec(req.get("authorization") ?? "")?.[1];
     const k = key && this.deps.db.prepare("SELECT * FROM relay_keys WHERE key_hash = ? AND revoked_at IS NULL").get(hash(key)) as KeyRow | undefined;
     if (!k) { res.status(401).json({ error: "invalid or revoked key" }); return undefined; }
-    if (!k.scopes.split(",").includes(scope)) { res.status(403).json({ error: `this key's scopes are ${k.scopes}, not ${scope}` }); return undefined; }
+    if (!k.scopes.split(",").includes("keyword_metrics")) { res.status(403).json({ error: `this key's scopes are ${k.scopes}, not keyword_metrics` }); return undefined; }
     return k;
   }
 
-  /** The HTTP handler. 202 = queued (and an upload attempt started); duplicates are accepted silently. */
-  handle = (req: Request, res: Response): void => {
-    const k = this.keyFor(req, res, "conversions");
-    if (!k) return;
-    const parsed = Body.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; ") }); return; }
-    const b = parsed.data;
-    if (!k.action_ids.split(",").includes(b.conversion_action_id)) {
-      res.status(403).json({ error: `this key may only report conversion action(s) ${k.action_ids}` }); return;
-    }
-    const at = b.conversion_time ? Math.floor(Date.parse(b.conversion_time) / 1000) : now();
-    if (at > now() + 300 || at < now() - MAX_AGE_DAYS * 86400) { res.status(400).json({ error: `conversion_time must be within the last ${MAX_AGE_DAYS} days` }); return; }
-    const kind = b.gclid ? "gclid" : b.gbraid ? "gbraid" : "wbraid";
-    this.deps.db.prepare(`INSERT OR IGNORE INTO relay_conversions (key_id, action_id, kind, click_id, at, value, currency, order_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(k.id, b.conversion_action_id, kind, b[kind]!, at, b.value ?? null, b.currency ?? null, b.order_id ?? "");
-    this.deps.db.prepare("UPDATE relay_keys SET last_used_at = ? WHERE id = ?").run(now(), k.id);
-    res.status(202).json({ queued: true });
-    void this.flush().catch(() => { /* retried by the sweep */ });
-  };
-
   /** Keyword Planner historical metrics with the key owner's connection: 200 { results }, Google's shape. */
   keywordMetrics = async (req: Request, res: Response): Promise<void> => {
-    const k = this.keyFor(req, res, "keyword_metrics");
+    const k = this.keyFor(req, res);
     if (!k) return;
     const parsed = KeywordBody.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; ") }); return; }
@@ -136,45 +89,4 @@ export class Relay {
       res.status(502).json({ error: (e as Error).message.slice(0, 1000) });
     }
   };
-
-  private flushing = false;
-
-  /** Upload every pending conversion, grouped by key (one user + account per key). */
-  async flush(): Promise<void> {
-    if (this.flushing) return;
-    this.flushing = true;
-    try {
-      const rows = this.deps.db.prepare(`SELECT c.*, k.user_id, k.customer_id, k.login_customer_id FROM relay_conversions c
-          JOIN relay_keys k ON k.id = c.key_id WHERE c.uploaded_at IS NULL AND c.attempts < ? AND k.revoked_at IS NULL ORDER BY c.id`)
-        .all(MAX_ATTEMPTS) as (KeyRow & { id: number; key_id: string; action_id: string; kind: string; click_id: string; at: number; value: number | null; currency: string | null; order_id: string })[];
-      const byKey = new Map<string, typeof rows>();
-      for (const r of rows) byKey.set(r.key_id, [...(byKey.get(r.key_id) ?? []), r]);
-      for (const batch of byKey.values()) {
-        const first = batch[0]!;
-        const fail = (msg: string, ids = batch.map((r) => r.id)) => {
-          const st = this.deps.db.prepare("UPDATE relay_conversions SET error = ?, attempts = attempts + 1 WHERE id = ?");
-          for (const id of ids) st.run(msg.slice(0, 500), id);
-        };
-        const user = this.deps.db.prepare("SELECT * FROM users WHERE id = ?").get(first.user_id) as UserRow | undefined;
-        if (!user?.enc_refresh) { fail("key owner is not connected to Google; reconnect Camberstack"); continue; }
-        const session = new UserSession(this.deps, user);
-        const ads = this.deps.adsFactory?.(user) ?? new AdsClient(() => session.googleAccessToken(), this.deps.google.developerToken, this.f);
-        try {
-          const errors = await ads.uploadClickConversions(first.customer_id, batch.map((r) => ({
-            [r.kind]: r.click_id,
-            conversionAction: `customers/${first.customer_id}/conversionActions/${r.action_id}`,
-            conversionDateTime: adsDateTime(r.at),
-            ...(r.value != null ? { conversionValue: r.value, currencyCode: r.currency ?? "USD" } : {}),
-            ...(r.order_id ? { orderId: r.order_id } : {}),
-          })), first.login_customer_id);
-          const ok = this.deps.db.prepare("UPDATE relay_conversions SET uploaded_at = ?, error = NULL, attempts = attempts + 1 WHERE id = ?");
-          batch.forEach((r, i) => (errors[i] ? fail(`rejected: ${errors[i]}`, [r.id]) : ok.run(now(), r.id)));
-        } catch (e) {
-          fail((e as Error).message);
-        }
-      }
-    } finally {
-      this.flushing = false;
-    }
-  }
 }

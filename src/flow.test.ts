@@ -293,11 +293,13 @@ const ga = {
   },
 };
 
-/** Our own Ads account's conversion upload endpoint, plus the operator's token refresh. */
+/** The conversions relay (~/conversions-relay) our own ad's conversions are handed to. */
 const conversionUploads: any[] = [];
 const adsConversionFetch: typeof fetch = async (url, init) => {
-  if (String(url).includes("oauth2.googleapis.com/token")) return new Response(JSON.stringify({ access_token: "op-token", expires_in: 3600 }), { status: 200 });
-  if (String(url).includes(":uploadClickConversions")) { conversionUploads.push(JSON.parse(String(init?.body))); return new Response("{}", { status: 200 }); }
+  if (String(url) === "http://conversions-relay.test/v1/conversions") {
+    conversionUploads.push({ auth: (init?.headers as Record<string, string>).Authorization, ...JSON.parse(String(init?.body)) });
+    return new Response('{"queued":true}', { status: 202 });
+  }
   throw new Error(`unexpected ${url}`);
 };
 
@@ -325,7 +327,7 @@ beforeAll(async () => {
   server.close();
   server = await new Promise<Server>((resolve) => {
     ({ app, billing, relay, grants } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
-      conversions: { customerId: "9998887777", actionId: "555", clientId: "c", clientSecret: "s", refreshToken: "r", developerToken: "d" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc, gaFactory: (u) => ({ summaries: () => ga.summaries(u.id), runReport: () => ga.runReport(), admin: (m, p, b) => ga.admin(m, p, b) }) }));
+      conversions: { relayUrl: "http://conversions-relay.test/v1/conversions", relayKey: "crk_ours", actionId: "555" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc, gaFactory: (u) => ({ summaries: () => ga.summaries(u.id), runReport: () => ga.runReport(), admin: (m, p, b) => ga.admin(m, p, b) }) }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
@@ -1816,15 +1818,19 @@ describe("OAuth + MCP end to end", () => {
   });
 
   it("prices keywords for a keyword_metrics key with the owner's connection, and keeps each key to its scope", async () => {
-    const kwKey = createRelayKey(db, "owner@example.com", "111-222-3333", [], "research", null, ["keyword_metrics"]);
-    const convKey = createRelayKey(db, "owner@example.com", "111-222-3333", ["7585493163"], "app");
+    const kwKey = createRelayKey(db, "owner@example.com", "111-222-3333", "research");
+    // A key left from when this relayed conversions too (scope "conversions"): it can't read Planner.
+    const convKey = "csk_legacyconversionskey0000";
+    const owner = (db.prepare("SELECT id FROM users WHERE email = 'owner@example.com'").get() as { id: string }).id;
+    db.prepare(`INSERT INTO relay_keys (id, key_hash, user_id, customer_id, label, action_ids, scopes, created_at)
+      VALUES ('legacy', ?, ?, '1112223333', 'app', '7585493163', 'conversions', 1)`).run(createHash("sha256").update(convKey).digest("hex"), owner);
     const post = (path: string, body: object, k: string) => fetch(`${base}${path}`, { method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${k}` }, body: JSON.stringify(body) });
     const kws = Array.from({ length: 120 }, (_, i) => `kw ${i}`);
 
     expect((await post("/v1/keyword-metrics", { keywords: kws }, "csk_wrongwrongwrongwrongwrong")).status).toBe(401);
     expect((await post("/v1/keyword-metrics", { keywords: kws }, convKey)).status).toBe(403);          // a conversions key can't read Planner
-    expect((await post("/v1/conversions", { conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" }, kwKey)).status).toBe(403);
+    expect((await post("/v1/conversions", { conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" }, kwKey)).status).toBe(404);  // moved to ~/conversions-relay
     expect((await post("/v1/keyword-metrics", { keywords: [] }, kwKey)).status).toBe(400);
     expect((await post("/v1/keyword-metrics", { keywords: kws, months: 60 }, kwKey)).status).toBe(400);
 
@@ -1840,34 +1846,6 @@ describe("OAuth + MCP end to end", () => {
     const { start, end } = req.req.historicalMetricsOptions.yearMonthRange;
     const idx = (m: { year: number; month: string }) => m.year * 12 + ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"].indexOf(m.month);
     expect(idx(end) - idx(start)).toBe(48);
-  });
-
-  it("relays an app's conversions with the key owner's connection, only for the key's actions", async () => {
-    const key = createRelayKey(db, "owner@example.com", "111-222-3333", ["7585493163"], "redbudway");
-    const post = (body: object, k = key) => fetch(`${base}/v1/conversions`, { method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${k}` }, body: JSON.stringify(body) });
-
-    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" }, "csk_wrongwrongwrongwrongwrong")).status).toBe(401);
-    expect((await post({ conversion_action_id: "999", gclid: "Cj0KCQjw_test_click" })).status).toBe(403);   // not this key's action
-    expect((await post({ conversion_action_id: "7585493163" })).status).toBe(400);                          // no click id
-    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click", conversion_time: "2020-01-01T00:00:00Z" })).status).toBe(400);
-
-    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click", conversion_time: new Date().toISOString() })).status).toBe(202);
-    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" })).status).toBe(202);   // duplicate: accepted, stored once
-    expect((await post({ conversion_action_id: "7585493163", gclid: "STALE_CLICK_ID_0001", value: 5 })).status).toBe(202);
-    expect((await post({ conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click", order_id: "in_2" })).status).toBe(202);  // same click, new order
-    await relay.flush();
-    const sent = ads.uploads.flatMap((u) => u.conversions.map((c) => ({ cid: u.cid, ...c })));
-    expect(sent.filter((c) => c.gclid === "Cj0KCQjw_test_click")).toHaveLength(2);
-    expect(sent.find((c) => c.orderId)).toMatchObject({ orderId: "in_2" });
-    expect(sent[0]).toMatchObject({ cid: "1112223333", conversionAction: "customers/1112223333/conversionActions/7585493163" });
-    expect(sent[0].conversionDateTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\+00:00$/);
-    const rows = db.prepare("SELECT click_id, uploaded_at IS NOT NULL up, error FROM relay_conversions ORDER BY id").all() as any[];
-    expect(rows).toEqual([
-      { click_id: "Cj0KCQjw_test_click", up: 1, error: null },
-      { click_id: "STALE_CLICK_ID_0001", up: 0, error: "rejected: The click is too old" },  // kept for the retrying sweep
-      { click_id: "Cj0KCQjw_test_click", up: 1, error: null },
-    ]);
   });
 
   it("tunes bids, ads, bidding, URL suffix and conversion actions, each with an undo", async () => {
@@ -1975,9 +1953,9 @@ describe("OAuth + MCP end to end", () => {
     try { await connect(cookie); } finally { googleUser.sub = "google-sub-1"; googleUser.email = "Owner@Example.com"; }
     await new Promise((r) => setTimeout(r, 50));
     expect(conversionUploads).toHaveLength(1);
-    const c = conversionUploads[0].conversions[0];
-    expect(c).toMatchObject({ gclid: "Cj0KCQtest_click_1234", conversionAction: "customers/9998887777/conversionActions/555" });
-    expect(c.conversionDateTime).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\+00:00$/);
+    const c = conversionUploads[0];
+    expect(c).toMatchObject({ auth: "Bearer crk_ours", conversion_action_id: "555", gclid: "Cj0KCQtest_click_1234" });
+    expect(c.conversion_time).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     expect(db.prepare("SELECT uploaded_at FROM ad_conversions").get()).toMatchObject({ uploaded_at: expect.any(Number) });
     // Nothing about the user travels with it.
     expect(JSON.stringify(conversionUploads)).not.toContain("new@example.com");
