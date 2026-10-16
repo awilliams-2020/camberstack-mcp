@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AdsApiError, AdsClient } from "./google.js";
-import { expandDuring, missingSelectFields } from "./session.js";
+import { expandDuring, missingSelectFields, renameFields } from "./session.js";
 
 /** Google's error body for one GAQL error, as the REST API returns it. */
 const body = (code: Record<string, string>, message: string, field?: string) => JSON.stringify({
@@ -13,7 +13,6 @@ describe("AdsApiError fix hints", () => {
   it.each([
     [{ queryError: "INVALID_VALUE_WITH_DURING_OPERATOR" }, "Invalid date literal supplied for DURING operator: LAST_90_DAYS.", undefined, "BETWEEN"],
     [{ queryError: "PROHIBITED_METRIC_IN_SELECT_OR_WHERE_CLAUSE" }, "Cannot select or filter on the following metrics: 'search_budget_lost_impression_share'", undefined, "FROM campaign"],
-    [{ queryError: "UNRECOGNIZED_FIELD" }, "Unrecognized field in the query: 'campaign.start_date'.", undefined, "campaign.start_date_time"],
     [{ queryError: "UNRECOGNIZED_FIELD" }, "Unrecognized fields in the query: 'recommendation.impact.base_metrics.clicks', 'recommendation.impact.potential_metrics.clicks'.", undefined, "SELECT recommendation.impact"],
     [{ queryError: "UNRECOGNIZED_FIELD" }, "Unrecognized field in the query: 'campaign.maximize_clicks.cpc_bid_ceiling_micros'.", undefined, "campaign.target_spend.cpc_bid_ceiling_micros"],
     [{ mutateError: "MUTATE_NOT_ALLOWED" }, "Mutates are not allowed for the requested resource.", "operations", "set_bidding_strategy can still move campaigns off it"],
@@ -51,6 +50,16 @@ describe("AdsApiError fix hints", () => {
   it("adds nothing for errors it has no fix for", () => {
     const e = new AdsApiError(403, body({ authorizationError: "USER_PERMISSION_DENIED" }, "User doesn't have permission."));
     expect(e.message).toBe("Google Ads API 403: USER_PERMISSION_DENIED User doesn't have permission.");
+  });
+});
+
+describe("renameFields", () => {
+  it("renames the dropped campaign date fields everywhere, and leaves the current ones alone", () => {
+    const r = renameFields("SELECT campaign.id, campaign.start_date, campaign.end_date FROM campaign ORDER BY campaign.end_date");
+    expect(r.query).toBe("SELECT campaign.id, campaign.start_date_time, campaign.end_date_time FROM campaign ORDER BY campaign.end_date_time");
+    expect(r.renamed).toEqual(["campaign.start_date as campaign.start_date_time", "campaign.end_date as campaign.end_date_time"]);
+    const ok = "SELECT campaign.start_date_time, campaign.end_date_time FROM campaign";
+    expect(renameFields(ok)).toEqual({ query: ok, renamed: [] });
   });
 });
 

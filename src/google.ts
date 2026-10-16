@@ -194,7 +194,6 @@ function adsErrorFix(code: string, message: string, field: string): string | nul
       return "Google doesn't allow this change through the API (some legacy or system-managed items are locked, and some campaign types "
         + "can't be created). Do it in Google Ads. For a locked shared bid strategy, set_bidding_strategy can still move campaigns off it.";
     case "UNRECOGNIZED_FIELD":
-      if (/campaign\.(start|end)_date'/.test(message)) return "campaign dates are campaign.start_date_time and campaign.end_date_time.";
       if (/conversion_action\.(tracking_status|last_received|last_conversion)/.test(message)) {
         return "whether a conversion action is recording is in metrics, FROM conversion_action: metrics.conversion_last_received_request_date_time "
           + "and metrics.conversion_last_conversion_date (a 1969/1970 date means never). The account-wide setting is "

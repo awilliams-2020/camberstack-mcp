@@ -420,7 +420,8 @@ export class UserSession {
   async runQuery(customerId: string, query: string) {
     if (!/^\s*select\b/i.test(query)) throw new Error("Only SELECT (read-only GAQL) queries are allowed. Use propose_changes to change anything.");
     const a = await this.account(customerId);
-    const { query: expanded, rewrote } = expandDuring(query);
+    const { query: current, renamed } = renameFields(query);
+    const { query: expanded, rewrote } = expandDuring(current);
     let q = expanded;
     // Models filter or sort on a field they didn't select despite the rule in run_gaql's description. Google names the
     // field, so select it and rerun rather than spend the model's turn on the retry.
@@ -445,6 +446,7 @@ export class UserSession {
     // A finding on a query Google ran is a bug in the check, not in the query: log it, never show it.
     void this.gaqlCheck(q).then((found) => { if (found.length) console.error(`gaql check false positive: ${found.join(" ")} | ${q.slice(0, 300)}`); });
     return { ...demoNote(a.customerId), ...(rewrote.length ? { rewritten: `Google only accepts LAST_7/14/30_DAYS, so ran ${rewrote.join(", ")} (dates in UTC)` } : {}),
+      ...(renamed.length ? { renamed: `These fields were renamed in the API, so ran ${renamed.join(", ")} (a date and time, e.g. 2026-01-31 23:59:59)` } : {}),
       ...(added.length ? { added_to_select: `Google requires fields used in WHERE or ORDER BY to be selected too, so added ${added.join(", ")} to SELECT` } : {}),
       rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
   }
@@ -1140,6 +1142,25 @@ export function expandDuring(query: string): { query: string; rewrote: string[] 
     return r;
   });
   return { query: q, rewrote };
+}
+
+/**
+ * Fields the API dropped for a renamed one, which models still write from older docs: sent as is they can only fail
+ * (UNRECOGNIZED_FIELD), so they're renamed before the query goes out, like expandDuring. Only exact one-to-one renames
+ * belong here; a field that moved somewhere with a different shape (url_expansion_opt_out) gets a hint instead.
+ */
+const RENAMED_FIELDS: Record<string, string> = {
+  "campaign.start_date": "campaign.start_date_time",
+  "campaign.end_date": "campaign.end_date_time",
+};
+export function renameFields(query: string): { query: string; renamed: string[] } {
+  const renamed: string[] = [];
+  let q = query;
+  for (const [old, now] of Object.entries(RENAMED_FIELDS)) {
+    const re = new RegExp(`\\b${old.replace(".", "\\.")}\\b`, "g");
+    if (re.test(q)) { q = q.replace(re, now); renamed.push(`${old} as ${now}`); }
+  }
+  return { query: q, renamed };
 }
 
 /** Fields Google says a GAQL query must also SELECT (EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE), from its error body. */
