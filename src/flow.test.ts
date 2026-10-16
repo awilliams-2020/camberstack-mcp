@@ -12,7 +12,6 @@ import { createApp } from "./server.js";
 import { openDb } from "./db.js";
 import type { Config } from "./config.js";
 import { decrypt, encrypt } from "./crypto.js";
-import { createRelayKey } from "./relay.js";
 import { AdsApiError, NotGrantedError } from "./google.js";
 import { io } from "./changes.js";
 import { SERVER_VERSION } from "./tools.js";
@@ -288,10 +287,10 @@ const ga = {
   },
 };
 
-/** The conversions relay (~/conversions-relay) our own ad's conversions are handed to. */
+/** Operations (~/operations), which our own ad's conversions are handed to. */
 const conversionUploads: any[] = [];
 const adsConversionFetch: typeof fetch = async (url, init) => {
-  if (String(url) === "http://conversions-relay.test/v1/conversions") {
+  if (String(url) === "http://operations.test/v1/conversions") {
     conversionUploads.push({ auth: (init?.headers as Record<string, string>).Authorization, ...JSON.parse(String(init?.body)) });
     return new Response('{"queued":true}', { status: 202 });
   }
@@ -301,7 +300,6 @@ const adsConversionFetch: typeof fetch = async (url, init) => {
 let app: ReturnType<typeof createApp>["app"];
 let billing: ReturnType<typeof createApp>["billing"];
 let grants: ReturnType<typeof createApp>["grants"];
-let relay: ReturnType<typeof createApp>["relay"];
 let server: Server;
 let base = "";
 const ads = new FakeAds();
@@ -321,8 +319,8 @@ beforeAll(async () => {
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
   server.close();
   server = await new Promise<Server>((resolve) => {
-    ({ app, billing, relay, grants } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
-      conversions: { relayUrl: "http://conversions-relay.test/v1/conversions", relayKey: "crk_ours", actionId: "555" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc, gaFactory: (u) => ({ summaries: () => ga.summaries(u.id), runReport: () => ga.runReport(), admin: (m, p, b) => ga.admin(m, p, b) }) }));
+    ({ app, billing, grants } = createApp({ ...cfg, baseUrl: base, adminUrl: base.replace("localhost", "127.0.0.1"), openaiAppsChallenge: "tok_test_123",
+      conversions: { opsUrl: "http://operations.test/v1/conversions", opsKey: "crk_ours", actionId: "555" } }, db, { fetch: googleFetch, stripeFetch, adsConversionFetch, adsFactory: () => ads as any, scFactory: () => sc, gaFactory: (u) => ({ summaries: () => ga.summaries(u.id), runReport: () => ga.runReport(), admin: (m, p, b) => ga.admin(m, p, b) }) }));
     const s = app.listen(Number(new URL(base).port), () => resolve(s));
   });
 });
@@ -1810,37 +1808,6 @@ describe("OAuth + MCP end to end", () => {
     } finally {
       io.fetchImage = real;
     }
-  });
-
-  it("prices keywords for a keyword_metrics key with the owner's connection, and keeps each key to its scope", async () => {
-    const kwKey = createRelayKey(db, "owner@example.com", "111-222-3333", "research");
-    // A key left from when this relayed conversions too (scope "conversions"): it can't read Planner.
-    const convKey = "csk_legacyconversionskey0000";
-    const owner = (db.prepare("SELECT id FROM users WHERE email = 'owner@example.com'").get() as { id: string }).id;
-    db.prepare(`INSERT INTO relay_keys (id, key_hash, user_id, customer_id, label, action_ids, scopes, created_at)
-      VALUES ('legacy', ?, ?, '1112223333', 'app', '7585493163', 'conversions', 1)`).run(createHash("sha256").update(convKey).digest("hex"), owner);
-    const post = (path: string, body: object, k: string) => fetch(`${base}${path}`, { method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${k}` }, body: JSON.stringify(body) });
-    const kws = Array.from({ length: 120 }, (_, i) => `kw ${i}`);
-
-    expect((await post("/v1/keyword-metrics", { keywords: kws }, "csk_wrongwrongwrongwrongwrong")).status).toBe(401);
-    expect((await post("/v1/keyword-metrics", { keywords: kws }, convKey)).status).toBe(403);          // a conversions key can't read Planner
-    expect((await post("/v1/conversions", { conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" }, kwKey)).status).toBe(404);  // moved to ~/conversions-relay
-    expect((await post("/v1/keyword-metrics", { keywords: [] }, kwKey)).status).toBe(400);
-    expect((await post("/v1/keyword-metrics", { keywords: kws, months: 60 }, kwKey)).status).toBe(400);
-
-    const ok = await post("/v1/keyword-metrics", { keywords: [...kws, "kw 0"], location_ids: ["2276"], language_id: "1001", months: 48 }, kwKey);
-    expect(ok.status).toBe(200);
-    const body = await ok.json();
-    expect(body.results).toHaveLength(120);  // Google's own shape: micros and enum months, for the script's own math
-    expect(body.results[3]).toMatchObject({ text: "kw 3", keywordMetrics: { avgMonthlySearches: "3" } });
-    const req = ads.plannerCalls.at(-1)!;
-    expect(req.method).toBe("generateKeywordHistoricalMetrics");
-    expect(req.req).toMatchObject({ language: "languageConstants/1001", geoTargetConstants: ["geoTargetConstants/2276"], keywordPlanNetwork: "GOOGLE_SEARCH" });
-    expect(req.req.keywords).toHaveLength(120);  // deduped
-    const { start, end } = req.req.historicalMetricsOptions.yearMonthRange;
-    const idx = (m: { year: number; month: string }) => m.year * 12 + ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"].indexOf(m.month);
-    expect(idx(end) - idx(start)).toBe(48);
   });
 
   it("tunes bids, ads, bidding, URL suffix and conversion actions, each with an undo", async () => {

@@ -14,7 +14,6 @@ import { CamberstackProvider, MCP_SCOPE, consentCookie } from "./provider.js";
 import { UserSession, clearGoogleCache, type SessionDeps } from "./session.js";
 import { Grants } from "./grant.js";
 import { GRANTS } from "./google.js";
-import { Relay } from "./relay.js";
 import { buildServer, SERVER_VERSION, toolCatalog } from "./tools.js";
 import { Analytics, BEACON_JS, gtagJs, parseBeacon } from "./analytics.js";
 import { mountAdmin } from "./admin.js";
@@ -54,8 +53,6 @@ export interface Service {
   billing: Billing;
   /** The background sweeps. Not started by createApp, so tests run without timers. */
   startJobs(): void;
-  /** The keyword relay (relay.ts). */
-  relay: Relay;
   /** Links that add one Google service to a connection, so tests can follow one. */
   grants: Grants;
 }
@@ -89,7 +86,6 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     billingLink: (kind, userId) => billing.link(kind, userId), refreshPlan: (userId) => billing.refreshPlan(userId),
     grantLink: (kind, userId) => grants.link(kind, userId), ...overrides,
   };
-  const relay = new Relay(deps);
   const mcpUrl = new URL(`${cfg.baseUrl}/mcp`);
   const logCall = db.prepare(`INSERT INTO tool_calls (at, user_id, client_id, tool, customer_id, ok, error, ms, bytes, query_shape)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -363,8 +359,6 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   // Page-view beacon (analytics.ts): only browsers that run JS are counted, which keeps bots out.
   const beaconJs = BEACON_JS + (cfg.ga4MeasurementId ? gtagJs(cfg.ga4MeasurementId) : "");
   app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(beaconJs); });
-  // Keyword relay for the operator's research scripts (relay.ts); 10,000 keywords of up to 80 characters each.
-  app.post("/v1/keyword-metrics", express.json({ limit: "1mb" }), relay.keywordMetrics);
 
   app.post("/e", express.urlencoded({ extended: false, limit: "2kb" }), (req, res) => {
     const b = parseBeacon(req.body ?? {});
@@ -400,7 +394,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
         .catch((e) => console.error(`IndexNow: ${(e as Error).message}`));
     }
   };
-  return { app, billing, startJobs, relay, grants };
+  return { app, billing, startJobs, grants };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

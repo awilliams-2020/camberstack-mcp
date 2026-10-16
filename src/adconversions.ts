@@ -7,9 +7,9 @@
  *     captureClick() keeps it in a first-party, HttpOnly cookie for 90 days (the conversion window).
  *  2. The same browser finishes "Connect Google Ads" (the OAuth callback): record() ties the click to
  *     that user, once, on their FIRST connection only.
- *  3. flush() hands it to the conversions relay (~/conversions-relay, http://conversions-relay:3000), the
- *     operator's service that uploads the fleet's conversions through Google's Data Manager API, with
- *     this app's own relay key, exactly as theqrcode and redbudway do. Nothing about the user travels
+ *  3. flush() hands it to operations (~/operations, http://operations:3000), the operator's service that
+ *     uploads the fleet's conversions through Google's Data Manager API, with this app's own key, exactly
+ *     as theqrcode and redbudway do. Nothing about the user travels
  *     with it. Until 2026-10-16 this uploaded with its own refresh token (CONV_ADS_*), which died unnoticed,
  *     and Google now refuses UploadClickConversions from new projects anyway.
  *     Failures stay in the table and the hourly sweep retries them, so nothing is lost while the relay is down.
@@ -20,10 +20,10 @@ import { now } from "./db.js";
 import { readCookie } from "./http.js";
 
 export interface ConversionConfig {
-  /** http://conversions-relay:3000/v1/conversions */
-  relayUrl: string;
-  /** This app's crk_ key on the relay, limited to actionId. */
-  relayKey: string;
+  /** http://operations:3000/v1/conversions */
+  opsUrl: string;
+  /** This app's crk_ key on operations, limited to actionId. */
+  opsKey: string;
   /** Our "Google Ads connected" conversion action in 386-283-8095. */
   actionId: string;
 }
@@ -79,11 +79,11 @@ export class AdConversions {
       { user_id: string; kind: Kind; click_id: string; at: number }[];
     for (const p of pending) {
       try {
-        const res = await this.f(cfg.relayUrl, { method: "POST",
-          headers: { Authorization: `Bearer ${cfg.relayKey}`, "Content-Type": "application/json" },
+        const res = await this.f(cfg.opsUrl, { method: "POST",
+          headers: { Authorization: `Bearer ${cfg.opsKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ conversion_action_id: cfg.actionId, [p.kind]: p.click_id, conversion_time: new Date(p.at * 1000).toISOString() }) });
-        if (res.status !== 202) throw new Error(`relay ${res.status}: ${(await res.text()).slice(0, 300)}`);
-        // Handed over: the relay uploads it, retries it, and mails the operator if Google rejects it.
+        if (res.status !== 202) throw new Error(`operations ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        // Handed over: operations uploads it, retries it, and mails the operator if Google rejects it.
         this.db.prepare("UPDATE ad_conversions SET uploaded_at = ?, error = NULL, attempts = attempts + 1 WHERE user_id = ?").run(now(), p.user_id);
       } catch (e) {
         this.fail(p.user_id, (e as Error).message);

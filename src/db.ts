@@ -117,22 +117,6 @@ CREATE TABLE IF NOT EXISTS ad_conversions (
   attempts     INTEGER NOT NULL DEFAULT 0
 );
 
--- Conversion relay (relay.ts): an app posts ad-click conversions with a key; Camberstack uploads them to
--- Google Ads with the key owner's own Google connection, so the app needs no Google token of its own.
-CREATE TABLE IF NOT EXISTS relay_keys (
-  id                 TEXT PRIMARY KEY,
-  key_hash           TEXT NOT NULL UNIQUE,
-  user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  customer_id        TEXT NOT NULL,
-  login_customer_id  TEXT,
-  label              TEXT NOT NULL,
-  action_ids         TEXT NOT NULL,          -- comma-separated conversion action ids this key may report
-  scopes             TEXT NOT NULL DEFAULT 'conversions',  -- comma-separated: conversions, keyword_metrics
-  created_at         INTEGER NOT NULL,
-  last_used_at       INTEGER,
-  revoked_at         INTEGER
-);
-
 -- Lifecycle emails (lifecycle.ts): one row per user per kind, so each is sent at most once.
 CREATE TABLE IF NOT EXISTS email_log (
   user_id  TEXT NOT NULL,
@@ -204,12 +188,8 @@ export function openDb(dataDir: string): DB {
   // The admin's email on an /account session opened through "Log in as user" (account.ts); NULL = the user's own.
   const ws = new Set((db.prepare("PRAGMA table_info(web_sessions)").all() as { name: string }[]).map((c) => c.name));
   if (!ws.has("impersonator")) db.exec("ALTER TABLE web_sessions ADD COLUMN impersonator TEXT");
-  // Relay keys got scopes in 0.13.0: every key before then reports conversions only.
-  const rk = new Set((db.prepare("PRAGMA table_info(relay_keys)").all() as { name: string }[]).map((c) => c.name));
-  if (!rk.has("scopes")) db.exec("ALTER TABLE relay_keys ADD COLUMN scopes TEXT NOT NULL DEFAULT 'conversions'");
-  // Conversions moved to ~/conversions-relay (2026-10-16): their queue (never used, empty) and revoked keys go.
-  db.exec("DROP TABLE IF EXISTS relay_conversions");
-  db.prepare("DELETE FROM relay_keys WHERE revoked_at IS NOT NULL").run();
+  // The conversion and keyword relays moved to ~/operations (2026-10-16): their tables go.
+  db.exec("DROP TABLE IF EXISTS relay_conversions; DROP TABLE IF EXISTS relay_keys");
   return db;
 }
 

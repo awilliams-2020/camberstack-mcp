@@ -35,7 +35,7 @@ export interface Config {
   adminEmails: Set<string>;
   /** Google Analytics tools for everyone (GA4_PUBLIC=1). Off: only ADMIN_EMAILS/PRO_EMAILS see them, until Google verifies the scope. */
   ga4Public: boolean;
-  /** Hand our own campaign's conversions to the conversions relay (adconversions.ts); unset = clicks are kept but not sent. */
+  /** Hand our own campaign's conversions to operations (adconversions.ts); unset = clicks are kept but not sent. */
   conversions?: import("./adconversions.js").ConversionConfig;
   /** Lifecycle emails via Resend (lifecycle.ts); unset = none are sent. */
   mail?: import("./lifecycle.js").MailConfig;
@@ -95,8 +95,8 @@ export function loadConfig(): Config {
       ? { apiKey: process.env.RESEND_API_KEY, from: process.env.RESEND_FROM || "Adam at Camberstack <adam@camberstack.io>", replyTo: "adam@camberstack.io",
         postalAddress: process.env.MAIL_POSTAL_ADDRESS || undefined }
       : undefined,
-    conversions: ["CONV_RELAY_URL", "CONV_RELAY_KEY", "CONV_ADS_ACTION_ID"].every((k) => process.env[k])
-      ? { relayUrl: process.env.CONV_RELAY_URL!, relayKey: process.env.CONV_RELAY_KEY!, actionId: process.env.CONV_ADS_ACTION_ID! }
+    conversions: ["OPS_CONVERSIONS_URL", "OPS_KEY", "CONV_ADS_ACTION_ID"].every((k) => process.env[k])
+      ? { opsUrl: process.env.OPS_CONVERSIONS_URL!, opsKey: process.env.OPS_KEY!, actionId: process.env.CONV_ADS_ACTION_ID! }
       : undefined,
     matomo: process.env.MATOMO_URL && process.env.MATOMO_SITE_ID
       ? { url: process.env.MATOMO_URL, siteId: process.env.MATOMO_SITE_ID, token: process.env.MATOMO_AUTH_TOKEN ?? "" }
