@@ -115,6 +115,9 @@ class FakeAds {
         { text: "invoice template docx" },
       ] };
     }
+    // A big list: one row per keyword, searches = its position, so a test can tell rows apart.
+    if (req.keywords?.length > 100) return { results: req.keywords.map((text: string, i: number) => ({ text, keywordMetrics: {
+      avgMonthlySearches: String(i), competition: "LOW", monthlySearchVolumes: [{ year: "2026", month: "SEPTEMBER", monthlySearches: String(i) }] } })) };
     return { results: [{ text: "invoice software", closeVariants: ["invoicing software"], keywordMetrics: {
       avgMonthlySearches: "12100", competition: "HIGH",
       monthlySearchVolumes: [{ year: "2026", month: "AUGUST", monthlySearches: "11000" }, { year: "2026", month: "SEPTEMBER", monthlySearches: "13000" }],
@@ -1078,6 +1081,17 @@ describe("OAuth + MCP end to end", () => {
     expect(m.json.keywords[0]).toMatchObject({ keyword: "invoice software", avg_monthly_searches: 12100, monthly: { "2026-08": 11000, "2026-09": 13000 } });
     expect(m.json.no_data).toEqual(["zzz"]);
 
+    // Over 100 keywords: a compact table, one header and arrays, instead of an object per keyword. Up to 500.
+    const many = Array.from({ length: 150 }, (_, i) => `kw ${i}`);
+    const big = await call(token, "keyword_metrics", { customer_id: "1112223333", keywords: many });
+    expect(big.json.keywords).toBeUndefined();
+    expect(big.json.columns).toEqual(["keyword", "avg_monthly_searches", "competition", "bid_low", "bid_high", "in_account", "monthly"]);
+    expect(big.json.months).toEqual(["2026-09"]);
+    expect(big.json.rows).toHaveLength(150);
+    expect(big.json.rows[5]).toEqual(["kw 5", 5, "LOW", null, null, null, [5]]);
+    expect(big.json.no_data).toEqual([]);
+    expect((await call(token, "keyword_metrics", { customer_id: "1112223333", keywords: [...many, ...Array.from({ length: 900 }, (_, i) => `x ${i}`)] })).isError).toBe(true);
+
     expect((await call(token, "keyword_ideas", { customer_id: "1112223333" })).isError).toBe(true);  // needs a seed
     expect(ads.mutations.length).toBe(before);
   });
@@ -1799,6 +1813,33 @@ describe("OAuth + MCP end to end", () => {
     } finally {
       io.fetchImage = real;
     }
+  });
+
+  it("prices keywords for a keyword_metrics key with the owner's connection, and keeps each key to its scope", async () => {
+    const kwKey = createRelayKey(db, "owner@example.com", "111-222-3333", [], "research", null, ["keyword_metrics"]);
+    const convKey = createRelayKey(db, "owner@example.com", "111-222-3333", ["7585493163"], "app");
+    const post = (path: string, body: object, k: string) => fetch(`${base}${path}`, { method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${k}` }, body: JSON.stringify(body) });
+    const kws = Array.from({ length: 120 }, (_, i) => `kw ${i}`);
+
+    expect((await post("/v1/keyword-metrics", { keywords: kws }, "csk_wrongwrongwrongwrongwrong")).status).toBe(401);
+    expect((await post("/v1/keyword-metrics", { keywords: kws }, convKey)).status).toBe(403);          // a conversions key can't read Planner
+    expect((await post("/v1/conversions", { conversion_action_id: "7585493163", gclid: "Cj0KCQjw_test_click" }, kwKey)).status).toBe(403);
+    expect((await post("/v1/keyword-metrics", { keywords: [] }, kwKey)).status).toBe(400);
+    expect((await post("/v1/keyword-metrics", { keywords: kws, months: 60 }, kwKey)).status).toBe(400);
+
+    const ok = await post("/v1/keyword-metrics", { keywords: [...kws, "kw 0"], location_ids: ["2276"], language_id: "1001", months: 48 }, kwKey);
+    expect(ok.status).toBe(200);
+    const body = await ok.json();
+    expect(body.results).toHaveLength(120);  // Google's own shape: micros and enum months, for the script's own math
+    expect(body.results[3]).toMatchObject({ text: "kw 3", keywordMetrics: { avgMonthlySearches: "3" } });
+    const req = ads.plannerCalls.at(-1)!;
+    expect(req.method).toBe("generateKeywordHistoricalMetrics");
+    expect(req.req).toMatchObject({ language: "languageConstants/1001", geoTargetConstants: ["geoTargetConstants/2276"], keywordPlanNetwork: "GOOGLE_SEARCH" });
+    expect(req.req.keywords).toHaveLength(120);  // deduped
+    const { start, end } = req.req.historicalMetricsOptions.yearMonthRange;
+    const idx = (m: { year: number; month: string }) => m.year * 12 + ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"].indexOf(m.month);
+    expect(idx(end) - idx(start)).toBe(48);
   });
 
   it("relays an app's conversions with the key owner's connection, only for the key's actions", async () => {

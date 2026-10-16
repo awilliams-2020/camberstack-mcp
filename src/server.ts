@@ -365,6 +365,8 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   app.get("/e.js", (_q, r) => { r.setHeader("Cache-Control", "public, max-age=86400"); r.type("application/javascript").send(beaconJs); });
   // Conversion relay for the operator's own apps (relay.ts): key-authenticated, no cookies, no CORS.
   app.post("/v1/conversions", express.json({ limit: "10kb" }), relay.handle);
+  // 10,000 keywords of up to 80 characters each.
+  app.post("/v1/keyword-metrics", express.json({ limit: "1mb" }), relay.keywordMetrics);
 
   app.post("/e", express.urlencoded({ extended: false, limit: "2kb" }), (req, res) => {
     const b = parseBeacon(req.body ?? {});

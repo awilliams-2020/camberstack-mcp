@@ -7,6 +7,14 @@ export interface Release { version: string; date: string; summary: string; items
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.13.0", date: "2026-10-16",
+    summary: "Price up to 500 keywords at once, and a clear way back in when Google access is revoked.",
+    items: [
+      "**`keyword_metrics` takes up to 500 keywords** (was 100). Over 100, the result comes back as a compact table, so a big list doesn't fill your AI's context.",
+      "**Reconnecting after Google access is revoked.** Camberstack now tells your AI app to sign in again, instead of answering every request with \"reconnect\" while the app still showed it as connected.",
+    ],
+  },
+  {
     version: "0.12.0", date: "2026-10-16",
     summary: "A warning before switching accounts on the Free plan, and approved proposals stay valid until the account changes.",
     items: [

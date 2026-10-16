@@ -10,7 +10,7 @@ import { isDemo, type Account, type UserSession } from "./session.js";
 import { isUnexpected, reportError } from "./sentry.js";
 
 const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.12.0";
+export const SERVER_VERSION = "0.13.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
@@ -53,8 +53,11 @@ type GaWindow = { days: number; start_date?: string; end_date?: string };
 const excludeQueryRegex = z.string().min(1).max(500).optional()
   .describe("Leave out queries matching this RE2 regex, typically the brand name, e.g. (?i)acme|ac me");
 
+/** Past this, indentation is most of the reply (a 100-row table pretty-printed is one number per line): send it on one line. */
+const PRETTY_MAX = 20_000;
 function ok(data: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+  const pretty = JSON.stringify(data, null, 2);
+  return { content: [{ type: "text" as const, text: pretty.length > PRETTY_MAX ? JSON.stringify(data) : pretty }] };
 }
 function fail(e: unknown) {
   // A plan limit carries its facts as fields (plans.ts PlanLimitError); the first line stays the sentence logs match on.
@@ -201,10 +204,11 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
 
   tool("keyword_metrics", {
     title: "Keyword volume and bids (Keyword Planner)",
-    description: "Google Keyword Planner numbers for an exact list of keywords: average monthly searches, the last 12 months, competition and the top-of-page bid range in the account's currency. Use it to size keywords before adding them or to check a trend. Changes nothing.",
+    description: "Google Keyword Planner numbers for an exact list of keywords: average monthly searches, the last 12 months, competition and the top-of-page bid range in the account's currency. Use it to size keywords before adding them or to check a trend. "
+      + "Up to 100 keywords come back as one object each; over 100, as a compact table (columns, months, rows). Changes nothing.",
     inputSchema: {
       customer_id: customerId,
-      keywords: z.array(z.string().min(1).max(80)).min(1).max(100).describe("Keywords to look up"),
+      keywords: z.array(z.string().min(1).max(80)).min(1).max(500).describe("Keywords to look up, up to 500"),
       location_ids: locationIds, language_id: languageId,
     },
     annotations: read,

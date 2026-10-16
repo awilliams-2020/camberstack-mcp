@@ -543,12 +543,22 @@ export class UserSession {
     }));
     // Google omits keywords it has no data for; say so rather than dropping them silently.
     const covered = new Set(rows.flatMap((r) => [r.keyword, ...(r.close_variants ?? [])].map((k: string) => k.toLowerCase())));
-    return {
+    const head = {
       account: { customer_id: a.customerId, name: a.name, currency: a.currency },
       ...demoNote(a.customerId),
       target: { location_ids: o.location_ids, language_id: o.language_id },
-      keywords: rows,
-      no_data: keywords.filter((k) => !covered.has(k.toLowerCase())),
+    };
+    const noData = keywords.filter((k) => !covered.has(k.toLowerCase()));
+    if (rows.length <= COMPACT_OVER) return { ...head, keywords: rows, no_data: noData };
+    // A big list as objects repeats every field name per row and floods the AI's context: one header, then arrays.
+    const months = [...new Set(rows.flatMap((r) => Object.keys(r.monthly)))].sort();
+    return {
+      ...head,
+      columns: ["keyword", "avg_monthly_searches", "competition", "bid_low", "bid_high", "in_account", "monthly"],
+      months,
+      rows: rows.map((r) => [r.keyword, r.avg_monthly_searches, r.competition, r.top_of_page_bid.low, r.top_of_page_bid.high,
+        (r as { in_account?: string }).in_account ?? null, months.map((m) => (r.monthly as Record<string, number>)[m] ?? null)]),
+      no_data: noData,
     };
   }
 
@@ -1021,6 +1031,9 @@ export class UserSession {
 }
 
 export interface KeywordPlanOpts { location_ids: string[]; language_id: string }
+
+/** keyword_metrics answers with one object per keyword up to this many, a compact table above it. */
+const COMPACT_OVER = 100;
 
 const planTarget = (o: KeywordPlanOpts) => ({
   language: `languageConstants/${o.language_id}`,
