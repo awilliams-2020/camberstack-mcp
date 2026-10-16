@@ -10,6 +10,8 @@
  *  - `cip` (the visitor's IP, so the visit geolocates to them and not this container) is rejected
  *    with HTTP 400 unless `token_auth` with write access to the site comes with it.
  *  - Matomo silently drops a request with an empty `ua`.
+ *  - A visit's campaign comes from `mtm_campaign`/`mtm_kwd` (any name in campaign_var_name). `_rcn`/`_rck`
+ *    look right but Matomo 5 reads them only for goal attribution: sent alone, every visit files as Direct.
  *  - AI-assistant fetches go to the BotTracking plugin with `recMode=1` (NOT `bots=1`, which records
  *    the bot as a human visit), and only these 7 user agents are stored; keep AI_FETCHER in step with
  *    $aiAssistantPatterns in Matomo's plugins/BotTracking/BotDetector.php.
@@ -101,7 +103,7 @@ export class Analytics {
     if (!w) return;
     this.send({ url: `${this.cfg.site}${page}`, action_name: page, urlref: ref, ua: w.ua,
       lang: String(req.headers["accept-language"] ?? ""), cid: w.cid,
-      ...(campaign ? { _rcn: campaign } : {}), ...(keyword ? { _rck: keyword } : {}) }, w.ip);
+      ...(campaign ? { mtm_campaign: campaign } : {}), ...(keyword ? { mtm_kwd: keyword } : {}) }, w.ip);
   }
 
   /** Server-side outcome event, e.g. a Google Ads account connected. Same browser → same daily visitor. */

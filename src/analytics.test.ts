@@ -40,8 +40,8 @@ describe("analytics", () => {
     expect(sent).toHaveLength(2);
     const [chat, ad] = sent.map((s) => Object.fromEntries(s));
     expect(chat).toMatchObject({ idsite: "7", url: "https://camberstack.io/", urlref: "https://chatgpt.com/", cip: "203.0.113.9", token_auth: "t" });
-    expect(chat!._rcn).toBeUndefined();
-    expect(ad).toMatchObject({ _rcn: "google-ads-1", _rck: "mcp" });
+    expect(chat!.mtm_campaign).toBeUndefined();
+    expect(ad).toMatchObject({ mtm_campaign: "google-ads-1", mtm_kwd: "mcp" });
   });
 
   it("records a connect with nothing that identifies the account", () => {
