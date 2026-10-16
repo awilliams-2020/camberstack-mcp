@@ -455,6 +455,21 @@ describe("OAuth + MCP end to end", () => {
     expect(raw.some((r) => r.token_hash === token)).toBe(false); // hashed, never stored raw
   });
 
+  it("answers 401 once Google is disconnected, so the AI app signs in again instead of showing a dead connector", async () => {
+    const saved = (db.prepare("SELECT enc_refresh FROM users WHERE email = 'owner@example.com'").get() as { enc_refresh: string }).enc_refresh;
+    db.prepare("UPDATE users SET enc_refresh = NULL WHERE email = 'owner@example.com'").run();
+    try {
+      const res = await fetch(`${base}/mcp`, { method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name: "list_accounts", arguments: {} } }) });
+      expect(res.status).toBe(401);
+      expect(res.headers.get("www-authenticate")).toContain("resource_metadata");
+    } finally {
+      db.prepare("UPDATE users SET enc_refresh = ? WHERE email = 'owner@example.com'").run(saved);
+    }
+    expect((await call(token, "list_accounts")).isError).toBe(false);
+  });
+
   it("shows who's asking before Google, and won't finish a sign-in this browser didn't approve", async () => {
     // A stranger registers their own client (open DCR) and builds the links a phishing mail would carry.
     const evil = "https://attacker.example/cb";

@@ -277,6 +277,10 @@ export class CamberstackProvider implements OAuthServerProvider {
     const row = this.db.prepare("SELECT * FROM tokens WHERE token_hash = ? AND kind = 'access'").get(sha256(token)) as
       { client_id: string; user_id: string; scopes: string; resource: string | null; expires_at: number } | undefined;
     if (!row || row.expires_at < now()) throw new InvalidTokenError("Invalid or expired access token");
+    // No Google token (revoked, or never finished): a 401 is what makes the AI app run sign-in again. A tool
+    // error saying "reconnect" left users stuck behind a connector their app still showed as connected (2026-10-16).
+    const user = this.db.prepare("SELECT enc_refresh FROM users WHERE id = ?").get(row.user_id) as { enc_refresh: string | null } | undefined;
+    if (!user?.enc_refresh) throw new InvalidTokenError("Google is disconnected; sign in again");
     return {
       token,
       clientId: row.client_id,
