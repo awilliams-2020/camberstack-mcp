@@ -54,6 +54,20 @@ export async function catalog(fetchFields: () => Promise<FieldMeta[]>): Promise<
 /** Tests only. */
 export const resetCatalog = () => { cached = undefined; };
 
+/**
+ * A query with every value taken out, for the usage log: which fields and resources custom queries use, so the common
+ * ones can become their own tools. GAQL quotes every string, so after blanking quoted strings and bare numbers what's
+ * left is field names, keywords and Google's enum constants (LAST_30_DAYS, ENABLED): the schema, never the user's
+ * data (campaign names, keywords, ids). The privacy policy promises exactly this; keep it so.
+ */
+export function queryShape(query: string): string {
+  return query
+    .replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "?")
+    .replace(/(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])/g, "?")
+    .replace(/\?(?:\s*,\s*\?)+/g, "?")
+    .replace(/\s+/g, " ").trim().slice(0, 1000);
+}
+
 export interface ParsedGaql { select: string[]; from: string; where: string[]; orderBy: string[] }
 
 const FIELD = /\b[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+\b/g;

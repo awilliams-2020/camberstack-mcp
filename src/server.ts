@@ -91,8 +91,8 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
   };
   const relay = new Relay(deps);
   const mcpUrl = new URL(`${cfg.baseUrl}/mcp`);
-  const logCall = db.prepare(`INSERT INTO tool_calls (at, user_id, client_id, tool, customer_id, ok, error, ms, bytes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const logCall = db.prepare(`INSERT INTO tool_calls (at, user_id, client_id, tool, customer_id, ok, error, ms, bytes, query_shape)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
   const analytics = new Analytics({ matomoUrl: cfg.matomo?.url ?? "", siteId: cfg.matomo?.siteId ?? "",
     token: cfg.matomo?.token ?? "", site: cfg.baseUrl, fetch: overrides.analyticsFetch });
@@ -235,7 +235,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     let session: UserSession | undefined;
     const email = (db.prepare("SELECT email FROM users WHERE id = ?").get(userId) as { email: string } | undefined)?.email.toLowerCase();
     return buildServer(() => (session ??= UserSession.load(deps, userId)), (c) => {
-      logCall.run(now(), userId, clientId, c.tool, c.customerId, c.ok ? 1 : 0, c.error, c.ms, c.bytes);
+      logCall.run(now(), userId, clientId, c.tool, c.customerId, c.ok ? 1 : 0, c.error, c.ms, c.bytes, c.queryShape ?? null);
     }, undefined, cfg.ga4Public || (!!email && internalEmails.has(email)));
   };
   // 2026-07-28 traffic (server/discover, per-request _meta envelope). The SDK's own legacy leg would

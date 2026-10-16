@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   ok           INTEGER NOT NULL,
   error        TEXT,            -- first 1000 chars of the message shown to the AI (300 before 2026-10-15)
   ms           INTEGER NOT NULL,
-  bytes        INTEGER NOT NULL -- size of the result text
+  bytes        INTEGER NOT NULL, -- size of the result text
+  query_shape  TEXT              -- run_gaql only: the query with every value replaced by ? (gaql.ts queryShape)
 );
 CREATE INDEX IF NOT EXISTS tool_calls_at ON tool_calls(at);
 
@@ -209,6 +210,9 @@ export function openDb(dataDir: string): DB {
   if (!cols.has("time_zone")) db.exec("ALTER TABLE users ADD COLUMN time_zone TEXT");
   // Google scopes on their token as Google last reported them (sign-in, /connect, every refresh); NULL = not seen yet.
   if (!cols.has("google_scopes")) db.exec("ALTER TABLE users ADD COLUMN google_scopes TEXT");
+  // run_gaql's query shape (2026-10-15): which fields custom queries ask for, never the values in them.
+  const tc = new Set((db.prepare("PRAGMA table_info(tool_calls)").all() as { name: string }[]).map((c) => c.name));
+  if (!tc.has("query_shape")) db.exec("ALTER TABLE tool_calls ADD COLUMN query_shape TEXT");
   // The admin's email on an /account session opened through "Log in as user" (account.ts); NULL = the user's own.
   const ws = new Set((db.prepare("PRAGMA table_info(web_sessions)").all() as { name: string }[]).map((c) => c.name));
   if (!ws.has("impersonator")) db.exec("ALTER TABLE web_sessions ADD COLUMN impersonator TEXT");

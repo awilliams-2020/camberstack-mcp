@@ -1,11 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { checkGaql, closest, lookupFields, parseGaql, type Catalog, type FieldMeta } from "./gaql.js";
+import { checkGaql, closest, lookupFields, parseGaql, queryShape, type Catalog, type FieldMeta } from "./gaql.js";
 
 // A trimmed snapshot of Google's real field catalog (v23, 2026-10-14): ten resources with all their attributes,
 // and a handful of metrics and segments.
 const rows = JSON.parse(readFileSync(new URL("./fixtures/gaql-catalog.json", import.meta.url), "utf8")) as FieldMeta[];
 const cat: Catalog = new Map(rows.map((f) => [f.name, f]));
+
+describe("queryShape, for the usage log", () => {
+  it("keeps fields, keywords and Google's constants, and takes out every value", () => {
+    expect(queryShape(`SELECT campaign.name, metrics.clicks FROM campaign
+      WHERE campaign.name LIKE '%Acme Plumbing%' AND campaign.id IN (123, 456,789) AND metrics.cost_micros > 1500000.5
+        AND search_term_view.search_term = "free invoice maker" AND segments.date DURING LAST_30_DAYS AND campaign.status = ENABLED
+      ORDER BY metrics.clicks DESC LIMIT 50`))
+      .toBe("SELECT campaign.name, metrics.clicks FROM campaign WHERE campaign.name LIKE ? AND campaign.id IN (?) AND metrics.cost_micros > ? "
+        + "AND search_term_view.search_term = ? AND segments.date DURING LAST_30_DAYS AND campaign.status = ENABLED ORDER BY metrics.clicks DESC LIMIT ?");
+  });
+
+  it("takes out dates, resource names and quotes inside strings", () => {
+    expect(queryShape("SELECT ad_group.id FROM ad_group WHERE segments.date BETWEEN '2026-01-01' AND '2026-01-31' AND ad_group.campaign = 'customers/1112223333/campaigns/10' AND ad_group.name = 'Bob\\'s'"))
+      .toBe("SELECT ad_group.id FROM ad_group WHERE segments.date BETWEEN ? AND ? AND ad_group.campaign = ? AND ad_group.name = ?");
+  });
+
+  it("keeps digits that are part of a name, and caps the length", () => {
+    expect(queryShape("SELECT metrics.top_impression_percentage FROM customer WHERE segments.date DURING LAST_7_DAYS"))
+      .toBe("SELECT metrics.top_impression_percentage FROM customer WHERE segments.date DURING LAST_7_DAYS");
+    expect(queryShape(`SELECT ${"campaign.name, ".repeat(200)}campaign.id FROM campaign`)).toHaveLength(1000);
+  });
+});
 
 describe("checkGaql against Google's field catalog", () => {
   // The mistakes users' assistants actually made (tool_calls.error, 2026-10).

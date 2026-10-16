@@ -1309,8 +1309,13 @@ describe("OAuth + MCP end to end", () => {
     expect({ plan: now.plan, used: now.accounts_in_use }).toEqual({ plan: left.plan, used: left.accounts_in_use });
   });
 
-  it("logs each tool call by name, without arguments or results", async () => {
+  it("logs each tool call by name, without arguments or results; for run_gaql only the query's shape", async () => {
+    await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT campaign.id, campaign.name FROM campaign WHERE campaign.name = 'Secret Brand' AND campaign.id = 10" });
+    const gaql = db.prepare("SELECT query_shape FROM tool_calls WHERE tool = 'run_gaql' ORDER BY id DESC LIMIT 1").get();
+    expect(gaql).toEqual({ query_shape: "SELECT campaign.id, campaign.name FROM campaign WHERE campaign.name = ? AND campaign.id = ?" });
     const rows = db.prepare("SELECT * FROM tool_calls ORDER BY id").all() as any[];
+    expect(JSON.stringify(rows)).not.toContain("Secret Brand");
+    expect(rows.filter((r) => r.tool !== "run_gaql").every((r) => r.query_shape === null)).toBe(true);
     const tools = rows.map((r) => r.tool);
     expect(tools).toContain("account_overview");
     expect(tools).toContain("apply_changes");

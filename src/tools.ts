@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import { MAX_CHANGES, PublicChangeSchema } from "./changes.js";
 import { landingPages, listProperties, report } from "./ga4.js";
+import { queryShape } from "./gaql.js";
 import { GA_TARGET, PublicGaChangeSchema, gaSetup } from "./ga4-changes.js";
 import { ACCOUNT_WINDOW_DAYS, PlanLimitError } from "./plans.js";
 import { isDemo, type Account, type UserSession } from "./session.js";
@@ -66,6 +67,8 @@ export interface ToolCall {
   error: string | null;
   ms: number;
   bytes: number;
+  /** run_gaql only: gaql.ts queryShape, never the values. */
+  queryShape?: string | null;
 }
 
 /** What the /tools page and llms.txt show about each tool; filled as buildServer registers them. */
@@ -92,6 +95,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
           tool: name, customerId: typeof cid === "string" ? cid.replace(/-/g, "") : null,
           ok: !("isError" in out), error: "isError" in out ? out.content[0]!.text.slice(7, 1007) : null,
           ms: Date.now() - t0, bytes: out.content[0]!.text.length,
+          queryShape: name === "run_gaql" && typeof (a as { query?: unknown })?.query === "string" ? queryShape((a as { query: string }).query) : null,
         });
       } catch { /* logging must never break a tool */ }
       release();  // after the log: the account now counts as used from tool_calls instead
