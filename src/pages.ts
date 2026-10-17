@@ -174,7 +174,7 @@ export function homePage(baseUrl: string): string {
 <li><strong>Undo on every plan.</strong> Ask your AI to undo a change, and it reverses exactly that change.</li>
 <li><strong>Warnings before you approve.</strong> Turning a campaign on, more than doubling a budget or bid, or switching bid strategy is flagged in the proposal.</li>
 <li><strong>Free for 1 Google Ads account, with unlimited changes.</strong> No card. Pro is $15/month for up to 10 accounts.</li>
-<li>Try every tool on a <a href="#demo">demo account</a> before using it on your own.</li>
+<li><strong>A <a href="#demo">demo account</a> to try first.</strong> Every tool works on it before you use your own.</li>
 <li>Changes range from negative keywords and budgets to bids, targeting and whole new Search, Performance Max, Display and YouTube campaigns.</li>
 <li>Connect Claude, ChatGPT, Cursor or any MCP app with one URL and a Google sign-in. Works with manager (MCC) accounts.</li>
 <li>Optional, read-only Search Console: see where you already rank, and which searches you may be paying for twice.</li>
@@ -214,7 +214,7 @@ export function homePage(baseUrl: string): string {
 <tr><td>Set a campaign's tracking URL suffix</td><td>Restores the previous suffix</td></tr>
 <tr><td>Create a conversion action, or set how many conversions a click can count</td><td>Removes it / restores the previous setting</td></tr>
 </table>
-<p class="muted">A new campaign is always created paused, so building it and letting it spend are two separate approvals. Removing a campaign's last location is also flagged.
+<p class="muted">A new campaign is always created paused, so building it and letting it spend are two separate approvals. Besides the warnings listed at the top, a proposal also warns before removing a campaign's last location.
 It cannot delete anything you built, touch billing, or edit anything outside Google Ads.
 Any question beyond these tools is answered with read-only queries. <a href="/tools">Every tool and what it can do</a>;
 the code is <a href="${SOURCE_URL}">open source</a>.</p>
