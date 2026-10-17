@@ -368,7 +368,7 @@ export function claudeGuidePage(baseUrl: string): string {
     description: "Connect your Google Ads account to Claude with an MCP server. No developer token or Google Cloud project: sign in with Google, then ask Claude about your account.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "TechArticle",
-      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-13",
+      headline: "Connect Google Ads to Claude", url: `${baseUrl}/google-ads-claude`, dateModified: "2026-10-17",
       author: { "@type": "Organization", name: "Camberstack", url: baseUrl },
       about: { "@type": "SoftwareApplication", name: "Camberstack", url: baseUrl },
     },
@@ -376,6 +376,9 @@ export function claudeGuidePage(baseUrl: string): string {
 <h1>Connect Google Ads to Claude</h1>
 <p class="lede">Claude can read your Google Ads account, answer questions about it,
 and make the changes you approve. Camberstack is in Claude's connector directory, so it takes a few clicks and a Google sign-in. No developer token, no Google Cloud project.</p>
+<p><a class="btn" href="https://claude.ai/directory/connectors/camberstack">Open in Claude's directory</a></p>
+<p id="demo"><strong>Try it on a demo account first.</strong> Once connected, ask <em>"Show me Camberstack's demo account"</em>: a sample
+plumbing business where you can try questions, proposals and undo. Changes there never reach Google.</p>
 
 <h2>Set it up</h2>
 <p>Camberstack is a hosted Google Ads MCP server. MCP (Model Context Protocol) is how Claude connects to outside tools.</p>

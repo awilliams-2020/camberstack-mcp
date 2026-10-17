@@ -2104,6 +2104,9 @@ describe("OAuth + MCP end to end", () => {
     const dir = await (await fetch(`${base}/google-ads-claude`)).text();
     expect(dir).toContain('href="https://claude.ai/directory/connectors/camberstack"');
     expect(dir).not.toContain("paste the server URL");
+    // The Reddit "demo" ad lands here, so the demo is on the first screen, under a button to the directory.
+    expect(dir).toContain('<a class="btn" href="https://claude.ai/directory/connectors/camberstack">');
+    expect(dir.split("<h2>Set it up</h2>")[0]).toContain("Show me Camberstack's demo account");
     // Error messages are troubleshot once, on /docs, in the words users see; each guide keeps its own app's fix and links there,
     // so the two guides don't repeat each other (Google declined to index them while they were 54% identical).
     const cg = await (await fetch(`${base}/google-ads-claude`)).text(), gg = await (await fetch(`${base}/google-ads-chatgpt`)).text();
