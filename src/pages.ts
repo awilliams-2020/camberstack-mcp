@@ -180,7 +180,7 @@ and any applied change can be undone in one step, on the free plan too.</p>
 <li>Connect Claude, ChatGPT, Cursor or any MCP app with one URL and a Google sign-in. Works with manager (MCC) accounts.</li>
 <li>Optional, read-only Search Console: see where you already rank, and which searches you may be paying for twice.</li>
 </ul>
-<p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;or <a href="#demo">try it on a demo account</a> first.</span></p>
+<p><a class="btn" href="#setup">Connect</a></p>
 
 <h2 id="example">What a change looks like</h2>
 <p>From the demo account, a sample plumbing business:</p>
