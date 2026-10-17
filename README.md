@@ -5,7 +5,9 @@
 Connect Google Ads (and, optionally, Search Console) to Claude, ChatGPT, Cursor or any MCP client. Your AI
 reads the account with read-only tools and can propose changes, from negative keywords to whole Search,
 Performance Max, Display and YouTube campaigns. **Nothing changes in the account until you approve a specific
-proposal, and every applied change can be undone.**
+proposal, and every applied change can be undone in one call, on every plan.** Risky changes (turning a campaign on,
+more than doubling a budget or bid, switching bid strategy) are flagged in the proposal before you approve. A demo
+account lets anyone try every tool first.
 
 Hosted: **https://camberstack.io/mcp** (Free: 1 Google Ads account at a time with one switch a month, every tool, unlimited changes; Pro $15/mo: up to 10 accounts).
 

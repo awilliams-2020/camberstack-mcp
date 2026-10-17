@@ -155,7 +155,7 @@ export function homePage(baseUrl: string): string {
   return layout({
     baseUrl, path: "/",
     title: "Camberstack: hosted Google Ads MCP for Claude and ChatGPT",
-    description: "A hosted Google Ads MCP server. Connect Google Ads to Claude, ChatGPT or Cursor with a Google sign-in: no developer token or Google Cloud project. Read your account and Search Console, and make only the changes you approve, with undo.",
+    description: "A hosted Google Ads MCP server for Claude, ChatGPT and Cursor. Your AI proposes changes, you approve each one, and any applied change can be undone in one step. Free for 1 account with unlimited changes; $15/month for 10.",
     jsonLd: {
       "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Camberstack",
       applicationCategory: "BusinessApplication", operatingSystem: "Web", url: baseUrl,
@@ -169,13 +169,15 @@ export function homePage(baseUrl: string): string {
     },
     body: `
 <h1>A hosted Google Ads MCP server</h1>
-<p class="lede">Connect your Google Ads account to Claude, ChatGPT, Cursor or any MCP app with one URL and a Google sign-in.
-No developer token, no Google Cloud project, nothing to install. Your AI can read the account, build and tune campaigns, and make
-changes only after you approve each one.</p>
+<p class="lede">Your AI reads your Google Ads account and proposes changes. Nothing changes until you approve,
+and any applied change can be undone in one step, on the free plan too.</p>
 <ul>
-<li>Works with manager (MCC) accounts.</li>
-<li>Any question about your account is answered with read-only queries.</li>
-<li>Changes range from negative keywords and budgets to bids, targeting and whole new Search, Performance Max, Display and YouTube campaigns. Each applied change can be undone.</li>
+<li><strong>Undo on every plan.</strong> Ask your AI to undo a change, and it reverses exactly that change.</li>
+<li><strong>Warnings before you approve.</strong> Turning a campaign on, more than doubling a budget or bid, or switching bid strategy is flagged in the proposal.</li>
+<li><strong>Free for 1 Google Ads account, with unlimited changes.</strong> No card. Pro is $15/month for up to 10 accounts.</li>
+<li><strong>Try it first</strong> on a <a href="#demo">demo account</a>, with every tool and nothing reaching Google.</li>
+<li>Changes range from negative keywords and budgets to bids, targeting and whole new Search, Performance Max, Display and YouTube campaigns.</li>
+<li>Connect Claude, ChatGPT, Cursor or any MCP app with one URL and a Google sign-in. Works with manager (MCC) accounts.</li>
 <li>Optional, read-only Search Console: see where you already rank, and which searches you may be paying for twice.</li>
 </ul>
 <p><a class="btn" href="#setup">Connect</a> <span class="muted">&nbsp;Free plan, no card. Or <a href="#demo">try it on a demo account</a> first.</span></p>
