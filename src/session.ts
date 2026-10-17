@@ -501,16 +501,19 @@ export class UserSession {
     try {
       rows = await fetch(query);
     } catch (e) {
-      // Google's codes here (UNRECOGNIZED_FIELD…) would draw run_gaql's account-query fixes, which don't apply: swap them for the lookup's own.
-      if (e instanceof AdsApiError) (e as Error).message = (e as Error).message.replace(/ → [^;\n]*/g, "")
-        + `\nA field lookup has no FROM and selects from: ${FIELD_COLUMNS}. `
-        + "E.g. SELECT name, category, selectable WHERE name LIKE '%search_term%', or SELECT attribute_resources, metrics, segments WHERE name = 'campaign'.";
+      // A rejected lookup (400) would draw run_gaql's account-query fixes (UNRECOGNIZED_FIELD…), which don't apply: swap them
+      // for the lookup's own, and say how to read an account, since a query that forgot its FROM lands here too.
+      if (e instanceof AdsApiError && e.status === 400) (e as Error).message = (e as Error).message.replace(/ → .*?(?=; [A-Z_]{3,} |\n|$)/g, "")
+        + `\nA query with no FROM is a field lookup, which selects from: ${FIELD_COLUMNS}. `
+        + "E.g. SELECT name, category, selectable WHERE name LIKE '%search_term%', or SELECT attribute_resources, metrics, segments WHERE name = 'campaign'. "
+        + "To read the account instead, add FROM and a resource (FROM campaign).";
       throw e;
     }
-    // A resource's metrics/segments and a field's selectable_with run to thousands of names: cap each list.
-    const LIST = 200;
+    // A field's selectable_with can run to hundreds of names; WHERE filters rows, not a row's lists, so cap only well past the
+    // longest a resource needs (campaign: ~200 metrics, 2026-10-16).
+    const LIST = 500;
     const out = rows.slice(0, 500).map(({ resourceName: _, ...r }) => Object.fromEntries(Object.entries(r).map(([k, v]) =>
-      [k, Array.isArray(v) && v.length > LIST ? [...v.slice(0, LIST), `… ${v.length - LIST} more: narrow with WHERE`] : v])));
+      [k, Array.isArray(v) && v.length > LIST ? [...v.slice(0, LIST), `… ${v.length - LIST} more not shown`] : v])));
     return { field_lookup: "Google's field catalog (no account involved)", rows: out, truncated: rows.length > 500, total_rows: rows.length };
   }
 

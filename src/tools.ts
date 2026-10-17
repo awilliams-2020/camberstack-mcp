@@ -10,7 +10,7 @@ import { isDemo, type Account, type UserSession } from "./session.js";
 import { isUnexpected, reportError } from "./sentry.js";
 
 const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.14.0";
+export const SERVER_VERSION = "0.14.1";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
@@ -431,6 +431,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   // The SDK lists every enabled tool, and a disabled one also refuses calls: filter the listing instead.
   const list = (server.server as unknown as { _getRequestHandler(m: string): (req: unknown, ctx: unknown) => Promise<ListToolsResult> })
     ._getRequestHandler("tools/list");
+  // A private SDK method: fail at startup, not by listing nothing, if an SDK update renames it.
+  if (typeof list !== "function") throw new Error("MCP SDK: no tools/list handler to filter (UNLISTED in tools.ts)");
   server.server.setRequestHandler("tools/list", async (req, ctx) => {
     const res = await list(req, ctx);
     return { ...res, tools: res.tools.filter((t) => !UNLISTED.has(t.name)) };

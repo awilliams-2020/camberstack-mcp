@@ -48,6 +48,16 @@ describe("lifecycle emails", () => {
     expect(await lc.run()).toBe(0);  // never twice
   });
 
+  it("doesn't count a run_gaql field lookup as using Camberstack: it reads no account (0.14.0)", async () => {
+    const { db, lc, sent, user } = setup();
+    const gaql = (userId: string, cid: string | null) =>
+      db.prepare("INSERT INTO tool_calls (at, user_id, tool, customer_id, ok, ms, bytes) VALUES (?, ?, 'run_gaql', ?, 1, 10, 10)").run(now(), userId, cid);
+    user("lookup", "lookup@example.com", 3); gaql("lookup", null);
+    user("queried", "queried@example.com", 3); gaql("queried", "1112223333");
+    expect(await lc.run()).toBe(1);
+    expect(sent.map((m) => m.to[0])).toEqual(["lookup@example.com"]);
+  });
+
   it("sends limit_reached once, the morning after the plan gate refused a second account, with when the next switch opens", async () => {
     const { db, lc, sent, user, call } = setup();
     const refused = (userId: string, daysAgo: number, error = "Plan limit: Camberstack has been used on 2 Google Ads accounts; "

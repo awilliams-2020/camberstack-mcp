@@ -147,6 +147,19 @@ describe("gaql_fields lookup (unlisted; apps that hold it still call it)", () =>
   it("suggests the resource it couldn't find", () => {
     expect(() => lookupFields(cat, { resource: "bid_strategy" })).toThrow("Closest:");
   });
+  it("still names the field behind the usual slips (audit of 0.14.0's tightening)", () => {
+    const names = [...cat.values()].filter((f) => f.category !== "RESOURCE").map((f) => f.name);
+    const top = (n: string) => closest(n, names);
+    expect(top("metrics.cost")).toContain("metrics.cost_micros");
+    expect(top("ad_group.cpc_bid")).toContain("ad_group.cpc_bid_micros");
+    expect(top("ad_group_criterion.keyword_text")).toContain("ad_group_criterion.keyword.text");
+    expect(top("segments.device_type")).toContain("segments.device");
+    expect(top("metrics.impression_share").some((n) => n.endsWith("_impression_share"))).toBe(true);
+    expect(top("campaign.status_reason").some((n) => n.endsWith("primary_status_reasons"))).toBe(true);
+    // …and still nothing for names nothing resembles.
+    expect(top("campaign.url_expansion_opt_out")).toEqual([]);
+    expect(top("conversion_action.all_conversions_settings")).toEqual([]);
+  });
   it("ranks the shared last part first", () => {
     expect(closest("campaign.max_clicks.cpc_bid_ceiling_micros", ["campaign.target_spend.cpc_bid_ceiling_micros", "campaign.max_clicks"])[0])
       .toBe("campaign.target_spend.cpc_bid_ceiling_micros");

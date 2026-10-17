@@ -7,6 +7,14 @@ export interface Release { version: string; date: string; summary: string; items
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.14.1", date: "2026-10-16",
+    summary: "Query-error fixes for the usual slips.",
+    items: [
+      "**Suggestions for the usual slips are back.** `metrics.cost` points at `metrics.cost_micros`, `keyword_text` at `keyword.text`, `segments.device_type` at `segments.device`, which 0.14.0's stricter matching had dropped.",
+      "**A query that forgot its FROM** now says to add one, and a temporary Google error on a field lookup no longer reads as a syntax problem.",
+    ],
+  },
+  {
     version: "0.14.0", date: "2026-10-16",
     summary: "Field lookups inside custom queries, and query errors that name the fix.",
     items: [

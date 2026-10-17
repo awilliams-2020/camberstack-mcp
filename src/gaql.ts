@@ -242,10 +242,13 @@ export function closest(name: string, pool: string[]): string[] {
   if (sameLeaf.length) return sameLeaf.slice(0, 8).map((x) => x.c);
   // Otherwise only names that are plausibly what was meant, judged on the last part: sharing the resource prefix alone
   // offered campaign.campaign_group for campaign.url_expansion_opt_out (2026-10-15), and a wrong guess costs a retry.
+  const flat = name.replace(/\./g, "_");
   const plausible = (c: string) => {
     const cl = c.split(".").at(-1)!;
-    // One part inside the other counts only when it's most of it: "conversions" isn't what "all_conversions_settings" meant.
-    return (Math.min(cl.length, leaf.length) >= Math.max(4, 0.6 * Math.max(cl.length, leaf.length)) && (cl.includes(leaf) || leaf.includes(cl)))
+    return c.replace(/\./g, "_") === flat                                  // ad_group_criterion.keyword_text → keyword.text
+      || (leaf.length >= 4 && cl.includes(leaf))                           // metrics.cost → cost_micros, impression_share → search_impression_share
+      || (cl.length >= 4 && leaf.startsWith(`${cl}_`))                      // segments.device_type → segments.device
+      // but not a word inside a longer name: "conversions" isn't what "all_conversions_settings" meant
       || levenshtein(leaf, cl) <= Math.max(2, Math.floor(leaf.length / 3));
   };
   return scored.filter((x) => x.s <= best.s + 3 && plausible(x.c)).slice(0, 3).map((x) => x.c);

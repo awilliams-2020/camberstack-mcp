@@ -53,12 +53,13 @@ class FakeAds {
   async searchFields(q: string) {
     if (q === CATALOG_QUERY) return JSON.parse(readFileSync(new URL("./fixtures/gaql-catalog.json", import.meta.url), "utf8"));
     this.fieldQueries.push(q);
+    if (q.includes("quota")) throw new AdsApiError(429, JSON.stringify({ error: { code: 429, message: "Resource has been exhausted." } }));
     if (q.includes("bogus_column")) {
       throw new AdsApiError(400, JSON.stringify({ error: { details: [{ errors: [{ errorCode: { queryError: "UNRECOGNIZED_FIELD" },
         message: "Unrecognized field in the query: 'bogus_column'." }] }] } }));
     }
     return [{ resourceName: "googleAdsFields/segments.search_term", name: "segments.search_term", category: "SEGMENT", selectable: true,
-      selectableWith: Array.from({ length: 250 }, (_, i) => `resource_${i}`) }];
+      selectableWith: Array.from({ length: 650 }, (_, i) => `resource_${i}`) }];
   }
   async search(_cid: string, q: string): Promise<any[]> {
     // Google's rule: a field in WHERE or ORDER BY must be in SELECT too.
@@ -577,14 +578,19 @@ describe("OAuth + MCP end to end", () => {
     expect(ads.fieldQueries.at(-1)).toBe("SELECT name, selectable_with WHERE name = 'segments.search_term'");
     expect(look.json.field_lookup).toBeDefined();
     expect(look.json.rows[0].resourceName).toBeUndefined();
-    expect(look.json.rows[0].selectableWith).toHaveLength(201);
-    expect(look.json.rows[0].selectableWith.at(-1)).toBe("… 50 more: narrow with WHERE");
+    expect(look.json.rows[0].selectableWith).toHaveLength(501);
+    expect(look.json.rows[0].selectableWith.at(-1)).toBe("… 150 more not shown");
     // A bad lookup gets the lookup's columns, not run_gaql's fixes for account queries (seen on dev, 2026-10-16).
     const wrong = await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT name, bogus_column WHERE name = 'campaign.id'" });
     expect(wrong.isError).toBe(true);
     expect(wrong.text).toContain("UNRECOGNIZED_FIELD Unrecognized field in the query: 'bogus_column'.");
     expect(wrong.text).not.toContain("prefixed with their resource");
-    expect(wrong.text).toContain("A field lookup has no FROM and selects from: name, category");
+    expect(wrong.text).toContain("A query with no FROM is a field lookup, which selects from: name, category");
+    expect(wrong.text).toContain("To read the account instead, add FROM");
+    // Only a rejected lookup (400) gets that: a quota or server error isn't a syntax problem.
+    const busy = await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT name WHERE name = 'quota'" });
+    expect(busy.isError).toBe(true);
+    expect(busy.text).not.toContain("field lookup");
 
     const bad = await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT campaign.id, campaign.maximize_clicks.cpc_bid_ceiling_micros FROM campaign" });
     expect(bad.isError).toBe(true);
