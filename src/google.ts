@@ -28,7 +28,7 @@ export interface GoogleCreds {
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
 
-/** `extraScopes`: more services asked at sign-in (Google Analytics once GA4_PUBLIC is on); each stays an untickable box. */
+/** `extraScopes`: more services asked at sign-in (Google Analytics); each stays an untickable box. */
 export function googleAuthUrl(creds: GoogleCreds, redirectUri: string, state: string, extraScopes: readonly string[] = []): string {
   return `${GOOGLE_AUTH}?${new URLSearchParams({
     client_id: creds.clientId,

@@ -34,7 +34,7 @@ export interface Preset {
 export const PRESETS: Preset[] = [
   {
     id: "ga4-open",
-    plan: "Once Google verifies the Analytics scopes and GA4_PUBLIC=1 is deployed (LAUNCH.md).",
+    plan: "Now: Google verified the Analytics scopes 2026-10-17 and they're on for everyone (LAUNCH.md).",
     audience: "all",
     subject: "Google Analytics now works in Camberstack",
     body: `Hi,
@@ -44,7 +44,7 @@ Camberstack can now read your Google Analytics 4 data, alongside your Google Ads
 - Which landing pages turn ad clicks into conversions?
 - How did paid and organic traffic compare last month?
 
-The first time you ask, Camberstack gives you a link to add Google Analytics to your connection. Changes to your Analytics settings still wait for your approval, and each one can be undone.
+New connections ask for Google Analytics on Google's sign-in screen, as an optional box. If you're already connected, the first time you ask, Camberstack gives you a link that adds it, no reconnecting. Changes to your Analytics settings still wait for your approval, and each one can be undone.
 
 Everything else that changed recently: https://camberstack.io/changelog
 

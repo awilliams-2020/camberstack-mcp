@@ -10,7 +10,7 @@ import type { ToolDoc } from "./tools.js";
 
 const CONTACT = "adam@camberstack.io";
 // Each policy keeps its own date: changing the terms mustn't re-date a privacy policy Google is reviewing.
-const PRIVACY_UPDATED = "2026-10-15";
+const PRIVACY_UPDATED = "2026-10-17";
 const TERMS_UPDATED = "2026-10-15";
 
 const CSS = `
@@ -230,7 +230,7 @@ queries and positions, and line them up against your ads:</p>
 <li><strong>Opportunities:</strong> searches just off page 1, and top results with a click-through rate low enough to point at the title.</li>
 <li><strong>Indexing:</strong> whether Google has indexed a page and why not, when it last crawled it, and when it last read your sitemap.</li>
 </ul>
-<p class="muted">Camberstack can't change anything in Search Console. Google Ads and Search Console are each optional: untick either one, and when you later ask about it Camberstack gives you a one-click link that adds it.
+<p class="muted">Camberstack can't change anything in Search Console. Google Ads, Search Console and Google Analytics are each optional: untick any of them, and when you later ask about it Camberstack gives you a one-click link that adds it.
 The Search Console tools work without a Google Ads account too: <a href="/google-search-console-mcp">Search Console MCP</a>.</p>
 
 <h2 id="setup">Connect</h2>
@@ -247,7 +247,7 @@ ${COPY_JS}
 ${cmd(`claude mcp add --transport http camberstack ${mcpUrl}`)}
 <h3>Cursor, VS Code, others</h3>
 ${cmd(`{ "mcpServers": { "camberstack": { "url": "${mcpUrl}" } } }`)}
-<p class="muted">Your AI app handles sign-in. Google shows exactly what Camberstack asks for before anything is shared: your Google Ads, and (optional, read-only) Search Console.</p>
+<p class="muted">Your AI app handles sign-in. Google shows exactly what Camberstack asks for before anything is shared: your Google Ads, and (optional) read-only Search Console and Google Analytics, which changes nothing without your approval.</p>
 <h3 id="demo">Want to look first?</h3>
 <p>Connect, then ask <em>"Show me Camberstack's demo account"</em>. It's a sample plumbing business with six months of
 campaigns and search terms, so you can try questions, proposals, applying and undo without touching a real account.
@@ -352,7 +352,7 @@ expired proposal, are covered in <a href="/docs#troubleshooting">the documentati
 const commonQuestions = (app: string) => `<h3>Do I need a Google Ads developer token?</h3>
 <p>No. Camberstack has its own Google Ads API access. You sign in with Google and choose what to share.</p>
 <h3>Does ${app} see my whole Google account?</h3>
-<p>No. It gets Google Ads access, your email address and, if you leave it ticked, read-only Search Console. Nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
+<p>No. It gets Google Ads access, your email address and, if you leave them ticked, read-only Search Console and Google Analytics (changed only when you approve a proposal). Nothing else: no Gmail, Drive or calendar. Details in the <a href="/privacy">privacy policy</a>.</p>
 <h3>What does it cost?</h3>
 <p>Free on one Google Ads account, with every tool and unlimited changes. <a href="/#pricing">Pro</a> covers up to 10 accounts for ${PRO_PRICE_LABEL}.</p>`;
 
@@ -514,8 +514,8 @@ If you use Claude too, setup there is shorter: see <a href="/google-ads-claude">
 <p>ChatGPT blocks disconnect requests from chat, so sign in at <a href="/account">camberstack.io/account</a> and choose
 <strong>Disconnect Google Ads</strong>, or remove Camberstack at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
 <h3>Does ChatGPT see my whole Google account?</h3>
-<p>No. The Google sign-in is Camberstack's, not ChatGPT's, and it shares only Google Ads, your email address and, if you leave it
-ticked, read-only Search Console. ChatGPT sees the answers Camberstack returns to the questions you ask, nothing else.</p>
+<p>No. The Google sign-in is Camberstack's, not ChatGPT's, and it shares only Google Ads, your email address and, if you leave them
+ticked, read-only Search Console and Google Analytics (changed only when you approve a proposal). ChatGPT sees the answers Camberstack returns to the questions you ask, nothing else.</p>
 <h3>Does it need a paid Camberstack plan?</h3>
 <p>No. One Google Ads account is free with every tool; <a href="/#pricing">Pro</a> is for managing up to 10. The paid ChatGPT plan
 in <a href="#before">Before you start</a> is OpenAI's requirement, not ours.</p>
@@ -808,7 +808,7 @@ change your Google Ads account. This policy explains what we access, why, and wh
 <li><strong>Your Google account email and a stable Google account ID</strong> (the <code>openid</code> and <code>email</code> scopes), so the same person gets the same account and change history each time.</li>
 <li><strong>Your Google Ads data</strong> (the <code>https://www.googleapis.com/auth/adwords</code> scope): account and campaign structure, performance metrics, search terms, keywords and conversion settings, read when your AI assistant calls a Camberstack tool.</li>
 <li><strong>Your Search Console data, read-only and optional</strong> (the <code>https://www.googleapis.com/auth/webmasters.readonly</code> scope): the websites you have verified, their Google Search clicks, impressions, queries and positions, Google's index status for pages you ask about, and the sitemaps you have submitted, read when your AI assistant calls a Search Console tool, for example to compare what you pay for with where you already rank. Google Ads and Search Console are each optional: you can untick either on Google's consent screen and add it later through a link Camberstack gives you. Camberstack cannot change anything in Search Console.</li>
-<li><strong>Your Google Analytics data and setup, optional</strong> (the <code>https://www.googleapis.com/auth/analytics.readonly</code> and <code>https://www.googleapis.com/auth/analytics.edit</code> scopes): the names of the Google Analytics accounts and properties you can access; reports on your properties' traffic, such as sessions, users, engagement, key events (conversions), landing pages and traffic sources; and each property's setup (web streams and their measurement IDs, key events, Google Ads links), read when your AI assistant calls a Google Analytics tool, for example to see whether visitors from your ads convert. With edit access Camberstack can set up tracking for you, <strong>only</strong> when you approve a specific proposal: create a property with a web stream, mark or unmark an event as a key event, and link or unlink a Google Ads account. Every such change is logged and can be undone. Neither scope is part of connecting Camberstack: we ask for both together, separately, only if you use a Google Analytics tool, through a link that adds them to the Google account you already connected.</li>
+<li><strong>Your Google Analytics data and setup, optional</strong> (the <code>https://www.googleapis.com/auth/analytics.readonly</code> and <code>https://www.googleapis.com/auth/analytics.edit</code> scopes): the names of the Google Analytics accounts and properties you can access; reports on your properties' traffic, such as sessions, users, engagement, key events (conversions), landing pages and traffic sources; and each property's setup (web streams and their measurement IDs, key events, Google Ads links), read when your AI assistant calls a Google Analytics tool, for example to see whether visitors from your ads convert. With edit access Camberstack can set up tracking for you, <strong>only</strong> when you approve a specific proposal: create a property with a web stream, mark or unmark an event as a key event, and link or unlink a Google Ads account. Every such change is logged and can be undone. Google Analytics is optional: both scopes come as one box on Google's consent screen, which you can untick and add later through a link Camberstack gives you.</li>
 </ul>
 <p>We request nothing else from your Google account: no Gmail, Drive, contacts or calendar.</p>
 
@@ -850,9 +850,10 @@ When the server hits a bug, the error and where in the code it happened go to an
 <p>Camberstack runs on infrastructure we operate in the United States. We use no third-party analytics on your Google data.</p>
 
 <h2>Emails</h2>
-<p>We may send you up to two short emails about using Camberstack: one if you connect but don't try it within a couple of days,
-and one if you try Camberstack on more Google Ads accounts than the Free plan covers. Each is sent once, from adam@camberstack.io, to the email address of the Google account
-you connected. They never contain your Google Ads data. Every email has an unsubscribe link, and replies reach a person.</p>
+<p>We may send you two short emails about using Camberstack: one if you connect but don't try it within a couple of days,
+and one if you try Camberstack on more Google Ads accounts than the Free plan covers. Each is sent once. We may also send occasional one-time announcements
+about changes to your account or to Camberstack's features. All of them come from adam@camberstack.io, to the email address of the Google account
+you connected, and never contain your Google Ads data. Every email has an unsubscribe link, and replies reach a person.</p>
 
 <h2>Our own Google ads</h2>
 <p>If you reach this site by clicking one of our Google ads, we keep the ad click identifier Google adds to the link in a cookie on

@@ -77,8 +77,8 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
 
   const provider = new CamberstackProvider(db, {
     baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey, fetch: overrides.fetch, allowedEmails: cfg.allowedEmails,
-    // Until Google verifies the Analytics scopes, prod asks for them only through the /connect/analytics link (GA4_PUBLIC off).
-    extraGoogleScopes: cfg.ga4Public ? GRANTS.analytics.scopes : [],
+    // Google verified the Analytics scopes 2026-10-17, so sign-in asks for them next to Ads + Search Console.
+    extraGoogleScopes: GRANTS.analytics.scopes,
   });
   const grants = new Grants({ db, baseUrl: cfg.baseUrl, google: cfg.google, encryptionKey: cfg.encryptionKey,
     signingKey: deriveKey(cfg.encryptionKey, "grant-links"), forgetToken: clearGoogleCache, fetch: overrides.fetch });
@@ -232,10 +232,9 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     const userId = String(auth?.extra?.userId ?? "");
     const clientId = auth?.clientId ?? null;
     let session: UserSession | undefined;
-    const email = (db.prepare("SELECT email FROM users WHERE id = ?").get(userId) as { email: string } | undefined)?.email.toLowerCase();
     return buildServer(() => (session ??= UserSession.load(deps, userId)), (c) => {
       logCall.run(now(), userId, clientId, c.tool, c.customerId, c.ok ? 1 : 0, c.error, c.ms, c.bytes, c.queryShape ?? null);
-    }, undefined, cfg.ga4Public || (!!email && internalEmails.has(email)));
+    });
   };
   // 2026-07-28 traffic (server/discover, per-request _meta envelope). The SDK's own legacy leg would
   // answer 2025-era requests over SSE, so it is off and those keep the JSON-response wiring below.
@@ -313,7 +312,7 @@ export function createApp(cfg: Config, db: DB, overrides: Overrides = {}): Servi
     firstTouch.capture(req, res);          // keeps the first tagged landing (utm_*, rdt_cid); same
     res.type("html").send(html);
   };
-  const tools = toolCatalog(cfg.ga4Public);
+  const tools = toolCatalog();
   const pages: Record<string, string> = {
     "/": homePage(cfg.baseUrl),
     "/google-ads-claude": claudeGuidePage(cfg.baseUrl),

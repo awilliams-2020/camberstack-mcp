@@ -77,7 +77,7 @@ export class CamberstackProvider implements OAuthServerProvider {
   constructor(
     private db: DB,
     private opts: { baseUrl: string; google: GoogleCreds; encryptionKey: Buffer; fetch?: typeof fetch; allowedEmails?: Set<string>;
-      /** Asked at sign-in on top of Ads + Search Console (server.ts: Google Analytics when GA4_PUBLIC). */
+      /** Asked at sign-in on top of Ads + Search Console (server.ts: Google Analytics). */
       extraGoogleScopes?: readonly string[] },
   ) {
     this.clientsStore = new ClientsStore(db);
@@ -176,7 +176,7 @@ export class CamberstackProvider implements OAuthServerProvider {
 
     const g = await exchangeGoogleCode(this.opts.google, q.code, this.googleRedirectUri, this.opts.fetch);
     // À la carte: any one service is enough to connect; a tool that needs another returns a link that adds it (grant.ts).
-    // Google Analytics counts only where sign-in asks for it (extraGoogleScopes, GA4_PUBLIC).
+    // Google Analytics counts only where sign-in asks for it (extraGoogleScopes).
     const granted = g.scope.split(" ");
     const enough = [ADS_SCOPE, SEARCH_CONSOLE_SCOPE, ...(this.opts.extraGoogleScopes ?? []).slice(0, 1)];
     if (!enough.some((s) => granted.includes(s))) {

@@ -67,10 +67,9 @@ describe("demo property", () => {
 });
 
 describe("rollout", () => {
-  it("lists the Google Analytics tools only when they're switched on", () => {
-    const names = (on: boolean) => toolCatalog(on).map((t) => t.name).filter((n) => n.startsWith("analytics_"));
-    expect(names(true)).toEqual(["analytics_properties", "analytics_setup", "analytics_landing_pages", "analytics_report"]);
-    expect(names(false)).toEqual([]);
+  it("lists the Google Analytics tools for everyone", () => {
+    const names = toolCatalog().map((t) => t.name).filter((n) => n.startsWith("analytics_"));
+    expect(names).toEqual(["analytics_properties", "analytics_setup", "analytics_landing_pages", "analytics_report"]);
   });
 });
 

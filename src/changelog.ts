@@ -7,6 +7,14 @@ export interface Release { version: string; date: string; summary: string; items
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.15.0", date: "2026-10-17",
+    summary: "Google Analytics 4 for everyone.",
+    items: [
+      "**Google Analytics tools are open to every account.** Google verified Camberstack's Analytics access, so your AI can list your GA4 properties, read reports and landing pages, and check each property's setup. Changes to that setup (a new property, key events, a Google Ads link) still wait for your approval, and each one can be undone.",
+      "**Google Analytics is a box on the sign-in screen**, next to Google Ads and Search Console. Any of the three can be unticked and added later through a link Camberstack gives you. Already connected? The first time you ask about Analytics, you get that link; no reconnecting.",
+    ],
+  },
+  {
     version: "0.14.1", date: "2026-10-16",
     summary: "Query-error fixes for the usual slips.",
     items: [
