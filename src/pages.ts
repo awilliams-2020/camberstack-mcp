@@ -159,7 +159,7 @@ export function homePage(baseUrl: string): string {
     jsonLd: {
       "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Camberstack",
       applicationCategory: "BusinessApplication", operatingSystem: "Web", url: baseUrl,
-      description: "Hosted Google Ads MCP server for Claude, ChatGPT and other MCP apps: read-only queries, optional Search Console data, and approved changes with undo.",
+      description: "Hosted Google Ads MCP server for Claude, ChatGPT and other MCP apps: read-only queries, optional Search Console and Google Analytics 4 data, and approved changes with undo.",
       offers: [
         { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD",
           description: "Every tool, with unlimited applied changes, on 1 Google Ads account." },
@@ -178,6 +178,7 @@ export function homePage(baseUrl: string): string {
 <li>Changes range from negative keywords and budgets to bids, targeting and whole new Search, Performance Max, Display and YouTube campaigns.</li>
 <li>Connect Claude, ChatGPT, Cursor or any MCP app with one URL and a Google sign-in. Works with manager (MCC) accounts.</li>
 <li>Optional, read-only Search Console: see where you already rank, and which searches you may be paying for twice.</li>
+<li>Optional <a href="#analytics">Google Analytics 4</a>: see which landing pages turn ad clicks into conversions, and set up tracking with the same approve-and-undo.</li>
 </ul>
 <p><a class="btn" href="#setup">Connect</a></p>
 
@@ -215,7 +216,7 @@ export function homePage(baseUrl: string): string {
 <tr><td>Create a conversion action, or set how many conversions a click can count</td><td>Removes it / restores the previous setting</td></tr>
 </table>
 <p class="muted">A new campaign is always created paused, so building it and letting it spend are two separate approvals. Besides the warnings listed at the top, a proposal also warns before removing a campaign's last location.
-It cannot delete anything you built, touch billing, or edit anything outside Google Ads.
+It cannot delete anything you built, touch billing, or edit anything outside Google Ads and the <a href="#analytics">Google Analytics setup changes</a> below.
 Any question beyond these tools is answered with read-only queries. <a href="/tools">Every tool and what it can do</a>;
 the code is <a href="${SOURCE_URL}">open source</a>.</p>
 
@@ -232,6 +233,22 @@ queries and positions, and line them up against your ads:</p>
 </ul>
 <p class="muted">Camberstack can't change anything in Search Console. Google Ads, Search Console and Google Analytics are each optional: untick any of them, and when you later ask about it Camberstack gives you a one-click link that adds it.
 The Search Console tools work without a Google Ads account too: <a href="/google-search-console-mcp">Search Console MCP</a>.</p>
+
+<h2 id="analytics">Google Analytics 4 (optional)</h2>
+<p>Leave the Google Analytics box ticked when you connect, and your AI can read your GA4 properties next to your ads:</p>
+<ul>
+<li><strong>Landing pages:</strong> sessions, engagement and key events (GA4's conversions) per landing page, for all traffic or one channel, such as Paid Search.</li>
+<li><strong>Reports:</strong> any GA4 report by dimension and metric, for example paid against organic traffic last month.</li>
+<li><strong>Setup check:</strong> each property's web streams and measurement IDs, which events count as key events, and which Google Ads accounts it's linked to.</li>
+</ul>
+<p>It can also change that setup, with the same proposal, approval and undo as a Google Ads change:</p>
+<table>
+<tr><th>Change</th><th>Undo</th></tr>
+<tr><td>Create a GA4 property with a web stream (the result gives the measurement ID and the tag your site needs)</td><td>Moves the property it created to Google Analytics' trash (restorable there for 35 days)</td></tr>
+<tr><td>Mark or unmark an event as a key event</td><td>Restores the previous setting</td></tr>
+<tr><td>Link or unlink a Google Ads account</td><td>Restores the previous link</td></tr>
+</table>
+<p class="muted">Already connected? The first time you ask about Google Analytics, Camberstack gives you a one-click link that adds it. The <a href="#demo">demo</a> includes a sample GA4 property.</p>
 
 <h2 id="setup">Connect</h2>
 <p>Add this server URL to your AI app, then sign in with Google.</p>
