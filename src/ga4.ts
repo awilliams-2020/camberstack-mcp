@@ -5,6 +5,8 @@
  *
  * The demo property (DEMO_PROPERTY) answers the same calls with sample data, like the demo Ads account and site.
  */
+import type { DB } from "./db.js";
+import { now } from "./db.js";
 import { NotGrantedError, scopeMissing } from "./google.js";
 
 const ADMIN_API = "https://analyticsadmin.googleapis.com/v1beta";
@@ -193,19 +195,64 @@ const SESSIONS_PER_DAY = 140;
 const DEMO_DIMS = ["date", "landingPage", "sessionDefaultChannelGroup", "sessionSourceMedium", "deviceCategory"];
 const DEMO_METRICS = ["sessions", "engagedSessions", "engagementRate", "keyEvents", "sessionKeyEventRate", "totalUsers", "screenPageViews"];
 
+/** Each user's copy of the demo property's setup: what their applied changes left, so undo finds what it reverses. */
+interface DemoGaState {
+  keyEvents: { id: number; eventName: string; countingMethod: string }[];
+  adsLinks: { id: number; customerId: string }[];
+  nextId: number;
+}
+const freshGa = (): DemoGaState => ({ keyEvents: [{ id: 1, eventName: "generate_lead", countingMethod: "ONCE_PER_EVENT" }], adsLinks: [], nextId: 2 });
+
 export class DemoAnalytics implements Analytics {
+  /** Without a db (tests, the tool catalog), changes last as long as this object. */
+  private mem?: DemoGaState;
+  constructor(private db?: DB, private userId?: string) {}
+
+  private load(): DemoGaState {
+    if (!this.db || !this.userId) return (this.mem ??= freshGa());
+    const row = this.db.prepare("SELECT state FROM demo_ga_state WHERE user_id = ?").get(this.userId) as { state: string } | undefined;
+    return row ? JSON.parse(row.state) as DemoGaState : freshGa();
+  }
+  private save(s: DemoGaState): void {
+    if (!this.db || !this.userId) { this.mem = s; return; }
+    this.db.prepare(`INSERT INTO demo_ga_state (user_id, state, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`).run(this.userId, JSON.stringify(s), now());
+  }
+
   async summaries() { return { accounts: [], properties: [] }; }
 
-  /** The demo property's setup: one web stream, one key event, no Google Ads link. Changes are accepted and simulated. */
-  async admin(method: "GET" | "POST" | "DELETE", path: string): Promise<any> {
-    const p = `properties/${DEMO_PROPERTY}`;
-    if (method === "POST") return { name: `${path}/${Date.now()}` };
-    if (method === "DELETE") return {};
+  /** The demo property's setup: one web stream, plus this user's key events and Google Ads links. Changes stick, like the demo Ads account's. */
+  async admin(method: "GET" | "POST" | "DELETE", path: string, body?: any): Promise<any> {
+    const p = `properties/${DEMO_PROPERTY}`, s = this.load();
+    const keyName = (id: number) => `${p}/keyEvents/${id}`, linkName = (id: number) => `${p}/googleAdsLinks/${id}`;
+    if (method === "POST" && path === `${p}/keyEvents`) {
+      const id = s.nextId++;
+      s.keyEvents.push({ id, eventName: body.eventName, countingMethod: body.countingMethod ?? "ONCE_PER_EVENT" });
+      this.save(s);
+      return { name: keyName(id) };
+    }
+    if (method === "POST" && path === `${p}/googleAdsLinks`) {
+      const id = s.nextId++;
+      s.adsLinks.push({ id, customerId: body.customerId });
+      this.save(s);
+      return { name: linkName(id) };
+    }
+    if (method === "DELETE" && path.startsWith(`${p}/keyEvents/`)) {
+      s.keyEvents = s.keyEvents.filter((k) => keyName(k.id) !== path);
+      this.save(s);
+      return {};
+    }
+    if (method === "DELETE" && path.startsWith(`${p}/googleAdsLinks/`)) {
+      s.adsLinks = s.adsLinks.filter((l) => linkName(l.id) !== path);
+      this.save(s);
+      return {};
+    }
+    if (method !== "GET") throw new Error(`The demo property doesn't support ${method} ${path}.`);
     if (path === p) return { name: p, displayName: "DEMO: Northwind Plumbing (sample data)", timeZone: "America/Chicago", currencyCode: "USD" };
     if (path.startsWith(`${p}/dataStreams`)) return { dataStreams: [{ name: `${p}/dataStreams/1`, type: "WEB_DATA_STREAM", displayName: "northwindplumbing.example",
       webStreamData: { measurementId: "G-DEMO000001", defaultUri: "https://northwindplumbing.example" } }] };
-    if (path.startsWith(`${p}/keyEvents`)) return { keyEvents: [{ name: `${p}/keyEvents/1`, eventName: "generate_lead", countingMethod: "ONCE_PER_EVENT" }] };
-    if (path.startsWith(`${p}/googleAdsLinks`)) return { googleAdsLinks: [] };
+    if (path.startsWith(`${p}/keyEvents`)) return { keyEvents: s.keyEvents.map((k) => ({ name: keyName(k.id), eventName: k.eventName, countingMethod: k.countingMethod })) };
+    if (path.startsWith(`${p}/googleAdsLinks`)) return { googleAdsLinks: s.adsLinks.map((l) => ({ name: linkName(l.id), customerId: l.customerId })) };
     throw new Error(`The demo property doesn't support ${method} ${path}.`);
   }
 

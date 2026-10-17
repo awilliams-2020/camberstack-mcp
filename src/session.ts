@@ -152,7 +152,7 @@ export class UserSession {
     this.ads = routed(google, new DemoAds(deps.db, user.id));
     this.sc = routedSc(deps.scFactory?.(user) ?? new SearchConsoleClient(() => this.googleAccessToken(), link("search-console")), new DemoSearchConsole());
     this.ga = routedAnalytics(deps.gaFactory?.(user)
-      ?? new AnalyticsClient(() => this.googleAccessToken(), link("analytics")), new DemoAnalytics());
+      ?? new AnalyticsClient(() => this.googleAccessToken(), link("analytics")), new DemoAnalytics(deps.db, user.id));
   }
 
   /** `seen: false` leaves last_seen_at alone: an admin viewing the user's /account through "Log in as user". */

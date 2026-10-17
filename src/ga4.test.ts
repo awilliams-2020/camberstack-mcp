@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { openDb } from "./db.js";
 import { NotGrantedError } from "./google.js";
 import { AnalyticsClient, DEMO_PROPERTY, DemoAnalytics, landingPages, listProperties, report } from "./ga4.js";
 import { toolCatalog } from "./tools.js";
@@ -107,5 +108,26 @@ describe("analytics_setup", () => {
   it("shows the demo property's stream, key events and links", async () => {
     expect(await gaSetup(new DemoAnalytics(), DEMO_PROPERTY)).toMatchObject({
       web_streams: [{ measurement_id: "G-DEMO000001" }], key_events: [{ event_name: "generate_lead" }], google_ads_links: [] });
+  });
+
+  it("keeps each user's demo changes, so undo finds what it reverses (2026-10-17: applies were forgotten and undo said nothing to change)", async () => {
+    const db = openDb(":memory:");
+    const mark = { type: "mark_key_event" as const, property_id: DEMO_PROPERTY, event_name: "phone_call", counting: "ONCE_PER_SESSION" as const };
+    const link = { type: "link_google_ads" as const, property_id: DEMO_PROPERTY, customer_id: "0000000001" };
+    const results = [];
+    for (const c of [mark, link]) {
+      const r = await resolveGaChange(new DemoAnalytics(db, "u1"), c);
+      results.push({ r, out: await writeGa(new DemoAnalytics(db, "u1"), r.operations) });
+    }
+    expect(await gaSetup(new DemoAnalytics(db, "u1"), DEMO_PROPERTY)).toMatchObject({
+      key_events: [{ event_name: "generate_lead" }, { event_name: "phone_call", counting: "ONCE_PER_SESSION" }], google_ads_links: [{ customer_id: "000-000-0001" }] });
+    expect((await gaSetup(new DemoAnalytics(db, "u2"), DEMO_PROPERTY)).key_events).toHaveLength(1);  // another user's demo is untouched
+
+    for (const { r, out } of results) {
+      const undo = await resolveGaChange(new DemoAnalytics(db, "u1"), gaInverseAfterApply(r, out)!);
+      expect(undo.operations).toHaveLength(1);
+      await writeGa(new DemoAnalytics(db, "u1"), undo.operations);
+    }
+    expect(await gaSetup(new DemoAnalytics(db, "u1"), DEMO_PROPERTY)).toMatchObject({ key_events: [{ event_name: "generate_lead" }], google_ads_links: [] });
   });
 });

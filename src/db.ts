@@ -141,6 +141,13 @@ CREATE TABLE IF NOT EXISTS demo_state (
   updated_at  INTEGER NOT NULL
 );
 
+-- The same for the demo Google Analytics property (ga4.ts DemoAnalytics): its key events and Google Ads links.
+CREATE TABLE IF NOT EXISTS demo_ga_state (
+  user_id     TEXT PRIMARY KEY,
+  state       TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+
 -- Public pages' content hashes, so the sitemap's lastmod moves only when a page really changes (lastmod.ts).
 CREATE TABLE IF NOT EXISTS page_versions (
   path     TEXT PRIMARY KEY,
