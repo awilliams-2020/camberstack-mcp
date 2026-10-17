@@ -1,16 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import type { ToolAnnotations } from "@modelcontextprotocol/server";
+import type { ListToolsResult, ToolAnnotations } from "@modelcontextprotocol/server";
 import { MAX_CHANGES, PublicChangeSchema } from "./changes.js";
 import { landingPages, listProperties, report } from "./ga4.js";
-import { queryShape } from "./gaql.js";
+import { fieldQuery, queryShape } from "./gaql.js";
 import { GA_TARGET, PublicGaChangeSchema, gaSetup } from "./ga4-changes.js";
 import { ACCOUNT_WINDOW_DAYS, PlanLimitError } from "./plans.js";
 import { isDemo, type Account, type UserSession } from "./session.js";
 import { isUnexpected, reportError } from "./sentry.js";
 
 const SERVER_NAME = "camberstack";
-export const SERVER_VERSION = "0.13.0";
+export const SERVER_VERSION = "0.14.0";
 
 const INSTRUCTIONS = `Camberstack connects the user's Google Ads account.
 Start with list_accounts. Answer the user's questions with account_overview and run_gaql (read-only). To change something: propose_changes → show the user the summary and ask for approval → apply_changes.
@@ -22,6 +22,18 @@ Account 000-000-0001 is a demo with sample data: anyone can try every tool on it
 
 /** Tools that read or propose on one Google Ads account, so count toward the plan's accounts (session.ts checkAccount). */
 const GATED = new Set(["account_overview", "run_gaql", "keyword_ideas", "keyword_metrics", "propose_changes", "paid_organic_overlap"]);
+
+/** A run_gaql field lookup reads Google's field catalog, not the account named: no plan gate, and no account in the log. */
+const isLookup = (name: string, a: unknown) => {
+  const q = (a as { query?: unknown } | undefined)?.query;
+  return name === "run_gaql" && typeof q === "string" && fieldQuery(q) !== null;
+};
+
+/**
+ * Callable but not listed. gaql_fields moved into run_gaql (a SELECT with no FROM), since most apps never listed or
+ * called it; apps that still hold it keep a working tool, because a failed call counts against the directory listings.
+ */
+const UNLISTED = new Set(["gaql_fields"]);
 
 const confirmSwitch = z.boolean().optional()
   .describe("Only after the user has agreed to spend their plan's account switch (a call answered \"Account switch:\"). Leave out otherwise");
@@ -85,7 +97,8 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   const wrap = <A>(name: string, fn: (a: A) => Promise<unknown> | unknown) => {
     return async (a: A) => {
       const t0 = Date.now();
-      const cid = (a as { customer_id?: unknown } | undefined)?.customer_id;
+      const lookup = isLookup(name, a);
+      const cid = lookup ? undefined : (a as { customer_id?: unknown } | undefined)?.customer_id;
       let out: ReturnType<typeof ok> | ReturnType<typeof fail>;
       let release = () => {};
       try {
@@ -111,7 +124,7 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
   // annotations.title repeats each tool's title: Claude's connector directory reads the name from there.
   // `as never`: registerTool infers its handler type from a literal inputSchema, which a helper cannot pass through.
   const tool = <A>(name: string, config: { title: string; description: string; inputSchema?: z.ZodRawShape; annotations: ToolAnnotations },
-    fn: (a: A) => Promise<unknown> | unknown) => (catalog.push({ name, ...config }),
+    fn: (a: A) => Promise<unknown> | unknown) => (UNLISTED.has(name) || catalog.push({ name, ...config }),
     server.registerTool(name, {
       ...config,
       inputSchema: config.inputSchema && z.object(GATED.has(name) ? { ...config.inputSchema, confirm_switch: confirmSwitch } : config.inputSchema),
@@ -169,7 +182,9 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
       + "Google rejects queries that break these rules: selecting or segmenting by segments.date needs a finite range in WHERE "
       + "(segments.date DURING LAST_30_DAYS, or BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'); click_view needs a single day (segments.date = 'YYYY-MM-DD'); "
       + "every field used in WHERE or ORDER BY must also be in SELECT. "
-      + "Unsure of a field's name or whether it fits this FROM? Look it up with gaql_fields first.",
+      + "Unsure of a field's name or whether it fits this FROM? Look it up first with a query that has no FROM, which reads Google's field "
+      + "catalog instead of the account (any customer_id): SELECT name, category, selectable WHERE name LIKE '%search_term%', or "
+      + "SELECT attribute_resources, metrics, segments WHERE name = 'campaign' for what can be used FROM campaign.",
     inputSchema: { customer_id: customerId, query: z.string().describe("A GAQL SELECT statement") },
     annotations: read,
   }, ({ customer_id, query }: { customer_id: string; query: string }) => session().runQuery(customer_id, query));
@@ -412,6 +427,14 @@ export function buildServer(session: () => UserSession, log: (c: ToolCall) => vo
     inputSchema: { confirm: z.literal(true).describe("Must be true; ask the user first") },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, () => session().disconnect());
+
+  // The SDK lists every enabled tool, and a disabled one also refuses calls: filter the listing instead.
+  const list = (server.server as unknown as { _getRequestHandler(m: string): (req: unknown, ctx: unknown) => Promise<ListToolsResult> })
+    ._getRequestHandler("tools/list");
+  server.server.setRequestHandler("tools/list", async (req, ctx) => {
+    const res = await list(req, ctx);
+    return { ...res, tools: res.tools.filter((t) => !UNLISTED.has(t.name)) };
+  });
 
   return server;
 }

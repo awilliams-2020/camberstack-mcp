@@ -3,11 +3,14 @@
  * of the API version we call, with what can be selected, filtered, and combined with what. The same metadata
  * Google's Query Validator is built on.
  *
- *   gaql_fields  lets the AI look fields up before writing a query, instead of guessing names.
+ *   fieldQuery   run_gaql's field lookup: a SELECT with no FROM (or FROM google_ads_field) goes to the catalog itself,
+ *                so every client can look names up through the tool it already has. (gaql_fields did this as its own
+ *                tool, which most apps never listed or called; it stays callable, unlisted, for apps that hold it.)
  *   checkGaql    finds unknown fields (with the closest real ones), fields that can't be selected or filtered,
  *                and fields that can't be used FROM the query's resource. It never blocks a query on its own:
  *                run_gaql still sends it to Google, and attaches these findings only when Google rejects it.
- *                A finding on a query Google accepts is a checker bug, and is logged as one.
+ *                A finding on a query Google accepts is a checker bug, and is logged as one. Findings never send the AI
+ *                to another tool: an app may not have it. They say the answer, or the field lookup to run.
  *
  * The catalog (~3,000 fields, ~2 MB) is fetched once per process and day, with any connected user's token.
  */
@@ -68,6 +71,25 @@ export function queryShape(query: string): string {
     .replace(/\s+/g, " ").trim().slice(0, 1000);
 }
 
+/** What a field lookup can select: GoogleAdsField's columns (Google's query has no FROM). */
+export const FIELD_COLUMNS = "name, category, data_type, selectable, filterable, sortable, is_repeated, selectable_with, attribute_resources, metrics, segments, enum_values";
+
+/** The field lookup to suggest for a name: every field whose name holds `part`. */
+export const lookupQuery = (part: string) => `SELECT name, category, selectable, filterable WHERE name LIKE '%${part}%'`;
+
+/**
+ * A query for Google's field catalog rather than an account: SELECT … [WHERE …] with no FROM, as GoogleAdsFieldService
+ * takes it, or written FROM google_ads_field (the resource it describes), which is dropped. Null for an account query.
+ */
+export function fieldQuery(query: string): string | null {
+  const blank = query.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
+  if (!/^\s*select\b/i.test(blank)) return null;
+  const from = /\bFROM\s+([a-z_]+)/i.exec(blank);
+  if (!from) return query.trim();
+  if (from[1]!.toLowerCase() !== "google_ads_field") return null;
+  return query.replace(/\s+FROM\s+google_ads_field\b/i, "").trim();
+}
+
 export interface ParsedGaql { select: string[]; from: string; where: string[]; orderBy: string[] }
 
 const FIELD = /\b[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+\b/g;
@@ -110,15 +132,20 @@ export function checkGaql(query: string, cat: Catalog): string[] {
             + `${usable(real) ? `, which can be selected FROM ${p.from}` : ` (its own resource, not part of ${p.from})${whereFrom(real, cat, p.from)}`}.`);
           continue;
         }
-        // Prefer suggestions this FROM can use; fall back to any field.
+        // Prefer suggestions this FROM can use; fall back to any field; with none close, the lookup that finds it.
         const pool = [...cat.values()].filter((x) => x.category !== "RESOURCE");
         const near = closest(name, pool.filter(usable).map((x) => x.name));
         const anywhere = near.length ? [] : closest(name, pool.map((x) => x.name));
-        issues.push(`${name} doesn't exist${near.length ? `. Closest usable FROM ${p.from}: ${near.join(", ")}`
-          : anywhere.length ? `. Closest: ${anywhere.join(", ")} (check what can be selected FROM ${p.from} with gaql_fields)` : ""}.`);
+        issues.push(`${name} doesn't exist${near.length ? `. Closest usable FROM ${p.from}: ${near.join(", ")}.`
+          : anywhere.length ? `. Closest: ${anywhere.join(", ")} (not usable FROM ${p.from}).`
+          : `. Find the name with run_gaql: ${lookupQuery(keyWord(name))}`}`);
         continue;
       }
-      if (f.category === "RESOURCE") { issues.push(`${name} is a resource, not a field: select its fields (gaql_fields resource="${name}").`); continue; }
+      if (f.category === "RESOURCE") {
+        const own = [...cat.values()].filter((x) => x.category === "ATTRIBUTE" && x.name.startsWith(`${name}.`) && x.selectable !== false).map((x) => x.name);
+        issues.push(`${name} is a resource, not a field: select its fields${own.length ? `, e.g. ${own.slice(0, 8).join(", ")}${own.length > 8 ? ", …" : ""}` : ""}.`);
+        continue;
+      }
       if (clause === "SELECT" && f.selectable === false) issues.push(`${name} can't be selected.`);
       if (clause === "WHERE" && f.filterable === false) issues.push(`${name} can't be used in WHERE.`);
       if (clause === "ORDER BY" && f.sortable === false) issues.push(`${name} can't be used in ORDER BY.`);
@@ -161,6 +188,11 @@ function fromAllows(from: FieldMeta, f: FieldMeta): boolean {
   return res === from.name || (from.attributeResources ?? []).includes(res) || (from.segments ?? []).includes(res);
 }
 
+/** The most telling word of a field's last part (url_expansion_opt_out → expansion), to look it up by. */
+function keyWord(name: string): string {
+  return name.split(".").at(-1)!.split("_").reduce((a, b) => (b.length > a.length ? b : a), "");
+}
+
 /** Account-wide resources first: they answer "per X" questions without splitting by ad group too. */
 const BROAD = ["customer", "campaign"];
 
@@ -180,7 +212,10 @@ function whereFrom(f: FieldMeta, cat: Catalog, from?: string): string {
     const pick = broad.length ? broad : split.slice(0, 4);
     return `; to split it by ${from}, query it FROM ${pick.join(" or FROM ")} with ${seg} in SELECT`;
   }
-  const pick = [...(own && ok.includes(own) ? [own] : []), ...ok.filter((r) => r !== own)].slice(0, 4);
+  // The field's own resource, then campaign and customer, then the rest: catalog order alone led with niche views
+  // (ad_group_ad_asset_view) ahead of campaign.
+  const lead = [...(own && ok.includes(own) ? [own] : []), ...["campaign", "customer"].filter((r) => r !== own && ok.includes(r))];
+  const pick = [...lead, ...ok.filter((r) => !lead.includes(r))].slice(0, 4);
   return pick.length ? `; query it FROM ${pick.join(" or FROM ")}` : "";
 }
 
@@ -205,9 +240,15 @@ export function closest(name: string, pool: string[]): string[] {
   // names alone can't tell which (maximize clicks is target_spend in the API, say).
   const sameLeaf = scored.filter((x) => x.c.split(".").at(-1) === leaf);
   if (sameLeaf.length) return sameLeaf.slice(0, 8).map((x) => x.c);
-  // Otherwise only names that are plausibly what was meant.
-  const limit = Math.max(4, Math.floor(name.length / 3));
-  return scored.filter((x) => x.s <= best.s + 3 && (x.s < 0 || x.s <= limit)).slice(0, 3).map((x) => x.c);
+  // Otherwise only names that are plausibly what was meant, judged on the last part: sharing the resource prefix alone
+  // offered campaign.campaign_group for campaign.url_expansion_opt_out (2026-10-15), and a wrong guess costs a retry.
+  const plausible = (c: string) => {
+    const cl = c.split(".").at(-1)!;
+    // One part inside the other counts only when it's most of it: "conversions" isn't what "all_conversions_settings" meant.
+    return (Math.min(cl.length, leaf.length) >= Math.max(4, 0.6 * Math.max(cl.length, leaf.length)) && (cl.includes(leaf) || leaf.includes(cl)))
+      || levenshtein(leaf, cl) <= Math.max(2, Math.floor(leaf.length / 3));
+  };
+  return scored.filter((x) => x.s <= best.s + 3 && plausible(x.c)).slice(0, 3).map((x) => x.c);
 }
 
 function levenshtein(a: string, b: string): number {

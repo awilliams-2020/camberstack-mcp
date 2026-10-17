@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { checkGaql, closest, lookupFields, parseGaql, queryShape, type Catalog, type FieldMeta } from "./gaql.js";
+import { checkGaql, closest, fieldQuery, lookupFields, parseGaql, queryShape, type Catalog, type FieldMeta } from "./gaql.js";
 
 // A trimmed snapshot of Google's real field catalog (v23, 2026-10-14): ten resources with all their attributes,
 // and a handful of metrics and segments.
@@ -56,6 +56,24 @@ describe("checkGaql against Google's field catalog", () => {
     expect(checkGaql("SELECT campaign.id, segments.search_term, metrics.clicks FROM campaign_search_term_view WHERE segments.date DURING LAST_30_DAYS", cat))
       .toEqual(["segments.search_term can't be used FROM campaign_search_term_view: select campaign_search_term_view.search_term instead, its own field."]);
   });
+  it("offers no unrelated names for a field that doesn't exist, but the lookup that finds it (2026-10-15 prod errors)", () => {
+    // Was: "Closest usable FROM campaign: campaign.campaign_group, campaign.campaign_budget, campaign.optimization_score".
+    expect(checkGaql("SELECT campaign.name, campaign.url_expansion_opt_out FROM campaign", cat)).toEqual([
+      "campaign.url_expansion_opt_out doesn't exist. Find the name with run_gaql: SELECT name, category, selectable, filterable WHERE name LIKE '%expansion%'"]);
+    // Was: "conversion_action.status, conversion_action.name".
+    const [i] = checkGaql("SELECT conversion_action.name, conversion_action.all_conversions_settings FROM conversion_action", cat);
+    expect(i).not.toMatch(/conversion_action\.(status|name)\b/);
+    expect(i).toContain("Find the name with run_gaql: ");
+    // Real near misses still come through.
+    expect(checkGaql("SELECT campaign.id, campaign.target_spend.cpc_bid_ceiling_micro FROM campaign", cat)[0])
+      .toContain("Closest usable FROM campaign: campaign.target_spend.cpc_bid_ceiling_micros");
+  });
+  it("never sends the AI to another tool, which its app may not have", () => {
+    for (const q of [
+      "SELECT campaign.name, campaign.url_expansion_opt_out FROM campaign",
+      "SELECT ad_group.id, campaign.nonexistent_thing FROM ad_group",
+    ]) for (const i of checkGaql(q, cat)) expect(i, q).not.toContain("gaql_fields");
+  });
   it("catches a metric the resource doesn't have", () => {
     expect(checkGaql("SELECT ad_group.id, metrics.search_budget_lost_impression_share FROM ad_group", cat)[0])
       .toContain("metrics.search_budget_lost_impression_share can't be used FROM ad_group; query it FROM campaign");
@@ -101,7 +119,18 @@ describe("checkGaql against Google's field catalog", () => {
   });
 });
 
-describe("gaql_fields lookup", () => {
+describe("run_gaql field lookups", () => {
+  it("takes a SELECT with no FROM, or FROM google_ads_field, and nothing else", () => {
+    expect(fieldQuery("SELECT name, category WHERE name LIKE '%search_term%'")).toBe("SELECT name, category WHERE name LIKE '%search_term%'");
+    expect(fieldQuery(" select name from GOOGLE_ADS_FIELD where name = 'campaign.id' ")).toBe("select name where name = 'campaign.id'");
+    expect(fieldQuery("SELECT name WHERE name LIKE '%FROM campaign%'")).not.toBeNull();  // FROM inside a literal isn't one
+    expect(fieldQuery("SELECT campaign.id FROM campaign")).toBeNull();
+    expect(fieldQuery("SELECT campaign.name FROM campaign WHERE campaign.name = 'google_ads_field'")).toBeNull();
+    expect(fieldQuery("DELETE name")).toBeNull();
+  });
+});
+
+describe("gaql_fields lookup (unlisted; apps that hold it still call it)", () => {
   it("lists a resource's fields, joinable resources, metrics and segments, narrowed by search", () => {
     const r = lookupFields(cat, { resource: "campaign", search: "ceiling" }) as any;
     expect(r.fields.names.join(" ")).toContain("campaign.target_spend.cpc_bid_ceiling_micros");

@@ -180,13 +180,14 @@ function adsErrorFix(code: string, message: string, field: string): string | nul
           + "They return geoTargetConstants/ID; get names with SELECT geo_target_constant.canonical_name FROM geo_target_constant "
           + "WHERE geo_target_constant.resource_name IN ('geoTargetConstants/ID', …).";
       }
-      return "that resource or segment can't be combined with this FROM: query it directly, in its own query.";
+      return "that segment or resource can't be used with this FROM resource: drop it, or query FROM a resource that has it.";
     case "BAD_ENUM_CONSTANT":
       if (/'(AFFILIATE_)?LOCATION'/.test(message)) {
         return "location assets aren't a field_type: they're asset sets. SELECT campaign.name, asset_set.name, asset_set.type FROM campaign_asset_set "
           + "(asset_set.type LOCATION_SYNC is the Business Profile link; affiliate locations are asset_set.location_set.location_ownership_type AFFILIATE).";
       }
-      return "that value isn't one this field takes. Enum values are UPPER_CASE names; look them up with gaql_fields.";
+      return "that value isn't one this field takes. Enum values are UPPER_CASE names; list a field's values with run_gaql: "
+        + "SELECT name, enum_values WHERE name = 'campaign.status' (with the field in question).";
     case "MUTATE_NOT_ALLOWED":
       return "Google doesn't allow this change through the API (some legacy or system-managed items are locked, and some campaign types "
         + "can't be created). Do it in Google Ads. For a locked shared bid strategy, set_bidding_strategy can still move campaigns off it.";

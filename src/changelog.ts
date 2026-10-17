@@ -7,6 +7,14 @@ export interface Release { version: string; date: string; summary: string; items
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.14.0", date: "2026-10-16",
+    summary: "Field lookups inside custom queries, and query errors that name the fix.",
+    items: [
+      "**Look fields up with `run_gaql`.** A query with no FROM reads Google's field catalog instead of an account: `SELECT name, category WHERE name LIKE '%search_term%'`, or `SELECT attribute_resources, metrics, segments WHERE name = 'campaign'` for what a resource can use. It works in every AI app without refreshing the connector, and doesn't count toward your plan's accounts. (`gaql_fields` keeps working where your app already has it.)",
+      "**Query errors name the fix.** A segment the resource has as its own field now points at that field (`campaign_search_term_view.search_term`, not `segments.search_term`); a mistyped field only gets suggestions that are close to it, otherwise the lookup that finds it; and errors never send your AI to a tool its app may not have.",
+    ],
+  },
+  {
     version: "0.13.0", date: "2026-10-16",
     summary: "Price up to 500 keywords at once, and a clear way back in when Google access is revoked.",
     items: [

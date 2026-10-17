@@ -14,7 +14,7 @@ import { ACCOUNT_WINDOW_DAYS, PLAN_LIMIT_PREFIX, PRO_PRICE_LABEL, PlanLimitError
 import { AnalyticsClient, DemoAnalytics, routedAnalytics, type Analytics } from "./ga4.js";
 import { GA_TARGET, GaChangeSchema, gaInverseAfterApply, gaNoteAfterApply, resolveGaChange, writeGa, type GaChange, type GaOp, type GaResolved } from "./ga4-changes.js";
 import { DEMO_CID, DEMO_NAME, DEMO_NOTE, DEMO_SITE, DemoAds, DemoSearchConsole } from "./demo.js";
-import { CATALOG_QUERY, catalog, checkGaql, lookupFields } from "./gaql.js";
+import { CATALOG_QUERY, FIELD_COLUMNS, catalog, checkGaql, fieldQuery, lookupFields } from "./gaql.js";
 import {
   ChangeSchema, MAX_CHANGES, inverseAfterApply, sameSummary, pendingOf, resolveChange, summarize,
   type Change, type ResolvedChange,
@@ -456,6 +456,8 @@ export class UserSession {
 
   async runQuery(customerId: string, query: string) {
     if (!/^\s*select\b/i.test(query)) throw new Error("Only SELECT (read-only GAQL) queries are allowed. Use propose_changes to change anything.");
+    const lookup = fieldQuery(query);
+    if (lookup !== null) return this.fieldLookup(lookup);
     const a = await this.account(customerId);
     const { query: current, renamed } = renameFields(query);
     const { query: expanded, rewrote } = expandDuring(current);
@@ -486,6 +488,30 @@ export class UserSession {
       ...(renamed.length ? { renamed: `These fields were renamed in the API, so ran ${renamed.join(", ")} (a date and time, e.g. 2026-01-31 23:59:59)` } : {}),
       ...(added.length ? { added_to_select: `Google requires fields used in WHERE or ORDER BY to be selected too, so added ${added.join(", ")} to SELECT` } : {}),
       rows: rows.slice(0, 500), truncated: rows.length > 500, total_rows: rows.length };
+  }
+
+  /**
+   * run_gaql's field lookup: the query goes to Google's field catalog as written (its own filters, LIKE included), not
+   * to an account, so it needs none and counts toward no plan (tools.ts skips the gate for it).
+   */
+  private async fieldLookup(query: string) {
+    const fetch = this.ads.searchFields;
+    if (!fetch) throw new Error("Google's field catalog isn't reachable right now. Try again in a few minutes.");
+    let rows: any[];
+    try {
+      rows = await fetch(query);
+    } catch (e) {
+      // Google's codes here (UNRECOGNIZED_FIELD…) would draw run_gaql's account-query fixes, which don't apply: swap them for the lookup's own.
+      if (e instanceof AdsApiError) (e as Error).message = (e as Error).message.replace(/ → [^;\n]*/g, "")
+        + `\nA field lookup has no FROM and selects from: ${FIELD_COLUMNS}. `
+        + "E.g. SELECT name, category, selectable WHERE name LIKE '%search_term%', or SELECT attribute_resources, metrics, segments WHERE name = 'campaign'.";
+      throw e;
+    }
+    // A resource's metrics/segments and a field's selectable_with run to thousands of names: cap each list.
+    const LIST = 200;
+    const out = rows.slice(0, 500).map(({ resourceName: _, ...r }) => Object.fromEntries(Object.entries(r).map(([k, v]) =>
+      [k, Array.isArray(v) && v.length > LIST ? [...v.slice(0, LIST), `… ${v.length - LIST} more: narrow with WHERE`] : v])));
+    return { field_lookup: "Google's field catalog (no account involved)", rows: out, truncated: rows.length > 500, total_rows: rows.length };
   }
 
   /** What Google's field catalog finds wrong with a query; empty when nothing, or when the catalog can't be had. */

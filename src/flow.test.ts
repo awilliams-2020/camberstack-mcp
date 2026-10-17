@@ -15,6 +15,7 @@ import { decrypt, encrypt } from "./crypto.js";
 import { AdsApiError, NotGrantedError } from "./google.js";
 import { io } from "./changes.js";
 import { SERVER_VERSION } from "./tools.js";
+import { CATALOG_QUERY } from "./gaql.js";
 import { buildReport } from "./report.js";
 
 const key = randomBytes(32);
@@ -47,8 +48,18 @@ class FakeAds {
   campaignStatus = "ENABLED";
   campaignEnd: string | undefined;
   async listAccessibleCustomers() { return ["1112223333"]; }
-  /** Google's field catalog: a trimmed real v23 snapshot. */
-  async searchFields() { return JSON.parse(readFileSync(new URL("./fixtures/gaql-catalog.json", import.meta.url), "utf8")); }
+  fieldQueries: string[] = [];
+  /** Google's field catalog: a trimmed real v23 snapshot. Any other query is a run_gaql field lookup, answered as Google shapes it. */
+  async searchFields(q: string) {
+    if (q === CATALOG_QUERY) return JSON.parse(readFileSync(new URL("./fixtures/gaql-catalog.json", import.meta.url), "utf8"));
+    this.fieldQueries.push(q);
+    if (q.includes("bogus_column")) {
+      throw new AdsApiError(400, JSON.stringify({ error: { details: [{ errors: [{ errorCode: { queryError: "UNRECOGNIZED_FIELD" },
+        message: "Unrecognized field in the query: 'bogus_column'." }] }] } }));
+    }
+    return [{ resourceName: "googleAdsFields/segments.search_term", name: "segments.search_term", category: "SEGMENT", selectable: true,
+      selectableWith: Array.from({ length: 250 }, (_, i) => `resource_${i}`) }];
+  }
   async search(_cid: string, q: string): Promise<any[]> {
     // Google's rule: a field in WHERE or ORDER BY must be in SELECT too.
     if (q.includes("ORDER BY campaign.status") && !/^SELECT[^]*campaign\.status[^]*FROM/.test(q)) {
@@ -548,8 +559,33 @@ describe("OAuth + MCP end to end", () => {
   });
 
   it("looks fields up in Google's catalog, and names the real ones when Google rejects a guessed field", async () => {
+    // gaql_fields is unlisted but still answers, for apps that hold it: a failed call would count against the listings.
     const f = await call(token, "gaql_fields", { resource: "campaign", search: "cpc_bid_ceiling" });
     expect(f.json.fields.names.join(" ")).toContain("campaign.target_spend.cpc_bid_ceiling_micros");
+    const listed = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    const names = (await listed.json()).result.tools.map((t: any) => t.name);
+    expect(names).toContain("run_gaql");
+    expect(names).not.toContain("gaql_fields");
+    expect(await (await fetch(`${base}/tools`)).text()).not.toContain("gaql_fields");
+
+    // The lookup every app has: run_gaql with no FROM (or FROM google_ads_field) reads the catalog, as Google shapes it.
+    const look = await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT name, selectable_with FROM google_ads_field WHERE name = 'segments.search_term'" });
+    expect(ads.fieldQueries.at(-1)).toBe("SELECT name, selectable_with WHERE name = 'segments.search_term'");
+    expect(look.json.field_lookup).toBeDefined();
+    expect(look.json.rows[0].resourceName).toBeUndefined();
+    expect(look.json.rows[0].selectableWith).toHaveLength(201);
+    expect(look.json.rows[0].selectableWith.at(-1)).toBe("… 50 more: narrow with WHERE");
+    // A bad lookup gets the lookup's columns, not run_gaql's fixes for account queries (seen on dev, 2026-10-16).
+    const wrong = await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT name, bogus_column WHERE name = 'campaign.id'" });
+    expect(wrong.isError).toBe(true);
+    expect(wrong.text).toContain("UNRECOGNIZED_FIELD Unrecognized field in the query: 'bogus_column'.");
+    expect(wrong.text).not.toContain("prefixed with their resource");
+    expect(wrong.text).toContain("A field lookup has no FROM and selects from: name, category");
+
     const bad = await call(token, "run_gaql", { customer_id: "1112223333", query: "SELECT campaign.id, campaign.maximize_clicks.cpc_bid_ceiling_micros FROM campaign" });
     expect(bad.isError).toBe(true);
     expect(bad.text).toContain("UNRECOGNIZED_FIELD");   // Google's own words stay
@@ -988,6 +1024,12 @@ describe("OAuth + MCP end to end", () => {
     expect(notice).toMatchObject({ error: "switch_confirmation_needed", switch_to: "2223334444", locks_account: "1112223333",
       keep_both: { plan: "pro", accounts_included: 10 } });
     expect(notice.keep_both.upgrade_url).toContain("/upgrade?t=");
+    // A field lookup reads Google's catalog, not the account it names: no switch, and the account isn't logged as used.
+    const look = await call(token, "run_gaql", { customer_id: "222-333-4444", query: "SELECT name, category WHERE name LIKE '%search_term%'" });
+    expect(look.isError).toBe(false);
+    expect(look.text).not.toContain("Account switch:");
+    expect(db.prepare("SELECT tool, customer_id, ok, query_shape FROM tool_calls WHERE user_id = ? ORDER BY id DESC LIMIT 1").get(uid))
+      .toEqual({ tool: "run_gaql", customer_id: null, ok: 1, query_shape: "SELECT name, category WHERE name LIKE ?" });
     expect((db.prepare("SELECT count(*) n FROM tool_calls WHERE user_id = ? AND customer_id = '2223334444' AND ok = 1").get(uid) as { n: number }).n).toBe(0);
     // The account in use, the demo and the switch once confirmed all go through (this login just can't read 2223334444).
     expect((await call(token, "account_overview", { customer_id: "111-222-3333", days: 30 })).text).not.toContain("Account switch:");
