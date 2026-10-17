@@ -169,13 +169,12 @@ export function homePage(baseUrl: string): string {
     },
     body: `
 <h1>A hosted Google Ads MCP server</h1>
-<p class="lede">Your AI reads your Google Ads account and proposes changes. Nothing changes until you approve,
-and any applied change can be undone in one step, on the free plan too.</p>
+<p class="lede">Your AI reads your Google Ads account and proposes changes. Nothing changes until you approve.</p>
 <ul>
 <li><strong>Undo on every plan.</strong> Ask your AI to undo a change, and it reverses exactly that change.</li>
 <li><strong>Warnings before you approve.</strong> Turning a campaign on, more than doubling a budget or bid, or switching bid strategy is flagged in the proposal.</li>
 <li><strong>Free for 1 Google Ads account, with unlimited changes.</strong> No card. Pro is $15/month for up to 10 accounts.</li>
-<li><strong>Try it first</strong> on a <a href="#demo">demo account</a>, with every tool and nothing reaching Google.</li>
+<li>Try every tool on a <a href="#demo">demo account</a> before using it on your own.</li>
 <li>Changes range from negative keywords and budgets to bids, targeting and whole new Search, Performance Max, Display and YouTube campaigns.</li>
 <li>Connect Claude, ChatGPT, Cursor or any MCP app with one URL and a Google sign-in. Works with manager (MCC) accounts.</li>
 <li>Optional, read-only Search Console: see where you already rank, and which searches you may be paying for twice.</li>
@@ -193,7 +192,7 @@ and any applied change can be undone in one step, on the free plan too.</p>
 <p class="who">You</p><p class="said">Apply it.</p>
 <p class="who">Your AI</p><p><span class="pill applied">applied</span>&nbsp; Done. If it blocks searches you wanted, ask me to undo it: that removes exactly these two negatives.</p>
 </div>
-<p class="muted">Nothing changes until you approve the proposal, and it's listed with its undo on your <a href="/account">account page</a>.</p>
+<p class="muted">Every applied change is listed with its undo on your <a href="/account">account page</a>.</p>
 
 <h2 id="changes">What it can change</h2>
 <table>
@@ -215,7 +214,7 @@ and any applied change can be undone in one step, on the free plan too.</p>
 <tr><td>Set a campaign's tracking URL suffix</td><td>Restores the previous suffix</td></tr>
 <tr><td>Create a conversion action, or set how many conversions a click can count</td><td>Removes it / restores the previous setting</td></tr>
 </table>
-<p class="muted">A new campaign is always created paused, so building it and letting it spend are two separate approvals. Turning a campaign on, more than doubling a budget or bid, switching bid strategy, or removing a campaign's last location is flagged with a warning in the proposal before you approve it.
+<p class="muted">A new campaign is always created paused, so building it and letting it spend are two separate approvals. Removing a campaign's last location is also flagged.
 It cannot delete anything you built, touch billing, or edit anything outside Google Ads.
 Any question beyond these tools is answered with read-only queries. <a href="/tools">Every tool and what it can do</a>;
 the code is <a href="${SOURCE_URL}">open source</a>.</p>
@@ -281,8 +280,6 @@ tool, though some apps (ChatGPT, for one) block disconnect requests from chat.</
 A manager (MCC) account and the demo account don't count. Free covers one account at a time, and you can switch to another once
 every ${ACCOUNT_WINDOW_DAYS} days: the new one becomes active and the old one is locked. Past that, a plan-limit error comes with a personal
 checkout link. Undo and change history always work.</p>
-<h3>Does it work with a manager (MCC) account?</h3>
-<p>Yes. It lists the client accounts under any manager your login can reach.</p>
 `,
   });
 }
